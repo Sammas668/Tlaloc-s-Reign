@@ -11,8 +11,7 @@
     "weapons": 2,
     "ritual_goods": 2,
     "fine_textiles": 0,
-    "captives": 0,
-    "looted_goods": 0
+    "captives": 0
   },
   "market_stockpiles": {
     "maize": 360,
@@ -25,8 +24,7 @@
     "weapons": 0,
     "ritual_goods": 16,
     "fine_textiles": 0,
-    "captives": 0,
-    "looted_goods": 0
+    "captives": 0
   },
   "market_demand": {
     "maize": 98,
@@ -39,8 +37,7 @@
     "weapons": 4,
     "ritual_goods": 6,
     "fine_textiles": 2,
-    "captives": 0,
-    "looted_goods": 0
+    "captives": 0
   },
   "estate_buildings": {
     "maize_chinampa": 2,
@@ -49,7 +46,13 @@
     "basic_tool_workshop": 1,
     "cloth_workshop": 0,
     "weapon_yard": 0,
-    "fine_textile_house": 0
+    "fine_textile_house": 0,
+    "commoner_housing": 0,
+    "tlacotin_quarters": 0,
+    "warrior_house": 0,
+    "priest_house": 0,
+    "noble_residence": 0,
+    "captive_holding_pen": 0
   },
   "population": {
     "macehualtin": 180,

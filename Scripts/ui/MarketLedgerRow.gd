@@ -4,6 +4,7 @@
 #
 # Marketplace ledger row with restored colour functionality and full market info.
 # Shows: Stock, Demand, Value, Coverage, State and Trend.
+# Row height increased so values no longer poke out of the button.
 extends Button
 
 signal good_selected(good_id: String)
@@ -39,7 +40,7 @@ var _has_pending_data: bool = false
 func _ready() -> void:
 	text = ""
 	clip_contents = true
-	custom_minimum_size = Vector2(0, 184)
+	custom_minimum_size = Vector2(0, 204)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	toggle_mode = true
@@ -62,7 +63,7 @@ func set_good_data(data: Dictionary, selected: bool) -> void:
 
 	text = ""
 	button_pressed = selected
-	custom_minimum_size = Vector2(0, 184)
+	custom_minimum_size = Vector2(0, 204)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	tooltip_text = _build_tooltip(data)
@@ -159,17 +160,17 @@ func _build_tooltip(data: Dictionary) -> String:
 
 func _apply_text_sizes() -> void:
 	if name_label:
-		name_label.add_theme_font_size_override("font_size", 17)
+		name_label.add_theme_font_size_override("font_size", 22)
 
 	var title_labels: Array[Label] = [stock_title, demand_title, value_title, coverage_title, state_title, trend_title]
 	for label: Label in title_labels:
 		if label:
-			label.add_theme_font_size_override("font_size", 12)
+			label.add_theme_font_size_override("font_size", 15)
 
 	var value_labels: Array[Label] = [stock_value, demand_value, value_value, coverage_value, state_value, trend_value]
 	for label: Label in value_labels:
 		if label:
-			label.add_theme_font_size_override("font_size", 13)
+			label.add_theme_font_size_override("font_size", 17)
 
 func _apply_base_style(border_colour: Color, selected: bool) -> void:
 	var normal_style: StyleBoxFlat = StyleBoxFlat.new()

@@ -249,7 +249,7 @@ func _add_list_heading(list: VBoxContainer, text: String) -> void:
 		return
 	var label: Label = Label.new()
 	label.text = text
-	label.add_theme_font_size_override("font_size", 16)
+	label.add_theme_font_size_override("font_size", 21)
 	label.add_theme_color_override("font_color", Color(0.56, 0.90, 0.82, 1.0))
 	list.add_child(label)
 
@@ -259,7 +259,7 @@ func _add_list_line(list: VBoxContainer, text: String) -> void:
 	var label: Label = Label.new()
 	label.text = "• " + text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.add_theme_font_size_override("font_size", 15)
+	label.add_theme_font_size_override("font_size", 20)
 	label.add_theme_color_override("font_color", Color(0.90, 0.86, 0.76, 1.0))
 	list.add_child(label)
 
@@ -310,7 +310,7 @@ func _signed_fmt(value: float) -> String:
 
 func _lock_layout_sizes() -> void:
 	if detail_stats:
-		detail_stats.custom_minimum_size = Vector2(0, 235)
+		detail_stats.custom_minimum_size = Vector2(0, 245)
 		detail_stats.fit_content = false
 		detail_stats.scroll_active = true
 	if empty_hint:
@@ -325,7 +325,7 @@ func _add_styles() -> void:
 	style.border_color = Color(0.50, 0.82, 0.74, 0.32)
 	style.set_border_width_all(1)
 	style.set_corner_radius_all(12)
-	style.set_content_margin_all(4)
+	style.set_content_margin_all(8)
 	style.shadow_color = Color(0.0, 0.0, 0.0, 0.40)
 	style.shadow_size = 8
 	add_theme_stylebox_override("panel", style)
@@ -342,14 +342,20 @@ func _add_styles() -> void:
 		detail_panel.add_theme_stylebox_override("panel", detail_style)
 
 	if heading_label:
-		heading_label.add_theme_font_size_override("font_size", 24)
+		heading_label.add_theme_font_size_override("font_size", 32)
 		heading_label.add_theme_color_override("font_color", Color(0.90, 0.86, 0.76, 1.0))
 	if detail_title:
-		detail_title.add_theme_font_size_override("font_size", 22)
+		detail_title.add_theme_font_size_override("font_size", 29)
 		detail_title.add_theme_color_override("font_color", Color(0.90, 0.86, 0.76, 1.0))
+	
+	if close_button:
+		close_button.custom_minimum_size = Vector2(44, 38)
+		close_button.add_theme_font_size_override("font_size", 18)
+
 	if detail_stats:
-		detail_stats.add_theme_font_size_override("normal_font_size", 16)
-		detail_stats.add_theme_font_size_override("bold_font_size", 16)
+		detail_stats.add_theme_font_size_override("normal_font_size", 21)
+		detail_stats.add_theme_font_size_override("bold_font_size", 22)
+		detail_stats.add_theme_constant_override("line_separation", 5)
 	if empty_hint:
-		empty_hint.add_theme_font_size_override("normal_font_size", 15)
-		empty_hint.add_theme_font_size_override("bold_font_size", 16)
+		empty_hint.add_theme_font_size_override("normal_font_size", 20)
+		empty_hint.add_theme_font_size_override("bold_font_size", 21)

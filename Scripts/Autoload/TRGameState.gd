@@ -229,6 +229,86 @@ func get_buildings_for_screen(screen_id: String, focus_id: String = "overview") 
 		output.append(_building_view_data(building_id))
 	return output
 
+func get_productive_labour_rows() -> Array[Dictionary]:
+	var required: Dictionary = _productive_labour_required()
+	var rows: Array[Dictionary] = []
+	for group_id: String in ["macehualtin", "tlacotin", "tolteca", "yaotequihuaqueh"]:
+		var total: int = int(population.get(group_id, 0))
+		var used: int = int(required.get(group_id, 0))
+		var free: int = max(0, total - used)
+		var pressure: String = "Available"
+		if total <= 0:
+			pressure = "Absent"
+		elif used > total:
+			pressure = "Overstretched"
+		elif used == total:
+			pressure = "Fully assigned"
+		elif used >= int(total * 0.75):
+			pressure = "Tight"
+		rows.append({
+			"id": "labour_" + group_id,
+			"name": _labour_group_name(group_id),
+			"screen": "production",
+			"category": "labour",
+			"is_labour": true,
+			"description": _labour_group_description(group_id),
+			"count": total,
+			"staff": {
+				"total_population": total,
+				"required_by_built_production": used,
+				"free_or_background_labour": free
+			},
+			"inputs": {},
+			"outputs": {},
+			"build_cost": {},
+			"can_build": false,
+			"build_status": "Labour is expanded through population, housing and future assignment systems.",
+			"operating": used,
+			"blocked": max(0, used - total),
+			"status_text": pressure + ": " + str(used) + " / " + str(total) + " currently required by built production."
+		})
+	return rows
+
+func _productive_labour_required() -> Dictionary:
+	var required: Dictionary = {}
+	for building_id: String in building_order:
+		var count: int = int(estate_buildings.get(building_id, 0))
+		if count <= 0:
+			continue
+		var definition: Dictionary = buildings[building_id] as Dictionary
+		var screen_id: String = String(definition.get("screen", ""))
+		if screen_id != "chinampas" and screen_id != "workshops":
+			continue
+		var staff: Dictionary = definition.get("staff", {}) as Dictionary
+		for group_variant: Variant in staff.keys():
+			var group_id: String = String(group_variant)
+			required[group_id] = int(required.get(group_id, 0)) + int(staff[group_id]) * count
+	return required
+
+func _labour_group_name(group_id: String) -> String:
+	match group_id:
+		"macehualtin":
+			return "Macehualtin Labourers"
+		"tlacotin":
+			return "Tlacotin Labourers"
+		"tolteca":
+			return "Tolteca Artisans"
+		"yaotequihuaqueh":
+			return "Yaotequihuaqueh Warriors"
+	return group_id.capitalize()
+
+func _labour_group_description(group_id: String) -> String:
+	match group_id:
+		"macehualtin":
+			return "Commoner labourers are the main productive base for chinampas and estate work."
+		"tlacotin":
+			return "Bonded or enslaved labour can support productive work where the estate has capacity and control."
+		"tolteca":
+			return "Skilled artisans operate workshops and convert raw goods into processed or luxury goods."
+		"yaotequihuaqueh":
+			return "Warriors mostly belong to Barracks and Flower Wars, but some production chains such as weapon yards can require martial staff."
+	return "Productive labour group."
+
 func _building_matches_focus(definition: Dictionary, focus_id: String) -> bool:
 	if focus_id == "" or focus_id == "overview" or focus_id == "build":
 		return true
@@ -464,6 +544,26 @@ func _estimate_building_status(building_id: String) -> Dictionary:
 	if blocked > 0:
 		status_text += "; blocked " + str(blocked)
 	return {"operating": operating, "blocked": blocked, "status_text": status_text}
+
+
+func add_looted_goods_bundle(loot: Dictionary) -> void:
+	# Flower Wars should not create a separate "Looted Goods" stockpile.
+	# Loot is immediately assigned into actual goods such as maize, wood, cacao,
+	# obsidian, cloth, tools, weapons, ritual goods, or fine textiles.
+	var gained_parts: Array[String] = []
+	for resource_variant: Variant in loot.keys():
+		var resource_id: String = String(resource_variant)
+		if not resource_order.has(resource_id):
+			push_warning("Ignoring looted item that is not a real good: " + resource_id)
+			continue
+		var amount: float = maxf(0.0, float(loot[resource_id]))
+		if amount <= 0.0:
+			continue
+		_add_stock(resource_id, amount)
+		gained_parts.append(_format_amount(amount) + " " + get_resource_name(resource_id))
+	if not gained_parts.is_empty():
+		last_report.append("Loot assigned into goods: " + ", ".join(gained_parts) + ".")
+	emit_signal("state_changed")
 
 func _stock(resource_id: String) -> float:
 	return float(estate_stockpiles.get(resource_id, 0.0))

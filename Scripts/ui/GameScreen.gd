@@ -4,9 +4,9 @@
 #
 # Shared game shell with data-backed prototype systems:
 # - Estate keeps the Veintena calendar.
-# - Chinampas and Workshops use real building definitions, build costs, staff, inputs and outputs.
+# - Production combines Chinampas, Workshops and Labour in one bottom-bar department.
 # - Storehouse and Market read from TRGameState instead of hard-coded UI placeholder data.
-# - Bottom bar order locked: Estate | Chinampas | Workshops | Storehouse | Marketplace | Shrines | Warrior House | Palace | Rival Houses | Advance Veintena.
+# - Bottom bar order locked: Estate | Production | Storehouse | Market | Housing | Shrines | Barracks | Palace | Rivals | Advance Veintena.
 extends Control
 
 const TR_GAME_STATE_SCRIPT: Script = preload("res://Scripts/autoload/TRGameState.gd")
@@ -18,6 +18,7 @@ const BUILDING_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/BuildingV
 const BUILDING_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/BuildingLedgerRow.tscn")
 
 @export var estate_art: Texture2D
+@export var production_art: Texture2D
 @export var chinampas_art: Texture2D
 @export var fields_art: Texture2D # Backwards-compatible fallback if you already assigned art to the older Fields Art slot.
 @export var storehouse_art: Texture2D
@@ -25,8 +26,10 @@ const BUILDING_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/Building
 @export var shrines_art: Texture2D
 @export var warriors_art: Texture2D
 @export var market_art: Texture2D
+@export var housing_art: Texture2D
 @export var palace_art: Texture2D
 @export var rivals_art: Texture2D
+@export var prestige_emblem_art: Texture2D
 
 @export var visible_veintenas: int = 7
 
@@ -39,11 +42,20 @@ const BUILDING_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/Building
 @onready var notification_title: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/NotificationTitle") as Label
 @onready var notification_list: VBoxContainer = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/NotificationScroll/NotificationList") as VBoxContainer
 
+@onready var house_claim_panel: PanelContainer = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel") as PanelContainer
+@onready var prestige_emblem: TextureRect = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/EmblemFrame/PrestigeEmblem") as TextureRect
+@onready var prestige_glyph_label: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/EmblemFrame/PrestigeGlyphLabel") as Label
+@onready var prestige_title_label: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText/PrestigeTitleLabel") as Label
+@onready var prestige_value_label: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText/PrestigeValueLabel") as Label
+@onready var prestige_standing_label: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText/PrestigeStandingLabel") as Label
+@onready var prestige_recognition_label: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText/PrestigeRecognitionLabel") as Label
+@onready var prestige_recent_label: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText/PrestigeRecentLabel") as Label
+
 @onready var estate_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/EstateButton") as Button
-@onready var chinampas_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/FieldsButton") as Button
-@onready var workshops_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/WorkshopsButton") as Button
+@onready var production_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/ProductionButton") as Button
 @onready var storehouse_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/StorehouseButton") as Button
 @onready var market_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/MarketButton") as Button
+@onready var housing_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/HousingButton") as Button
 @onready var shrines_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/ShrinesButton") as Button
 @onready var warriors_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/WarriorsButton") as Button
 @onready var palace_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/PalaceButton") as Button
@@ -90,38 +102,24 @@ var _screen_profiles: Dictionary = {
 		"report_title": "House Warnings & Reports",
 		"body": "The estate court is the whole-house planning screen. It keeps the Veintena calendar because this is where you read the year, review warnings and advance time.",
 		"sections": [
-			{"heading": "Estate overview", "lines": ["The top row shows the Veintena calendar.", "The right panel summarises the last turn and major warnings.", "Chinampas and Workshops now drive Storehouse totals through real production.", "Use Advance Veintena to run upkeep, building inputs and building output."]}
+			{"heading": "Estate overview", "lines": ["The top row shows the Veintena calendar.", "The right panel summarises the last turn and major warnings.", "Production now drives Storehouse totals through chinampas, workshops and labour.", "Use Advance Veintena to run upkeep, building inputs and building output."]}
 		],
 		"reports": []
 	},
-	"chinampas": {
-		"title": "Chinampas",
+	"production": {
+		"title": "Production",
 		"special_view": "buildings",
-		"building_screen": "chinampas",
-		"report_title": "Chinampa Ledger",
-		"body": "Chinampas are the estate's agricultural engine. Built chinampas need staff and tool inputs before they feed the Storehouse.",
+		"building_screen": "production",
+		"report_title": "Production Ledger",
+		"body": "Production is where the estate turns land, labour and buildings into goods. The Overview tab is a dashboard: it summarises expected output, input bottlenecks, blocked buildings and productive labour pressure instead of repeating the Chinampas or Workshops ledgers.",
 		"focuses": [
 			{"id": "overview", "label": "Overview"},
-			{"id": "maize", "label": "Maize"},
-			{"id": "cacao", "label": "Cacao"},
-			{"id": "cotton", "label": "Cotton"},
-			{"id": "labour", "label": "Labour"},
-			{"id": "build", "label": "Build"}
-		]
-	},
-	"workshops": {
-		"title": "Workshops",
-		"special_view": "buildings",
-		"building_screen": "workshops",
-		"report_title": "Workshop Ledger",
-		"body": "Workshops convert raw goods into tools, cloth, weapons and luxury goods. They only operate when built, staffed and supplied with their input goods.",
-		"focuses": [
-			{"id": "overview", "label": "Overview"},
-			{"id": "tools", "label": "Tools"},
-			{"id": "cloth", "label": "Cloth"},
-			{"id": "weapons", "label": "Weapons"},
-			{"id": "luxury", "label": "Luxury"},
-			{"id": "build", "label": "Build"}
+			{"id": "chinampas", "label": "Chinampas"},
+			{"id": "workshops", "label": "Workshops"},
+			{"id": "labour", "label": "Labour"}
+		],
+		"sections": [
+			{"heading": "Production dashboard", "lines": ["Expected output this Veintena from built production buildings.", "Input goods that production will consume.", "Buildings blocked by missing inputs, staffing or lack of construction.", "Labour pressure across chinampas and workshops."]}
 		]
 	},
 	"storehouse": {
@@ -150,8 +148,25 @@ var _screen_profiles: Dictionary = {
 			{"id": "reports", "label": "Reports"}
 		]
 	},
+	"housing": {
+		"title": "Housing",
+		"special_view": "buildings",
+		"building_screen": "housing",
+		"report_title": "Housing Ledger",
+		"body": "Housing and support buildings turn population growth into an estate development problem. New people need maize, work and places to live before they strengthen the house.",
+		"focuses": [
+			{"id": "overview", "label": "Overview"},
+			{"id": "commoners", "label": "Commoners"},
+			{"id": "tlacotin", "label": "Tlacotin"},
+			{"id": "warriors", "label": "Warriors"},
+			{"id": "priests", "label": "Priests"},
+			{"id": "nobles", "label": "Nobles"},
+			{"id": "captives", "label": "Captives"},
+			{"id": "build", "label": "Build"}
+		]
+	},
 	"shrines": {"title": "Shrines", "report_title": "Omens & Priest Reports", "body": "Offerings to Tlaloc, Huitzilopochtli, Tezcatlipoca and Quetzalcoatl will be managed here.", "focuses": [{"id": "overview", "label": "Overview"}, {"id": "tlaloc", "label": "Tlaloc"}, {"id": "huitzilopochtli", "label": "Huitzilopochtli"}, {"id": "tezcatlipoca", "label": "Tezcatlipoca"}, {"id": "quetzalcoatl", "label": "Quetzalcoatl"}, {"id": "offerings", "label": "Offerings"}], "reports": ["Shrine systems are not connected yet.", "Offerings will later consume goods from the Storehouse."]},
-	"warriors": {"title": "Warrior House", "report_title": "Warrior Reports", "body": "Warriors, weapons and Flower Wars preparation will be managed here.", "focuses": [{"id": "overview", "label": "Overview"}, {"id": "warriors", "label": "Warriors"}, {"id": "weapons", "label": "Weapons"}, {"id": "flower_wars", "label": "Flower Wars"}, {"id": "returns", "label": "Returns"}], "reports": ["Warrior systems are not connected yet.", "Weapons will come from the Workshop system."]},
+	"warriors": {"title": "Barracks", "report_title": "Barracks Reports", "body": "Warriors, weapons and Flower Wars preparation will be managed here. The Barracks is the estate's military support screen.", "focuses": [{"id": "overview", "label": "Overview"}, {"id": "warriors", "label": "Warriors"}, {"id": "weapons", "label": "Weapons"}, {"id": "flower_wars", "label": "Flower Wars"}, {"id": "returns", "label": "Returns"}], "reports": ["Warrior systems are not connected yet.", "Weapons will come from the Workshop system."]},
 	"palace": {"title": "Palace", "report_title": "Palace Messages", "body": "Tribute, royal favour and recognition pressure will be managed here.", "focuses": [{"id": "overview", "label": "Overview"}, {"id": "demand", "label": "Demand"}, {"id": "tribute", "label": "Tribute"}, {"id": "royal_favour", "label": "Royal Favour"}, {"id": "recognition", "label": "Recognition"}], "reports": ["Palace systems are not connected yet.", "Tribute will later reserve goods from the Storehouse."]},
 	"rivals": {"title": "Rival Houses", "report_title": "Rival Reports", "body": "War Rival, Cunning Rival and Diplomatic Rival pressure will be shown here.", "focuses": [{"id": "overview", "label": "Overview"}, {"id": "war_rival", "label": "War Rival"}, {"id": "cunning_rival", "label": "Cunning Rival"}, {"id": "diplomatic_rival", "label": "Diplomatic Rival"}, {"id": "prestige", "label": "Prestige"}], "reports": ["Rival systems are not connected yet.", "Market procurement is the next natural hook."]}
 }
@@ -185,14 +200,14 @@ func _connect_state() -> void:
 func _wire_buttons() -> void:
 	if estate_button:
 		estate_button.pressed.connect(func() -> void: show_location("estate"))
-	if chinampas_button:
-		chinampas_button.pressed.connect(func() -> void: show_location("chinampas"))
-	if workshops_button:
-		workshops_button.pressed.connect(func() -> void: show_location("workshops"))
+	if production_button:
+		production_button.pressed.connect(func() -> void: show_location("production"))
 	if storehouse_button:
 		storehouse_button.pressed.connect(func() -> void: show_location("storehouse"))
 	if market_button:
 		market_button.pressed.connect(func() -> void: show_location("market"))
+	if housing_button:
+		housing_button.pressed.connect(func() -> void: show_location("housing"))
 	if shrines_button:
 		shrines_button.pressed.connect(func() -> void: show_location("shrines"))
 	if warriors_button:
@@ -207,18 +222,18 @@ func _wire_buttons() -> void:
 func _apply_bottom_bar_labels() -> void:
 	if estate_button:
 		estate_button.text = "Estate"
-	if chinampas_button:
-		chinampas_button.text = "Chinampas"
-	if workshops_button:
-		workshops_button.text = "Workshops"
+	if production_button:
+		production_button.text = "Production"
 	if storehouse_button:
 		storehouse_button.text = "Storehouse"
 	if market_button:
 		market_button.text = "Market"
+	if housing_button:
+		housing_button.text = "Housing"
 	if shrines_button:
 		shrines_button.text = "Shrines"
 	if warriors_button:
-		warriors_button.text = "Warriors"
+		warriors_button.text = "Barracks"
 	if palace_button:
 		palace_button.text = "Palace"
 	if rivals_button:
@@ -238,6 +253,8 @@ func show_focus(location_id: String, focus_id: String) -> void:
 		selected_storehouse_good_id = ""
 	if location_id == "market":
 		selected_market_good_id = ""
+	if location_id == "production" or location_id == "housing":
+		selected_building_id_by_location[location_id] = ""
 	_refresh_all()
 
 func _refresh_all() -> void:
@@ -279,7 +296,7 @@ func _build_calendar_row() -> void:
 	for i: int in range(start_index, end_index):
 		var card_data: Dictionary = _veintenas[i] as Dictionary
 		var card: PanelContainer = PanelContainer.new()
-		card.custom_minimum_size = Vector2(150, 94)
+		card.custom_minimum_size = Vector2(166, 106)
 		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		card.tooltip_text = "Veintena " + str(i + 1) + " — " + String(card_data.get("name", "")) + ". " + String(card_data.get("tooltip", ""))
 		var style: StyleBoxFlat = _make_panel_style(Color(0.055, 0.08, 0.075, 0.92), Color(0.33, 0.70, 0.62, 0.55), 10)
@@ -287,18 +304,18 @@ func _build_calendar_row() -> void:
 			style = _make_panel_style(Color(0.09, 0.13, 0.115, 0.98), Color(0.76, 0.63, 0.32, 0.85), 10)
 		card.add_theme_stylebox_override("panel", style)
 		var margin: MarginContainer = MarginContainer.new()
-		margin.add_theme_constant_override("margin_left", 6)
-		margin.add_theme_constant_override("margin_right", 6)
-		margin.add_theme_constant_override("margin_top", 6)
-		margin.add_theme_constant_override("margin_bottom", 6)
+		margin.add_theme_constant_override("margin_left", 8)
+		margin.add_theme_constant_override("margin_right", 8)
+		margin.add_theme_constant_override("margin_top", 7)
+		margin.add_theme_constant_override("margin_bottom", 7)
 		card.add_child(margin)
 		var stack: VBoxContainer = VBoxContainer.new()
 		stack.alignment = BoxContainer.ALIGNMENT_CENTER
 		margin.add_child(stack)
-		_add_center_label(stack, "Veintena " + str(i + 1), 13)
-		_add_center_label(stack, String(card_data.get("name", "")), 11)
-		_add_center_label(stack, String(card_data.get("type", "")), 13)
-		_add_center_label(stack, String(card_data.get("detail", "")), 11)
+		_add_center_label(stack, "Veintena " + str(i + 1), 17)
+		_add_center_label(stack, String(card_data.get("name", "")), 15)
+		_add_center_label(stack, String(card_data.get("type", "")), 17)
+		_add_center_label(stack, String(card_data.get("detail", "")), 15)
 		top_row.add_child(card)
 
 func _build_focus_row(profile: Dictionary) -> void:
@@ -313,8 +330,9 @@ func _build_focus_row(profile: Dictionary) -> void:
 		button.text = String(focus.get("label", focus_id.capitalize()))
 		button.toggle_mode = true
 		button.button_pressed = focus_id == selected_focus
-		button.custom_minimum_size = Vector2(130, 54)
+		button.custom_minimum_size = Vector2(150, 64)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.add_theme_font_size_override("font_size", 21)
 		button.pressed.connect(func() -> void:
 			show_focus(current_location_id, focus_id)
 		)
@@ -328,7 +346,9 @@ func _refresh_main_content() -> void:
 	if location_art:
 		location_art.texture = _art_for_location(current_location_id)
 	var special_view: String = String(profile.get("special_view", ""))
-	if special_view == "storehouse":
+	if current_location_id == "production" and _current_focus_id() == "overview":
+		_show_production_overview_content()
+	elif special_view == "storehouse":
 		_show_storehouse_view()
 	elif special_view == "market":
 		_show_market_view()
@@ -346,6 +366,64 @@ func _show_text_content(profile: Dictionary) -> void:
 		content_text.scroll_active = true
 		content_text.fit_content = false
 		content_text.text = _build_standard_text(profile)
+
+func _show_production_overview_content() -> void:
+	if content_root:
+		content_root.visible = true
+	if content_text:
+		content_text.visible = true
+		content_text.bbcode_enabled = true
+		content_text.scroll_active = true
+		content_text.fit_content = false
+		content_text.text = _build_production_overview_text()
+
+func _build_production_overview_text() -> String:
+	var text: String = ""
+	text += "[b]Production Overview[/b]\n"
+	text += "A dashboard of what the estate is expected to make this Veintena and what may stop production. Use Chinampas or Workshops to select individual buildings; use Labour to inspect the productive workforce.\n\n"
+
+	var outputs: Dictionary = _production_output_totals()
+	text += "[b]Expected Output This Veintena[/b]\n"
+	text += _resource_dictionary_lines(outputs, "No expected production output yet.", 8)
+	text += "\n"
+
+	var inputs: Dictionary = _production_input_totals()
+	text += "[b]Input Demand This Veintena[/b]\n"
+	text += _resource_dictionary_lines(inputs, "No production input demand yet.", 8)
+	text += "\n"
+
+	var building_summary: Dictionary = _production_building_summary()
+	text += "[b]Operating Status[/b]\n"
+	text += "• Built production buildings: " + str(int(building_summary.get("built", 0))) + "\n"
+	text += "• Expected operating instances: " + str(int(building_summary.get("operating", 0))) + "\n"
+	text += "• Blocked instances: " + str(int(building_summary.get("blocked", 0))) + "\n"
+
+	var blocked_lines: Array = building_summary.get("blocked_lines", []) as Array
+	if blocked_lines.is_empty():
+		text += "• No built production buildings are currently blocked.\n"
+	else:
+		for blocked_line_variant: Variant in blocked_lines:
+			text += "• " + String(blocked_line_variant) + "\n"
+	text += "\n"
+
+	text += "[b]Production Chains Not Yet Built[/b]\n"
+	var unbuilt_lines: Array = building_summary.get("unbuilt_lines", []) as Array
+	if unbuilt_lines.is_empty():
+		text += "• All listed production chains have at least one building.\n"
+	else:
+		for unbuilt_line_variant: Variant in unbuilt_lines:
+			text += "• " + String(unbuilt_line_variant) + "\n"
+	text += "\n"
+
+	text += "[b]Labour Pressure[/b]\n"
+	var labour_lines: Array[String] = _production_labour_summary_lines()
+	if labour_lines.is_empty():
+		text += "• No productive labour data available.\n"
+	else:
+		for labour_line: String in labour_lines:
+			text += "• " + labour_line + "\n"
+
+	return text.strip_edges()
 
 func _build_standard_text(profile: Dictionary) -> String:
 	var text: String = String(profile.get("body", "")) + "\n\n"
@@ -432,7 +510,10 @@ func _refresh_right_panel() -> void:
 	_clear_children(notification_list)
 	var profile: Dictionary = _profile(current_location_id)
 	if notification_title:
-		notification_title.text = String(profile.get("report_title", "Warnings & Reports"))
+		notification_title.text = _report_title_for_current_focus(profile)
+
+	_refresh_house_claim()
+
 	var special_view: String = String(profile.get("special_view", ""))
 	if special_view == "storehouse":
 		_build_storehouse_ledger()
@@ -442,9 +523,243 @@ func _refresh_right_panel() -> void:
 		else:
 			_build_market_ledger()
 	elif special_view == "buildings":
-		_build_building_ledger(profile)
+		if current_location_id == "production" and _current_focus_id() == "overview":
+			_build_production_overview_reports()
+		else:
+			_build_building_ledger(profile)
 	else:
 		_build_report_list(profile)
+
+func _refresh_house_claim() -> void:
+	if house_claim_panel == null:
+		return
+
+	var estate_visible: bool = current_location_id == "estate"
+	house_claim_panel.visible = estate_visible
+	if not estate_visible:
+		return
+
+	var summary: Dictionary = _prestige_summary()
+	var prestige_value: float = float(summary.get("prestige", 0.0))
+	var standing_text: String = String(summary.get("standing", "Standing: not ranked yet"))
+	var recognition_text: String = String(summary.get("recognition", "Recognition: unproven"))
+	var recent_text: String = String(summary.get("recent", "Last change: none"))
+
+	if prestige_emblem:
+		prestige_emblem.texture = prestige_emblem_art
+		prestige_emblem.visible = prestige_emblem_art != null
+	if prestige_glyph_label:
+		prestige_glyph_label.visible = prestige_emblem_art == null
+	if prestige_title_label:
+		prestige_title_label.text = "House Claim"
+	if prestige_value_label:
+		prestige_value_label.text = "Prestige: " + _format_float(prestige_value)
+	if prestige_standing_label:
+		prestige_standing_label.text = standing_text
+	if prestige_recognition_label:
+		prestige_recognition_label.text = recognition_text
+	if prestige_recent_label:
+		prestige_recent_label.text = recent_text
+
+	house_claim_panel.tooltip_text = "Prestige is public recognition of the house. The Estate screen shows the quick claim; the Rivals and Palace screens should later show full comparison."
+
+func _prestige_summary() -> Dictionary:
+	var summary: Dictionary = {
+		"prestige": 0.0,
+		"standing": "Standing: not ranked yet",
+		"recognition": "Recognition: unproven",
+		"recent": "Last change: none"
+	}
+
+	var state: Node = _state()
+	if state == null:
+		return summary
+
+	if state.has_method("get_prestige_summary"):
+		var raw_summary: Variant = state.call("get_prestige_summary")
+		if raw_summary is Dictionary:
+			var state_summary: Dictionary = raw_summary as Dictionary
+			for key_variant: Variant in state_summary.keys():
+				var key: String = String(key_variant)
+				summary[key] = state_summary[key]
+			return summary
+
+	if state.has_method("get_player_prestige"):
+		summary["prestige"] = float(state.call("get_player_prestige"))
+	if state.has_method("get_prestige_standing_text"):
+		summary["standing"] = String(state.call("get_prestige_standing_text"))
+	if state.has_method("get_recognition_text"):
+		summary["recognition"] = String(state.call("get_recognition_text"))
+	if state.has_method("get_recent_prestige_text"):
+		summary["recent"] = String(state.call("get_recent_prestige_text"))
+
+	return summary
+
+func _report_title_for_current_focus(profile: Dictionary) -> String:
+	if current_location_id != "production":
+		return String(profile.get("report_title", "Warnings & Reports"))
+	match _current_focus_id():
+		"overview":
+			return "Production Reports"
+		"chinampas":
+			return "Chinampa Ledger"
+		"workshops":
+			return "Workshop Ledger"
+		"labour":
+			return "Productive Labour"
+	return "Production Reports"
+
+func _build_production_overview_reports() -> void:
+	var messages: Array[String] = _production_overview_report_messages()
+	for message: String in messages:
+		_add_notification(message)
+
+func _production_overview_report_messages() -> Array[String]:
+	var output: Array[String] = []
+	var outputs: Dictionary = _production_output_totals()
+	var inputs: Dictionary = _production_input_totals()
+	var summary: Dictionary = _production_building_summary()
+	var labour_lines: Array[String] = _production_labour_summary_lines()
+
+	var output_summary: String = _resource_dictionary_inline(outputs, 4)
+	if output_summary == "":
+		output.append("No production output is currently expected. Build chinampas or workshops to start producing goods.")
+	else:
+		output.append("Expected output: " + output_summary + ".")
+
+	var input_summary: String = _resource_dictionary_inline(inputs, 4)
+	if input_summary == "":
+		output.append("No production inputs are currently being consumed by built production buildings.")
+	else:
+		output.append("Production inputs needed this Veintena: " + input_summary + ".")
+
+	output.append("Built production buildings: " + str(int(summary.get("built", 0))) + "; operating: " + str(int(summary.get("operating", 0))) + "; blocked: " + str(int(summary.get("blocked", 0))) + ".")
+
+	var blocked_lines: Array = summary.get("blocked_lines", []) as Array
+	if blocked_lines.is_empty():
+		output.append("No built production buildings are currently blocked.")
+	else:
+		output.append("Blocked production: " + _join_string_items(blocked_lines, "; ", 0) + ".")
+
+	var unbuilt_lines: Array = summary.get("unbuilt_lines", []) as Array
+	if not unbuilt_lines.is_empty():
+		output.append("Unbuilt chains: " + _join_string_items(unbuilt_lines, "; ", 3) + ".")
+
+	if labour_lines.is_empty():
+		output.append("Labour pressure is not available yet.")
+	else:
+		output.append("Labour read: " + "; ".join(labour_lines.slice(0, mini(3, labour_lines.size()))) + ".")
+
+	return output
+
+func _production_output_totals() -> Dictionary:
+	var state: Node = _state()
+	if state != null and state.has_method("estimate_building_outputs"):
+		return state.call("estimate_building_outputs") as Dictionary
+	return {}
+
+func _production_input_totals() -> Dictionary:
+	var state: Node = _state()
+	if state != null and state.has_method("estimate_building_inputs"):
+		return state.call("estimate_building_inputs") as Dictionary
+	return {}
+
+func _production_building_summary() -> Dictionary:
+	var result: Dictionary = {
+		"built": 0,
+		"operating": 0,
+		"blocked": 0,
+		"blocked_lines": [],
+		"unbuilt_lines": []
+	}
+
+	var all_buildings: Array[Dictionary] = []
+	var state: Node = _state()
+	if state != null and state.has_method("get_buildings_for_screen"):
+		var chinampas: Array = state.call("get_buildings_for_screen", "chinampas", "overview") as Array
+		for item_variant: Variant in chinampas:
+			all_buildings.append(item_variant as Dictionary)
+		var workshops: Array = state.call("get_buildings_for_screen", "workshops", "overview") as Array
+		for item_variant: Variant in workshops:
+			all_buildings.append(item_variant as Dictionary)
+
+	var blocked_lines: Array[String] = []
+	var unbuilt_lines: Array[String] = []
+	var built_count: int = 0
+	var operating_count: int = 0
+	var blocked_count: int = 0
+
+	for building: Dictionary in all_buildings:
+		var count: int = int(building.get("count", 0))
+		var operating: int = int(building.get("operating", 0))
+		var blocked: int = int(building.get("blocked", 0))
+		var name: String = String(building.get("name", "Building"))
+		built_count += count
+		operating_count += operating
+		blocked_count += blocked
+		if count <= 0:
+			unbuilt_lines.append(name + " not built")
+		elif blocked > 0:
+			blocked_lines.append(name + " " + String(building.get("status_text", "blocked")))
+
+	result["built"] = built_count
+	result["operating"] = operating_count
+	result["blocked"] = blocked_count
+	result["blocked_lines"] = blocked_lines
+	result["unbuilt_lines"] = unbuilt_lines
+	return result
+
+func _production_labour_summary_lines() -> Array[String]:
+	var output: Array[String] = []
+	var state: Node = _state()
+	if state == null or not state.has_method("get_productive_labour_rows"):
+		return output
+	var rows: Array = state.call("get_productive_labour_rows") as Array
+	for row_variant: Variant in rows:
+		var row: Dictionary = row_variant as Dictionary
+		var name: String = String(row.get("name", "Labour"))
+		var status: String = String(row.get("status_text", ""))
+		output.append(name + " — " + status)
+	return output
+
+func _resource_dictionary_lines(values: Dictionary, empty_text: String, max_items: int = 8) -> String:
+	var keys: Array = values.keys()
+	if keys.is_empty():
+		return "• " + empty_text + "\n"
+	var lines: String = ""
+	var count: int = 0
+	for key_variant: Variant in keys:
+		if count >= max_items:
+			var remaining: int = keys.size() - count
+			lines += "• +" + str(remaining) + " more goods\n"
+			break
+		var resource_id: String = String(key_variant)
+		var amount: float = float(values[key_variant])
+		if absf(amount) <= 0.001:
+			continue
+		lines += "• " + _resource_name(resource_id) + ": " + _format_float(amount) + "\n"
+		count += 1
+	if lines == "":
+		return "• " + empty_text + "\n"
+	return lines
+
+func _resource_dictionary_inline(values: Dictionary, max_items: int = 4) -> String:
+	var parts: Array[String] = []
+	for key_variant: Variant in values.keys():
+		if parts.size() >= max_items:
+			break
+		var resource_id: String = String(key_variant)
+		var amount: float = float(values[key_variant])
+		if absf(amount) <= 0.001:
+			continue
+		parts.append(_resource_name(resource_id) + " " + _format_float(amount))
+	return ", ".join(parts)
+
+func _resource_name(resource_id: String) -> String:
+	var state: Node = _state()
+	if state != null and state.has_method("get_resource_name"):
+		return String(state.call("get_resource_name", resource_id))
+	return resource_id.replace("_", " ").capitalize()
 
 func _build_storehouse_ledger() -> void:
 	var focus_id: String = _current_focus_id()
@@ -563,7 +878,41 @@ func _market_goods() -> Array[Dictionary]:
 func _buildings_for_current_screen(profile: Dictionary) -> Array[Dictionary]:
 	var output: Array[Dictionary] = []
 	var state: Node = _state()
-	if state != null and state.has_method("get_buildings_for_screen"):
+	if state == null:
+		return output
+
+	if current_location_id == "production":
+		var focus_id: String = _current_focus_id()
+		if focus_id == "labour":
+			if state.has_method("get_productive_labour_rows"):
+				var labour_rows: Array = state.call("get_productive_labour_rows") as Array
+				for item_variant: Variant in labour_rows:
+					output.append(item_variant as Dictionary)
+			return output
+		if state.has_method("get_buildings_for_screen"):
+			if focus_id == "chinampas":
+				var raw_chinampas: Array = state.call("get_buildings_for_screen", "chinampas", "overview") as Array
+				for item_variant: Variant in raw_chinampas:
+					output.append(item_variant as Dictionary)
+				return output
+			if focus_id == "workshops":
+				var raw_workshops: Array = state.call("get_buildings_for_screen", "workshops", "overview") as Array
+				for item_variant: Variant in raw_workshops:
+					output.append(item_variant as Dictionary)
+				return output
+			var raw_all_chinampas: Array = state.call("get_buildings_for_screen", "chinampas", "overview") as Array
+			for item_variant: Variant in raw_all_chinampas:
+				output.append(item_variant as Dictionary)
+			var raw_all_workshops: Array = state.call("get_buildings_for_screen", "workshops", "overview") as Array
+			for item_variant: Variant in raw_all_workshops:
+				output.append(item_variant as Dictionary)
+			if state.has_method("get_productive_labour_rows"):
+				var labour_overview: Array = state.call("get_productive_labour_rows") as Array
+				for item_variant: Variant in labour_overview:
+					output.append(item_variant as Dictionary)
+		return output
+
+	if state.has_method("get_buildings_for_screen"):
 		var screen_id: String = String(profile.get("building_screen", ""))
 		var raw: Array = state.call("get_buildings_for_screen", screen_id, _current_focus_id()) as Array
 		for item_variant: Variant in raw:
@@ -644,16 +993,22 @@ func _art_for_location(location_id: String) -> Texture2D:
 	match location_id:
 		"estate":
 			return estate_art
-		"chinampas":
+		"production":
+			if production_art:
+				return production_art
 			if chinampas_art:
 				return chinampas_art
+			if workshops_art:
+				return workshops_art
 			return fields_art
-		"workshops":
-			return workshops_art
 		"storehouse":
 			return storehouse_art
 		"market":
 			return market_art
+		"housing":
+			if housing_art:
+				return housing_art
+			return estate_art
 		"shrines":
 			return shrines_art
 		"warriors":
@@ -667,10 +1022,10 @@ func _art_for_location(location_id: String) -> Texture2D:
 func _update_button_pressed_state() -> void:
 	var button_map: Dictionary = {
 		"estate": estate_button,
-		"chinampas": chinampas_button,
-		"workshops": workshops_button,
+		"production": production_button,
 		"storehouse": storehouse_button,
 		"market": market_button,
+		"housing": housing_button,
 		"shrines": shrines_button,
 		"warriors": warriors_button,
 		"palace": palace_button,
@@ -694,21 +1049,58 @@ func _apply_style() -> void:
 		if panel:
 			panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.035, 0.055, 0.052, 0.90), Color(0.34, 0.71, 0.63, 0.45), 14))
 	if location_title:
-		location_title.add_theme_font_size_override("font_size", 26)
+		location_title.add_theme_font_size_override("font_size", 35)
 	if content_text:
-		content_text.add_theme_font_size_override("normal_font_size", 16)
-		content_text.add_theme_font_size_override("bold_font_size", 17)
+		content_text.add_theme_font_size_override("normal_font_size", 21)
+		content_text.add_theme_font_size_override("bold_font_size", 22)
+		content_text.add_theme_constant_override("line_separation", 5)
 		var content_style: StyleBoxFlat = _make_panel_style(Color(0.0, 0.0, 0.0, 0.55), Color(0.50, 0.82, 0.74, 0.25), 12)
 		content_text.add_theme_stylebox_override("normal", content_style)
-	var buttons: Array = [estate_button, chinampas_button, workshops_button, storehouse_button, market_button, shrines_button, warriors_button, palace_button, rivals_button, advance_turn_button]
+	if notification_title:
+		notification_title.add_theme_font_size_override("font_size", 25)
+	if house_claim_panel:
+		house_claim_panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.58), Color(0.76, 0.63, 0.32, 0.58), 12))
+	if prestige_title_label:
+		prestige_title_label.add_theme_font_size_override("font_size", 22)
+	if prestige_value_label:
+		prestige_value_label.add_theme_font_size_override("font_size", 23)
+	if prestige_standing_label:
+		prestige_standing_label.add_theme_font_size_override("font_size", 18)
+	if prestige_recognition_label:
+		prestige_recognition_label.add_theme_font_size_override("font_size", 18)
+	if prestige_recent_label:
+		prestige_recent_label.add_theme_font_size_override("font_size", 16)
+	if prestige_glyph_label:
+		prestige_glyph_label.add_theme_font_size_override("font_size", 42)
+
+	var buttons: Array = [estate_button, production_button, storehouse_button, market_button, housing_button, shrines_button, warriors_button, palace_button, rivals_button, advance_turn_button]
 	for button_variant: Variant in buttons:
 		var button: Button = button_variant as Button
 		if button:
-			button.custom_minimum_size = Vector2(0, 48)
-			button.add_theme_font_size_override("font_size", 14)
+			button.custom_minimum_size = Vector2(0, 62)
+			button.add_theme_font_size_override("font_size", 20)
 			if button != advance_turn_button:
 				button.toggle_mode = true
+			else:
+				button.custom_minimum_size = Vector2(250, 62)
+				button.add_theme_font_size_override("font_size", 21)
 
+
+
+func _join_string_items(items: Array, separator: String = ", ", max_items: int = 0) -> String:
+	var parts: Array[String] = []
+	var limit: int = items.size()
+	if max_items > 0:
+		limit = mini(max_items, items.size())
+
+	for i: int in range(limit):
+		parts.append(String(items[i]))
+
+	if max_items > 0 and items.size() > max_items:
+		var remaining: int = items.size() - max_items
+		parts.append("+" + str(remaining) + " more")
+
+	return separator.join(parts)
 
 func _format_float(value: float) -> String:
 	if is_equal_approx(value, roundf(value)):
@@ -729,7 +1121,7 @@ func _add_notification(text: String) -> void:
 	var label: Label = Label.new()
 	label.text = "• " + text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_font_size_override("font_size", 19)
 	notification_list.add_child(label)
 
 func _clear_children(parent: Node) -> void:

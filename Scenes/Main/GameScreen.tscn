@@ -1,12 +1,8 @@
-[gd_scene format=3 uid="uid://bxlscu40nsrgd"]
+[gd_scene load_steps=2 format=3]
 
-[ext_resource type="Script" uid="uid://cvoiiw875iubp" path="res://Scripts/ui/GameScreen.gd" id="1_gamescreen"]
-[ext_resource type="Texture2D" uid="uid://dltxubjvphxtu" path="res://Assets/main_menu/Main menu.png" id="2_kljcf"]
-[ext_resource type="Texture2D" uid="uid://dktggms541iil" path="res://Assets/main_menu/Storehouse.png" id="3_0e7bs"]
-[ext_resource type="Texture2D" uid="uid://dltkfrkr65imq" path="res://Assets/main_menu/Chinampa.png" id="3_vp021"]
-[ext_resource type="Texture2D" uid="uid://bv0dsqj0166d" path="res://Assets/main_menu/Marketpalce.png" id="4_reg34"]
+[ext_resource type="Script" path="res://Scripts/ui/GameScreen.gd" id="1_gamescreen"]
 
-[node name="GameScreen" type="Control" unique_id=1640859442]
+[node name="GameScreen" type="Control"]
 layout_mode = 3
 anchors_preset = 15
 anchor_right = 1.0
@@ -14,12 +10,8 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_gamescreen")
-estate_art = ExtResource("2_kljcf")
-chinampas_art = ExtResource("3_vp021")
-storehouse_art = ExtResource("3_0e7bs")
-market_art = ExtResource("4_reg34")
 
-[node name="BackgroundColour" type="ColorRect" parent="." unique_id=202978634]
+[node name="BackgroundColour" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -28,7 +20,7 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0.018, 0.052, 0.052, 1)
 
-[node name="BackgroundDim" type="ColorRect" parent="." unique_id=1937619845]
+[node name="BackgroundDim" type="ColorRect" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -37,15 +29,15 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0, 0, 0, 0.18)
 
-[node name="SafeArea" type="MarginContainer" parent="." unique_id=643500131]
+[node name="SafeArea" type="MarginContainer" parent="."]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 16.0
-offset_top = 14.0
-offset_right = -16.0
-offset_bottom = -14.0
+offset_left = 12.0
+offset_top = 10.0
+offset_right = -12.0
+offset_bottom = -10.0
 grow_horizontal = 2
 grow_vertical = 2
 theme_override_constants/margin_left = 0
@@ -53,59 +45,59 @@ theme_override_constants/margin_top = 0
 theme_override_constants/margin_right = 0
 theme_override_constants/margin_bottom = 0
 
-[node name="MainVBox" type="VBoxContainer" parent="SafeArea" unique_id=1772764781]
-layout_mode = 2
-theme_override_constants/separation = 12
-
-[node name="CalendarPanel" type="PanelContainer" parent="SafeArea/MainVBox" unique_id=1680022195]
-custom_minimum_size = Vector2(0, 112)
-layout_mode = 2
-
-[node name="Margin" type="MarginContainer" parent="SafeArea/MainVBox/CalendarPanel" unique_id=2088841447]
-layout_mode = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 10
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 10
-
-[node name="CardRow" type="HBoxContainer" parent="SafeArea/MainVBox/CalendarPanel/Margin" unique_id=708479692]
+[node name="MainVBox" type="VBoxContainer" parent="SafeArea"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="MiddleRow" type="HBoxContainer" parent="SafeArea/MainVBox" unique_id=774077582]
+[node name="CalendarPanel" type="PanelContainer" parent="SafeArea/MainVBox"]
+custom_minimum_size = Vector2(0, 126)
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="SafeArea/MainVBox/CalendarPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
+
+[node name="CardRow" type="HBoxContainer" parent="SafeArea/MainVBox/CalendarPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="MiddleRow" type="HBoxContainer" parent="SafeArea/MainVBox"]
 layout_mode = 2
 size_flags_vertical = 3
-theme_override_constants/separation = 12
+theme_override_constants/separation = 10
 
-[node name="MainView" type="PanelContainer" parent="SafeArea/MainVBox/MiddleRow" unique_id=1909802754]
+[node name="MainView" type="PanelContainer" parent="SafeArea/MainVBox/MiddleRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 
-[node name="Margin" type="MarginContainer" parent="SafeArea/MainVBox/MiddleRow/MainView" unique_id=1632169562]
+[node name="Margin" type="MarginContainer" parent="SafeArea/MainVBox/MiddleRow/MainView"]
 layout_mode = 2
-theme_override_constants/margin_left = 16
-theme_override_constants/margin_top = 14
-theme_override_constants/margin_right = 16
-theme_override_constants/margin_bottom = 14
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 10
 
-[node name="MainStack" type="VBoxContainer" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin" unique_id=152236805]
+[node name="MainStack" type="VBoxContainer" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin"]
 layout_mode = 2
 theme_override_constants/separation = 10
 
-[node name="LocationTitle" type="Label" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack" unique_id=310183038]
+[node name="LocationTitle" type="Label" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack"]
 layout_mode = 2
 text = "Estate Court"
 horizontal_alignment = 1
 
-[node name="ArtArea" type="Control" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack" unique_id=1600482204]
-clip_contents = true
-custom_minimum_size = Vector2(0, 500)
+[node name="ArtArea" type="Control" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack"]
+custom_minimum_size = Vector2(0, 520)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
+clip_contents = true
 
-[node name="LocationArt" type="TextureRect" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/ArtArea" unique_id=1332617939]
+[node name="LocationArt" type="TextureRect" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/ArtArea"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -115,11 +107,11 @@ grow_vertical = 2
 expand_mode = 1
 stretch_mode = 6
 
-[node name="ContentRoot" type="VBoxContainer" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/ArtArea" unique_id=1801561350]
+[node name="ContentRoot" type="VBoxContainer" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/ArtArea"]
 layout_mode = 1
 anchors_preset = -1
 anchor_left = 0.03
-anchor_top = 0.52
+anchor_top = 0.46
 anchor_right = 0.97
 anchor_bottom = 0.97
 grow_horizontal = 2
@@ -128,118 +120,209 @@ size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 8
 
-[node name="ContentText" type="RichTextLabel" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/ArtArea/ContentRoot" unique_id=144045494]
-custom_minimum_size = Vector2(0, 170)
+[node name="ContentText" type="RichTextLabel" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/ArtArea/ContentRoot"]
+custom_minimum_size = Vector2(0, 230)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 bbcode_enabled = true
-text = "This is the heart of your noble house."
 fit_content = true
 scroll_active = false
+text = "This is the heart of your noble house."
 
-[node name="DynamicViewHost" type="VBoxContainer" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/ArtArea/ContentRoot" unique_id=1406311041]
+[node name="DynamicViewHost" type="VBoxContainer" parent="SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/ArtArea/ContentRoot"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
 theme_override_constants/separation = 8
 
-[node name="NotificationPanel" type="PanelContainer" parent="SafeArea/MainVBox/MiddleRow" unique_id=315945888]
-custom_minimum_size = Vector2(430, 0)
+[node name="NotificationPanel" type="PanelContainer" parent="SafeArea/MainVBox/MiddleRow"]
+custom_minimum_size = Vector2(490, 0)
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="Margin" type="MarginContainer" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel" unique_id=503864819]
+[node name="Margin" type="MarginContainer" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel"]
 layout_mode = 2
-theme_override_constants/margin_left = 12
-theme_override_constants/margin_top = 12
-theme_override_constants/margin_right = 12
-theme_override_constants/margin_bottom = 12
+theme_override_constants/margin_left = 8
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 8
+theme_override_constants/margin_bottom = 8
 
-[node name="NotificationStack" type="VBoxContainer" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin" unique_id=1518478651]
+[node name="NotificationStack" type="VBoxContainer" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin"]
 layout_mode = 2
 theme_override_constants/separation = 8
 
-[node name="NotificationTitle" type="Label" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack" unique_id=1348809982]
+[node name="NotificationTitle" type="Label" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack"]
 layout_mode = 2
 text = "Warnings & Reports"
 horizontal_alignment = 1
 
-[node name="NotificationScroll" type="ScrollContainer" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack" unique_id=646721605]
+[node name="NotificationScroll" type="ScrollContainer" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack"]
 layout_mode = 2
 size_flags_vertical = 3
 
-[node name="NotificationList" type="VBoxContainer" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/NotificationScroll" unique_id=486861219]
+[node name="NotificationList" type="VBoxContainer" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/NotificationScroll"]
 layout_mode = 2
 size_flags_horizontal = 3
 theme_override_constants/separation = 8
 
-[node name="BottomNav" type="PanelContainer" parent="SafeArea/MainVBox" unique_id=1468486960]
-custom_minimum_size = Vector2(0, 76)
+[node name="HouseClaimPanel" type="PanelContainer" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack"]
+visible = false
+custom_minimum_size = Vector2(0, 150)
 layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 0
 
-[node name="Margin" type="MarginContainer" parent="SafeArea/MainVBox/BottomNav" unique_id=1668542937]
+[node name="Margin" type="MarginContainer" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel"]
 layout_mode = 2
 theme_override_constants/margin_left = 10
 theme_override_constants/margin_top = 10
 theme_override_constants/margin_right = 10
 theme_override_constants/margin_bottom = 10
 
-[node name="ButtonRow" type="HBoxContainer" parent="SafeArea/MainVBox/BottomNav/Margin" unique_id=1388549346]
+[node name="ClaimRow" type="HBoxContainer" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 10
+alignment = 1
+
+[node name="EmblemFrame" type="Control" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow"]
+custom_minimum_size = Vector2(90, 104)
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="PrestigeEmblem" type="TextureRect" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/EmblemFrame"]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+expand_mode = 1
+stretch_mode = 5
+
+[node name="PrestigeGlyphLabel" type="Label" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/EmblemFrame"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+text = "✦"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="ClaimText" type="VBoxContainer" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 1
+
+[node name="PrestigeTitleLabel" type="Label" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText"]
+layout_mode = 2
+text = "House Claim"
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="PrestigeValueLabel" type="Label" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText"]
+layout_mode = 2
+text = "Prestige: 0"
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="PrestigeStandingLabel" type="Label" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText"]
+layout_mode = 2
+text = "Standing: not ranked yet"
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="PrestigeRecognitionLabel" type="Label" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText"]
+layout_mode = 2
+text = "Recognition: unproven"
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="PrestigeRecentLabel" type="Label" parent="SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText"]
+layout_mode = 2
+text = "Last change: none"
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="BottomNav" type="PanelContainer" parent="SafeArea/MainVBox"]
+custom_minimum_size = Vector2(0, 90)
+layout_mode = 2
+
+[node name="Margin" type="MarginContainer" parent="SafeArea/MainVBox/BottomNav"]
+layout_mode = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 10
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 10
+
+[node name="ButtonRow" type="HBoxContainer" parent="SafeArea/MainVBox/BottomNav/Margin"]
 layout_mode = 2
 theme_override_constants/separation = 7
 
-[node name="EstateButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=1066775568]
+[node name="EstateButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Estate"
 
-[node name="FieldsButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=508502533]
+[node name="ProductionButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Chinampas"
+text = "Production"
 
-[node name="WorkshopsButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=188757397]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Workshops"
-
-[node name="StorehouseButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=1286424379]
+[node name="StorehouseButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Storehouse"
 
-[node name="MarketButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=1027655990]
+[node name="MarketButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Market"
 
-[node name="ShrinesButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=907593152]
+[node name="HousingButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Housing"
+
+[node name="ShrinesButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Shrines"
 
-[node name="WarriorsButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=240543094]
+[node name="WarriorsButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Warriors"
+text = "Barracks"
 
-[node name="PalaceButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=2030563410]
+[node name="PalaceButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Palace"
 
-[node name="RivalsButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=894963133]
+[node name="RivalsButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Rivals"
 
-[node name="AdvanceTurnButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=161789825]
+[node name="NavSpacer" type="Control" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
+custom_minimum_size = Vector2(10, 0)
 layout_mode = 2
 size_flags_horizontal = 3
+
+[node name="AdvanceTurnButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
+custom_minimum_size = Vector2(250, 62)
+layout_mode = 2
+size_flags_horizontal = 0
 text = "Advance Veintena"
 
-[node name="EventOverlay" type="Control" parent="." unique_id=1635607873]
+
+[node name="EventOverlay" type="Control" parent="."]
 visible = false
 z_index = 10
 layout_mode = 1
@@ -249,7 +332,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 
-[node name="ModalDim" type="ColorRect" parent="EventOverlay" unique_id=326368260]
+[node name="ModalDim" type="ColorRect" parent="EventOverlay"]
 layout_mode = 1
 anchors_preset = 15
 anchor_right = 1.0
@@ -258,7 +341,7 @@ grow_horizontal = 2
 grow_vertical = 2
 color = Color(0, 0, 0, 0.58)
 
-[node name="EventCard" type="PanelContainer" parent="EventOverlay" unique_id=2137221350]
+[node name="EventCard" type="PanelContainer" parent="EventOverlay"]
 custom_minimum_size = Vector2(620, 360)
 layout_mode = 1
 anchors_preset = 8

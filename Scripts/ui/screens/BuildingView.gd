@@ -16,6 +16,7 @@ var buildings: Array[Dictionary] = []
 var selected_building_id: String = ""
 
 func _ready() -> void:
+	_apply_styles()
 	if close_button:
 		close_button.pressed.connect(close_detail)
 	if build_button:
@@ -63,8 +64,11 @@ func _update_detail() -> void:
 		detail_text.bbcode_enabled = true
 		detail_text.text = _build_detail_text(data)
 	if build_button:
-		build_button.disabled = not bool(data.get("can_build", false))
-		build_button.text = "Build" if bool(data.get("can_build", false)) else String(data.get("build_status", "Cannot build"))
+		var is_labour: bool = bool(data.get("is_labour", false))
+		build_button.visible = not is_labour
+		if not is_labour:
+			build_button.disabled = not bool(data.get("can_build", false))
+			build_button.text = "Build" if bool(data.get("can_build", false)) else String(data.get("build_status", "Cannot build"))
 
 func _find_building(building_id: String) -> Dictionary:
 	for item_variant: Variant in buildings:
@@ -106,3 +110,18 @@ func _format_amount(value: float) -> String:
 func _on_build_pressed() -> void:
 	if selected_building_id != "":
 		emit_signal("build_requested", selected_building_id)
+
+
+func _apply_styles() -> void:
+	if title_label:
+		title_label.add_theme_font_size_override("font_size", 28)
+	if detail_text:
+		detail_text.add_theme_font_size_override("normal_font_size", 21)
+		detail_text.add_theme_font_size_override("bold_font_size", 21)
+		detail_text.add_theme_constant_override("line_separation", 4)
+	if build_button:
+		build_button.custom_minimum_size = Vector2(0, 54)
+		build_button.add_theme_font_size_override("font_size", 21)
+	if close_button:
+		close_button.custom_minimum_size = Vector2(44, 38)
+		close_button.add_theme_font_size_override("font_size", 21)

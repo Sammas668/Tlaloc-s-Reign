@@ -6,10 +6,19 @@
       "screen": "chinampas",
       "category": "food",
       "description": "Raised canal-fed maize plots. The estate food base and the first real production engine.",
-      "build_cost": {"wood": 25, "tools": 4},
-      "staff": {"macehualtin": 75},
-      "inputs": {"tools": 0.5},
-      "outputs": {"maize": 60},
+      "build_cost": {
+        "wood": 25,
+        "tools": 4
+      },
+      "staff": {
+        "macehualtin": 75
+      },
+      "inputs": {
+        "tools": 0.5
+      },
+      "outputs": {
+        "maize": 60
+      },
       "priority": 10
     },
     {
@@ -18,10 +27,19 @@
       "screen": "chinampas",
       "category": "raw",
       "description": "Protected garden plots for cacao. Valuable for ritual, nobles, tribute and market pressure.",
-      "build_cost": {"wood": 30, "tools": 5},
-      "staff": {"macehualtin": 40},
-      "inputs": {"tools": 0.25},
-      "outputs": {"cacao": 2},
+      "build_cost": {
+        "wood": 30,
+        "tools": 5
+      },
+      "staff": {
+        "macehualtin": 40
+      },
+      "inputs": {
+        "tools": 0.25
+      },
+      "outputs": {
+        "cacao": 2
+      },
       "priority": 20
     },
     {
@@ -30,10 +48,19 @@
       "screen": "chinampas",
       "category": "raw",
       "description": "Cotton plots that feed the cloth and fine textile chains.",
-      "build_cost": {"wood": 30, "tools": 5},
-      "staff": {"macehualtin": 60},
-      "inputs": {"tools": 0.25},
-      "outputs": {"cotton": 30},
+      "build_cost": {
+        "wood": 30,
+        "tools": 5
+      },
+      "staff": {
+        "macehualtin": 60
+      },
+      "inputs": {
+        "tools": 0.25
+      },
+      "outputs": {
+        "cotton": 30
+      },
       "priority": 30
     },
     {
@@ -42,10 +69,19 @@
       "screen": "workshops",
       "category": "tools",
       "description": "A small starter workshop that prevents the estate from becoming tool-paralysed.",
-      "build_cost": {"wood": 25, "cloth": 5},
-      "staff": {"tolteca": 10},
-      "inputs": {"wood": 10},
-      "outputs": {"tools": 8},
+      "build_cost": {
+        "wood": 25,
+        "cloth": 5
+      },
+      "staff": {
+        "tolteca": 10
+      },
+      "inputs": {
+        "wood": 10
+      },
+      "outputs": {
+        "tools": 8
+      },
       "priority": 40
     },
     {
@@ -54,10 +90,21 @@
       "screen": "workshops",
       "category": "cloth",
       "description": "Converts cotton and tools into cloth for upkeep, buildings and palace-facing production.",
-      "build_cost": {"wood": 40, "tools": 10, "cotton": 20},
-      "staff": {"tolteca": 25},
-      "inputs": {"cotton": 20, "tools": 0.5},
-      "outputs": {"cloth": 28},
+      "build_cost": {
+        "wood": 40,
+        "tools": 10,
+        "cotton": 20
+      },
+      "staff": {
+        "tolteca": 25
+      },
+      "inputs": {
+        "cotton": 20,
+        "tools": 0.5
+      },
+      "outputs": {
+        "cloth": 28
+      },
       "priority": 50
     },
     {
@@ -66,10 +113,25 @@
       "screen": "workshops",
       "category": "weapons",
       "description": "Produces weapons from obsidian, wood, cloth and tools. This is expensive but opens war readiness.",
-      "build_cost": {"wood": 50, "tools": 15, "obsidian": 10, "cloth": 10},
-      "staff": {"tolteca": 25, "yaotequihuaqueh": 20},
-      "inputs": {"obsidian": 10, "wood": 10, "cloth": 5, "tools": 1},
-      "outputs": {"weapons": 8},
+      "build_cost": {
+        "wood": 50,
+        "tools": 15,
+        "obsidian": 10,
+        "cloth": 10
+      },
+      "staff": {
+        "tolteca": 25,
+        "yaotequihuaqueh": 20
+      },
+      "inputs": {
+        "obsidian": 10,
+        "wood": 10,
+        "cloth": 5,
+        "tools": 1
+      },
+      "outputs": {
+        "weapons": 8
+      },
       "priority": 60
     },
     {
@@ -78,11 +140,119 @@
       "screen": "workshops",
       "category": "luxury",
       "description": "Produces elite palace-facing fine textiles from cotton, cacao and tools.",
-      "build_cost": {"wood": 45, "tools": 10, "cotton": 20, "cacao": 3},
-      "staff": {"tolteca": 25},
-      "inputs": {"cotton": 15, "cacao": 1, "tools": 0.5},
-      "outputs": {"fine_textiles": 3},
+      "build_cost": {
+        "wood": 45,
+        "tools": 10,
+        "cotton": 20,
+        "cacao": 3
+      },
+      "staff": {
+        "tolteca": 25
+      },
+      "inputs": {
+        "cotton": 15,
+        "cacao": 1,
+        "tools": 0.5
+      },
+      "outputs": {
+        "fine_textiles": 3
+      },
       "priority": 70
+    },
+    {
+      "id": "commoner_housing",
+      "name": "Commoner Housing",
+      "screen": "housing",
+      "category": "commoners",
+      "description": "Basic calpulli-style housing and support for commoners and estate workers. This is the first housing pressure release for estate growth.",
+      "build_cost": {
+        "wood": 40,
+        "cloth": 10
+      },
+      "staff": {},
+      "inputs": {},
+      "outputs": {},
+      "priority": 80
+    },
+    {
+      "id": "tlacotin_quarters",
+      "name": "Tlacotin Quarters",
+      "screen": "housing",
+      "category": "tlacotin",
+      "description": "Quarters and support space required before enslaved or bonded labour can be used at larger scale.",
+      "build_cost": {
+        "wood": 30,
+        "tools": 5
+      },
+      "staff": {},
+      "inputs": {},
+      "outputs": {},
+      "priority": 90
+    },
+    {
+      "id": "warrior_house",
+      "name": "Warrior House",
+      "screen": "housing",
+      "category": "warriors",
+      "description": "Housing and support for warriors. This belongs to the Housing screen; active military preparation belongs to the Barracks screen.",
+      "build_cost": {
+        "wood": 30,
+        "cloth": 10,
+        "weapons": 5
+      },
+      "staff": {},
+      "inputs": {},
+      "outputs": {},
+      "priority": 100
+    },
+    {
+      "id": "priest_house",
+      "name": "Priest House",
+      "screen": "housing",
+      "category": "priests",
+      "description": "Housing and support for priests and ritual servants. Priests need material support before shrine operation can scale.",
+      "build_cost": {
+        "wood": 20,
+        "cloth": 5,
+        "ritual_goods": 2
+      },
+      "staff": {},
+      "inputs": {},
+      "outputs": {},
+      "priority": 110
+    },
+    {
+      "id": "noble_residence",
+      "name": "Noble Residence",
+      "screen": "housing",
+      "category": "nobles",
+      "description": "A status residence for nobles, palace-facing activity and elite obligations.",
+      "build_cost": {
+        "wood": 25,
+        "cloth": 10,
+        "cacao": 3,
+        "fine_textiles": 1
+      },
+      "staff": {},
+      "inputs": {},
+      "outputs": {},
+      "priority": 120
+    },
+    {
+      "id": "captive_holding_pen",
+      "name": "Captive Holding Pen",
+      "screen": "housing",
+      "category": "captives",
+      "description": "A guarded holding place for captives taken through Flower Wars. Captive holding is a capacity pressure, not an ordinary labour building.",
+      "build_cost": {
+        "wood": 25,
+        "tools": 5,
+        "weapons": 2
+      },
+      "staff": {},
+      "inputs": {},
+      "outputs": {},
+      "priority": 130
     }
   ]
 }

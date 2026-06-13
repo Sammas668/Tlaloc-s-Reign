@@ -144,20 +144,16 @@ func _build_market_reports_text() -> String:
 			shortage_goods.append(name)
 		if base_value > 0.0 and current_value >= base_value * 1.5:
 			high_value_goods.append(name + " (" + _fmt(current_value) + ")")
-	var text: String = "The marketplace is the shared regional exchange layer. Use it to see scarcity, barter value and rival buying pressure.
-"
+
+	var text: String = "The marketplace is the shared regional exchange layer. Use it to see scarcity, barter value and rival buying pressure.\n"
 	if not crisis_goods.is_empty():
-		text += "
-Crisis goods: [color=" + BB_NEGATIVE + "][b]" + ", ".join(crisis_goods) + "[/b][/color]"
+		text += "\nCrisis goods: [color=" + BB_NEGATIVE + "][b]" + ", ".join(crisis_goods) + "[/b][/color]"
 	if not shortage_goods.is_empty():
-		text += "
-Shortage goods: [color=" + BB_TIGHT + "][b]" + ", ".join(shortage_goods) + "[/b][/color]"
+		text += "\nShortage goods: [color=" + BB_TIGHT + "][b]" + ", ".join(shortage_goods) + "[/b][/color]"
 	if not high_value_goods.is_empty():
-		text += "
-High-value goods: [color=" + BB_POSITIVE + "][b]" + ", ".join(high_value_goods) + "[/b][/color]"
+		text += "\nHigh-value goods: [color=" + BB_POSITIVE + "][b]" + ", ".join(high_value_goods) + "[/b][/color]"
 	if crisis_goods.is_empty() and shortage_goods.is_empty() and high_value_goods.is_empty():
-		text += "
-No severe market warnings are currently visible."
+		text += "\nNo severe market warnings are currently visible."
 	return text
 
 func _update_good_detail(good: Dictionary) -> void:
@@ -191,18 +187,12 @@ func _build_good_stats(good: Dictionary) -> String:
 	var trend: String = String(good.get("trend", "Stable"))
 
 	var text: String = ""
-	text += "Market stock: [b]" + _fmt(market_stock) + "[/b]
-"
-	text += "Demand / turn: [b]" + _fmt(demand) + "[/b]
-"
-	text += "Coverage: [b]" + _fmt(coverage) + " turns[/b]
-"
-	text += "Base value: [b]" + _fmt(base_value) + "[/b]
-"
-	text += "Current barter value: [color=" + _value_colour_hex(base_value, current_value) + "][b]" + _fmt(current_value) + "[/b][/color]
-"
-	text += "Market state: [color=" + _state_colour_hex(label) + "][b]" + label + "[/b][/color]
-"
+	text += "Market stock: [b]" + _fmt(market_stock) + "[/b]\n"
+	text += "Demand / turn: [b]" + _fmt(demand) + "[/b]\n"
+	text += "Coverage: [b]" + _fmt(coverage) + " turns[/b]\n"
+	text += "Base value: [b]" + _fmt(base_value) + "[/b]\n"
+	text += "Current barter value: [color=" + _value_colour_hex(base_value, current_value) + "][b]" + _fmt(current_value) + "[/b][/color]\n"
+	text += "Market state: [color=" + _state_colour_hex(label) + "][b]" + label + "[/b][/color]\n"
 	text += "Trend: [color=" + _trend_colour_hex(trend, label) + "][b]" + trend + "[/b][/color]"
 	return text
 
@@ -239,7 +229,7 @@ func _add_list_heading(list: VBoxContainer, text: String) -> void:
 		return
 	var label: Label = Label.new()
 	label.text = text
-	label.add_theme_font_size_override("font_size", 15)
+	label.add_theme_font_size_override("font_size", 21)
 	label.add_theme_color_override("font_color", Color(0.56, 0.90, 0.82, 1.0))
 	list.add_child(label)
 
@@ -249,7 +239,7 @@ func _add_list_line(list: VBoxContainer, text: String) -> void:
 	var label: Label = Label.new()
 	label.text = "• " + text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_font_size_override("font_size", 20)
 	label.add_theme_color_override("font_color", Color(0.90, 0.86, 0.76, 1.0))
 	list.add_child(label)
 
@@ -297,7 +287,7 @@ func _fmt(value: float) -> String:
 
 func _lock_layout_sizes() -> void:
 	if detail_stats:
-		detail_stats.custom_minimum_size = Vector2(0, 220)
+		detail_stats.custom_minimum_size = Vector2(0, 245)
 		detail_stats.fit_content = false
 		detail_stats.scroll_active = true
 	if empty_hint:
@@ -310,7 +300,7 @@ func _add_styles() -> void:
 	style.border_color = Color(0.50, 0.82, 0.74, 0.32)
 	style.set_border_width_all(1)
 	style.set_corner_radius_all(12)
-	style.set_content_margin_all(6)
+	style.set_content_margin_all(8)
 	style.shadow_color = Color(0.0, 0.0, 0.0, 0.40)
 	style.shadow_size = 8
 	add_theme_stylebox_override("panel", style)
@@ -324,11 +314,17 @@ func _add_styles() -> void:
 		detail_panel.add_theme_stylebox_override("panel", detail_style)
 
 	if heading_label:
-		heading_label.add_theme_font_size_override("font_size", 22)
+		heading_label.add_theme_font_size_override("font_size", 32)
 		heading_label.add_theme_color_override("font_color", Color(0.90, 0.86, 0.76, 1.0))
 	if detail_title:
-		detail_title.add_theme_font_size_override("font_size", 20)
+		detail_title.add_theme_font_size_override("font_size", 29)
 		detail_title.add_theme_color_override("font_color", Color(0.90, 0.86, 0.76, 1.0))
+
+	if close_button:
+		close_button.custom_minimum_size = Vector2(44, 38)
+		close_button.add_theme_font_size_override("font_size", 18)
+
 	if detail_stats:
-		detail_stats.add_theme_font_size_override("normal_font_size", 15)
-		detail_stats.add_theme_font_size_override("bold_font_size", 15)
+		detail_stats.add_theme_font_size_override("normal_font_size", 21)
+		detail_stats.add_theme_font_size_override("bold_font_size", 22)
+		detail_stats.add_theme_constant_override("line_separation", 5)
