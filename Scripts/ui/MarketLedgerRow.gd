@@ -2,11 +2,8 @@
 # Godot 4.x
 # Project path: res://Scripts/ui/MarketLedgerRow.gd
 #
-# Improved marketplace ledger row:
-# - safer data application after @onready labels exist
-# - clearer spacing
-# - colour-coded net movement and scarcity state
-# - subtler row background/border for readability
+# Marketplace ledger row with restored colour functionality and full market info.
+# Shows: Stock, Demand, Value, Coverage, State and Trend.
 extends Button
 
 signal good_selected(good_id: String)
@@ -23,14 +20,16 @@ const COLOR_TEAL: Color = Color(0.56, 0.90, 0.82, 1.0)
 
 @onready var stock_title: Label = get_node_or_null(^"Margin/Stack/Metrics/StockRow/Title") as Label
 @onready var stock_value: Label = get_node_or_null(^"Margin/Stack/Metrics/StockRow/Value") as Label
+@onready var demand_title: Label = get_node_or_null(^"Margin/Stack/Metrics/DemandRow/Title") as Label
+@onready var demand_value: Label = get_node_or_null(^"Margin/Stack/Metrics/DemandRow/Value") as Label
 @onready var value_title: Label = get_node_or_null(^"Margin/Stack/Metrics/ValueRow/Title") as Label
 @onready var value_value: Label = get_node_or_null(^"Margin/Stack/Metrics/ValueRow/Value") as Label
 @onready var coverage_title: Label = get_node_or_null(^"Margin/Stack/Metrics/CoverageRow/Title") as Label
 @onready var coverage_value: Label = get_node_or_null(^"Margin/Stack/Metrics/CoverageRow/Value") as Label
-@onready var net_title: Label = get_node_or_null(^"Margin/Stack/Metrics/NetRow/Title") as Label
-@onready var net_value: Label = get_node_or_null(^"Margin/Stack/Metrics/NetRow/Value") as Label
 @onready var state_title: Label = get_node_or_null(^"Margin/Stack/Metrics/StateRow/Title") as Label
 @onready var state_value: Label = get_node_or_null(^"Margin/Stack/Metrics/StateRow/Value") as Label
+@onready var trend_title: Label = get_node_or_null(^"Margin/Stack/Metrics/TrendRow/Title") as Label
+@onready var trend_value: Label = get_node_or_null(^"Margin/Stack/Metrics/TrendRow/Value") as Label
 
 var good_id: String = ""
 var _pending_data: Dictionary = {}
@@ -40,7 +39,7 @@ var _has_pending_data: bool = false
 func _ready() -> void:
 	text = ""
 	clip_contents = true
-	custom_minimum_size = Vector2(0, 150)
+	custom_minimum_size = Vector2(0, 184)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	toggle_mode = true
@@ -63,7 +62,7 @@ func set_good_data(data: Dictionary, selected: bool) -> void:
 
 	text = ""
 	button_pressed = selected
-	custom_minimum_size = Vector2(0, 150)
+	custom_minimum_size = Vector2(0, 184)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	tooltip_text = _build_tooltip(data)
@@ -75,8 +74,7 @@ func set_selected(selected: bool) -> void:
 	_pending_selected = selected
 	button_pressed = selected
 	if is_node_ready() and _has_pending_data:
-		var state_colour: Color = _state_colour(String(_pending_data.get("label", "Unknown")))
-		_apply_base_style(state_colour, selected)
+		_apply_base_style(_state_colour(String(_pending_data.get("label", "Unknown"))), selected)
 
 func _apply_pending_data() -> void:
 	if not _has_pending_data:
@@ -85,12 +83,11 @@ func _apply_pending_data() -> void:
 	var data: Dictionary = _pending_data
 	var good_name: String = String(data.get("name", "Good"))
 	var market_stock: float = float(data.get("market_stock", 0.0))
-	var incoming: float = float(data.get("incoming", 0.0))
-	var outgoing: float = float(data.get("outgoing", data.get("demand", 0.0)))
+	var demand: float = float(data.get("demand", data.get("outgoing", 0.0)))
 	var current_value: float = float(data.get("current_value", 0.0))
 	var coverage: float = float(data.get("coverage", 0.0))
 	var market_state: String = String(data.get("label", "Unknown"))
-	var net: float = incoming - outgoing
+	var trend: String = String(data.get("trend", "Stable"))
 
 	button_pressed = _pending_selected
 
@@ -100,41 +97,43 @@ func _apply_pending_data() -> void:
 
 	if stock_value:
 		stock_value.text = _fmt(market_stock)
+		stock_value.add_theme_color_override("font_color", COLOR_TEXT)
+	if demand_value:
+		demand_value.text = _fmt(demand)
+		demand_value.add_theme_color_override("font_color", COLOR_MUTED)
 	if value_value:
 		value_value.text = _fmt(current_value)
+		value_value.add_theme_color_override("font_color", _value_colour(data))
 	if coverage_value:
 		coverage_value.text = _fmt(coverage) + " turns"
-	if net_value:
-		net_value.text = _signed_fmt(net)
-		net_value.add_theme_color_override("font_color", _net_colour(net))
+		coverage_value.add_theme_color_override("font_color", COLOR_TEXT)
 	if state_value:
 		state_value.text = market_state
 		state_value.add_theme_color_override("font_color", _state_colour(market_state))
+	if trend_value:
+		trend_value.text = trend
+		trend_value.add_theme_color_override("font_color", _trend_colour(trend, market_state))
 
-	var state_colour: Color = _state_colour(market_state)
-	_apply_base_style(state_colour, _pending_selected)
+	_apply_base_style(_state_colour(market_state), _pending_selected)
 
 func _apply_static_text() -> void:
 	if stock_title:
 		stock_title.text = "Stock"
+	if demand_title:
+		demand_title.text = "Demand"
 	if value_title:
 		value_title.text = "Value"
 	if coverage_title:
 		coverage_title.text = "Cover"
-	if net_title:
-		net_title.text = "Net"
 	if state_title:
 		state_title.text = "State"
+	if trend_title:
+		trend_title.text = "Trend"
 
-	var title_labels: Array[Label] = [stock_title, value_title, coverage_title, net_title, state_title]
+	var title_labels: Array[Label] = [stock_title, demand_title, value_title, coverage_title, state_title, trend_title]
 	for label: Label in title_labels:
 		if label:
 			label.add_theme_color_override("font_color", COLOR_MUTED)
-
-	var value_labels: Array[Label] = [stock_value, value_value, coverage_value, state_value]
-	for label: Label in value_labels:
-		if label:
-			label.add_theme_color_override("font_color", COLOR_TEXT)
 
 func _on_pressed() -> void:
 	emit_signal("good_selected", good_id)
@@ -142,21 +141,18 @@ func _on_pressed() -> void:
 func _build_tooltip(data: Dictionary) -> String:
 	var good_name: String = String(data.get("name", "Good"))
 	var market_stock: float = float(data.get("market_stock", 0.0))
-	var incoming: float = float(data.get("incoming", 0.0))
 	var demand: float = float(data.get("demand", data.get("outgoing", 0.0)))
 	var coverage: float = float(data.get("coverage", 0.0))
-	var multiplier: float = float(data.get("multiplier", 0.0))
+	var base_value: float = float(data.get("base_value", 0.0))
 	var current_value: float = float(data.get("current_value", 0.0))
 	var market_state: String = String(data.get("label", "Unknown"))
 	var trend: String = String(data.get("trend", "Stable"))
 
 	return good_name \
 		+ "\nMarket stock: " + _fmt(market_stock) \
-		+ "\nIncoming / turn: +" + _fmt(incoming) \
-		+ "\nDemand / turn: -" + _fmt(demand) \
-		+ "\nNet: " + _signed_fmt(incoming - demand) \
+		+ "\nDemand / turn: " + _fmt(demand) \
 		+ "\nCoverage: " + _fmt(coverage) + " turns" \
-		+ "\nScarcity multiplier: " + _fmt(multiplier) + "x" \
+		+ "\nBase value: " + _fmt(base_value) \
 		+ "\nCurrent value: " + _fmt(current_value) \
 		+ "\nState: " + market_state \
 		+ "\nTrend: " + trend
@@ -165,12 +161,12 @@ func _apply_text_sizes() -> void:
 	if name_label:
 		name_label.add_theme_font_size_override("font_size", 17)
 
-	var title_labels: Array[Label] = [stock_title, value_title, coverage_title, net_title, state_title]
+	var title_labels: Array[Label] = [stock_title, demand_title, value_title, coverage_title, state_title, trend_title]
 	for label: Label in title_labels:
 		if label:
 			label.add_theme_font_size_override("font_size", 12)
 
-	var value_labels: Array[Label] = [stock_value, value_value, coverage_value, net_value, state_value]
+	var value_labels: Array[Label] = [stock_value, demand_value, value_value, coverage_value, state_value, trend_value]
 	for label: Label in value_labels:
 		if label:
 			label.add_theme_font_size_override("font_size", 13)
@@ -189,7 +185,7 @@ func _apply_base_style(border_colour: Color, selected: bool) -> void:
 
 	var pressed_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
 	pressed_style.bg_color = Color(0.06, 0.13, 0.12, 0.92)
-	pressed_style.border_color = Color(border_colour.r, border_colour.g, border_colour.b, 0.90)
+	pressed_style.border_color = Color(border_colour.r, border_colour.g, border_colour.b, 0.95)
 	pressed_style.set_border_width_all(2)
 
 	if selected:
@@ -199,13 +195,6 @@ func _apply_base_style(border_colour: Color, selected: bool) -> void:
 	add_theme_stylebox_override("hover", hover_style)
 	add_theme_stylebox_override("pressed", pressed_style)
 	add_theme_stylebox_override("focus", pressed_style)
-
-func _net_colour(value: float) -> Color:
-	if value > 0.01:
-		return COLOR_POSITIVE
-	if value < -0.01:
-		return COLOR_NEGATIVE
-	return COLOR_MUTED
 
 func _state_colour(state: String) -> Color:
 	match state:
@@ -222,12 +211,31 @@ func _state_colour(state: String) -> Color:
 		_:
 			return COLOR_MUTED
 
+func _trend_colour(trend: String, state: String) -> Color:
+	match trend:
+		"Critical":
+			return COLOR_NEGATIVE
+		"Rising":
+			return COLOR_WARNING
+		"Soft":
+			return COLOR_POSITIVE
+		"Stable":
+			return COLOR_TEAL
+		_:
+			return _state_colour(state)
+
+func _value_colour(data: Dictionary) -> Color:
+	var base_value: float = float(data.get("base_value", 0.0))
+	var current_value: float = float(data.get("current_value", 0.0))
+	if base_value <= 0.0:
+		return COLOR_TEXT
+	if current_value >= base_value * 1.5:
+		return COLOR_POSITIVE
+	if current_value <= base_value * 0.8:
+		return COLOR_MUTED
+	return COLOR_TEXT
+
 func _fmt(value: float) -> String:
 	if is_equal_approx(value, roundf(value)):
 		return str(int(roundf(value)))
 	return "%.2f" % value
-
-func _signed_fmt(value: float) -> String:
-	if value >= 0.0:
-		return "+" + _fmt(value)
-	return "-" + _fmt(absf(value))

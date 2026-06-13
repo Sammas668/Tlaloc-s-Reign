@@ -1,0 +1,44 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/ui/BuildingLedgerRow.gd" id="1_buildingrow"]
+
+[node name="BuildingLedgerRow" type="Button"]
+custom_minimum_size = Vector2(0, 118)
+toggle_mode = true
+script = ExtResource("1_buildingrow")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="Stack" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+theme_override_constants/separation = 3
+
+[node name="NameLabel" type="Label" parent="Margin/Stack"]
+layout_mode = 2
+text = "Building"
+clip_text = true
+
+[node name="CountLabel" type="Label" parent="Margin/Stack"]
+layout_mode = 2
+text = "Built: 0"
+clip_text = true
+
+[node name="StatusLabel" type="Label" parent="Margin/Stack"]
+layout_mode = 2
+text = "Status"
+clip_text = true
+
+[node name="CostLabel" type="Label" parent="Margin/Stack"]
+layout_mode = 2
+text = "Build: ready"
+clip_text = true

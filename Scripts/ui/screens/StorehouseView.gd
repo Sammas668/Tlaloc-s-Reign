@@ -24,12 +24,11 @@ const BB_MUTED: String = "#BBB19A"
 var stockpiles: Array[Dictionary] = []
 var focus_id: String = "overview"
 var selected_good_id: String = ""
-var overview_closed_by_user: bool = false
 
 func _ready() -> void:
 	_lock_layout_sizes()
 	_add_styles()
-	if close_button and not close_button.pressed.is_connected(close_good):
+	if close_button:
 		close_button.pressed.connect(close_good)
 	_refresh()
 
@@ -40,20 +39,19 @@ func setup(new_stockpiles: Array, new_focus_id: String, new_selected_good_id: St
 		stockpiles.append(item)
 	focus_id = new_focus_id
 	selected_good_id = new_selected_good_id
-	if selected_good_id != "":
-		overview_closed_by_user = false
 	_ensure_selected_good_is_valid()
 	_refresh()
 
 func select_good(good_id: String) -> void:
-	overview_closed_by_user = false
+	# Called by the parent GameScreen after a ledger row is clicked.
+	# Do not emit good_selected here, or the parent will call select_good() again
+	# and create an infinite signal loop / stack overflow.
 	selected_good_id = good_id
 	_ensure_selected_good_is_valid()
 	_refresh()
 
 func close_good() -> void:
 	selected_good_id = ""
-	overview_closed_by_user = true
 	_refresh()
 	emit_signal("good_closed")
 
@@ -72,12 +70,12 @@ func _refresh() -> void:
 		heading_label.text = _focus_title()
 
 	if selected_good_id == "":
-		_show_overview()
+		_show_closed_detail()
 		return
 
 	var selected_good: Dictionary = _selected_good()
 	if selected_good.is_empty():
-		_show_overview()
+		_show_closed_detail()
 		return
 	_update_good_detail(selected_good)
 
@@ -93,25 +91,19 @@ func _focus_title() -> String:
 			return "Luxury Goods"
 		"special":
 			return "Special Stores"
+		"reserved":
+			return "Reserved Goods"
 		_:
 			return "Storehouse Overview"
 
-func _show_overview() -> void:
-	if overview_closed_by_user:
-		visible = false
-		if detail_panel:
-			detail_panel.visible = false
-		if empty_hint:
-			empty_hint.visible = false
-		return
-
-	visible = true
+func _show_closed_detail() -> void:
+	# No good is open, so the whole Storehouse overview/detail box should collapse.
+	# The player reopens it by clicking a good in the right-hand stockpile ledger.
+	visible = false
 	if detail_panel:
 		detail_panel.visible = false
 	if empty_hint:
-		empty_hint.visible = true
-		empty_hint.bbcode_enabled = true
-		empty_hint.text = _build_overview_text()
+		empty_hint.visible = false
 
 func _update_good_detail(good: Dictionary) -> void:
 	visible = true
@@ -143,50 +135,6 @@ func _update_good_detail(good: Dictionary) -> void:
 		for reserve_variant: Variant in reserved_breakdown:
 			_add_list_line(reserve_list, String(reserve_variant))
 
-func _build_overview_text() -> String:
-	var visible_goods: Array[Dictionary] = _filtered_goods()
-	var crisis_count: int = 0
-	var short_next_count: int = 0
-	var falling_count: int = 0
-	var fully_reserved_count: int = 0
-	var building_count: int = 0
-	var worst_name: String = "None"
-	var worst_status: String = "Stable"
-
-	for good_variant: Variant in visible_goods:
-		var good: Dictionary = good_variant as Dictionary
-		var status: String = _status_for(good)
-		match status:
-			"EMPTY", "RESERVE SHORT", "RUNS OUT":
-				crisis_count += 1
-				if worst_status == "Stable":
-					worst_status = status
-					worst_name = String(good.get("name", "Good"))
-			"SHORT NEXT":
-				short_next_count += 1
-				if worst_status == "Stable":
-					worst_status = status
-					worst_name = String(good.get("name", "Good"))
-			"FALLING":
-				falling_count += 1
-			"FULLY RESERVED":
-				fully_reserved_count += 1
-			"BUILDING":
-				building_count += 1
-
-	var text: String = "[b]" + _focus_title() + "[/b]\n"
-	text += "Select a good from the stockpile ledger on the right.\n\n"
-	text += "Visible goods: [b]" + str(visible_goods.size()) + "[/b]\n"
-	text += "Immediate shortage risk: [color=" + BB_NEGATIVE + "][b]" + str(crisis_count) + "[/b][/color]\n"
-	text += "Short next Veintena: [color=" + BB_NEGATIVE + "][b]" + str(short_next_count) + "[/b][/color]\n"
-	text += "Falling stock: [color=" + BB_WARNING + "][b]" + str(falling_count) + "[/b][/color]\n"
-	text += "Fully reserved: [color=" + BB_WARNING + "][b]" + str(fully_reserved_count) + "[/b][/color]\n"
-	text += "Building stock: [color=" + BB_POSITIVE + "][b]" + str(building_count) + "[/b][/color]\n"
-	if worst_name != "None":
-		text += "\nMost urgent: [color=" + BB_NEGATIVE + "][b]" + worst_name + " — " + worst_status + "[/b][/color]\n"
-	text += "\nThe right ledger now shows projected stock and risk status. SHORT NEXT only appears when projected stock will not cover the next Veintena's required outgoing demand."
-	return text
-
 func _build_good_stats(good: Dictionary) -> String:
 	var stored: float = float(good.get("stored", 0.0))
 	var incoming: float = float(good.get("incoming", 0.0))
@@ -207,7 +155,8 @@ func _build_good_stats(good: Dictionary) -> String:
 	text += "Outgoing this Veintena: [b]-" + _fmt(outgoing) + "[/b]\n"
 	text += "Net change: [color=" + _net_colour_hex(net) + "][b]" + _signed_fmt(net) + "[/b][/color]\n"
 	text += "Projected after turn: [color=" + _projected_colour_hex(projected, reserved) + "][b]" + _fmt(projected) + "[/b][/color]\n"
-	text += "Projected free after reserves: [b]" + _fmt(projected_free) + "[/b]"
+	text += "Projected free after reserves: [b]" + _fmt(projected_free) + "[/b]\n"
+	text += "\n" + _status_explanation(status)
 	return text
 
 func _status_for(good: Dictionary) -> String:
@@ -219,6 +168,8 @@ func _status_for(good: Dictionary) -> String:
 	var free: float = maxf(0.0, stored - reserved)
 	var net: float = incoming - outgoing
 
+	# "SHORT NEXT" only appears if the projected stock after this turn
+	# will not cover the next Veintena's expected outgoing demand.
 	var next_turn_required_need: float = outgoing
 
 	if stored <= 0.0 and projected <= 0.0:
@@ -236,6 +187,27 @@ func _status_for(good: Dictionary) -> String:
 	if net > 0.01:
 		return "BUILDING"
 	return "STABLE"
+
+func _status_explanation(status_text: String) -> String:
+	match status_text:
+		"EMPTY":
+			return "[color=" + BB_NEGATIVE + "]No usable stock is available.[/color]"
+		"RESERVE SHORT":
+			return "[color=" + BB_NEGATIVE + "]Current stores do not cover reserved upkeep and input needs.[/color]"
+		"RUNS OUT":
+			return "[color=" + BB_NEGATIVE + "]This good is projected to run out after this Veintena.[/color]"
+		"SHORT NEXT":
+			return "[color=" + BB_NEGATIVE + "]Projected stock will not cover another Veintena at the current outgoing rate.[/color]"
+		"FULLY RESERVED":
+			return "[color=" + BB_WARNING + "]Everything currently stored is reserved. There is nothing safe to spend.[/color]"
+		"FALLING":
+			return "[color=" + BB_WARNING + "]Stock is falling this Veintena.[/color]"
+		"BUILDING":
+			return "[color=" + BB_POSITIVE + "]Stock is increasing this Veintena.[/color]"
+		"STABLE":
+			return "[color=" + BB_TEAL + "]Current stock is stable against expected outgoing demand.[/color]"
+		_:
+			return ""
 
 func _selected_good() -> Dictionary:
 	for good_variant: Variant in stockpiles:
@@ -277,7 +249,7 @@ func _add_list_heading(list: VBoxContainer, text: String) -> void:
 		return
 	var label: Label = Label.new()
 	label.text = text
-	label.add_theme_font_size_override("font_size", 18)
+	label.add_theme_font_size_override("font_size", 16)
 	label.add_theme_color_override("font_color", Color(0.56, 0.90, 0.82, 1.0))
 	list.add_child(label)
 
@@ -287,9 +259,10 @@ func _add_list_line(list: VBoxContainer, text: String) -> void:
 	var label: Label = Label.new()
 	label.text = "• " + text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.add_theme_font_size_override("font_size", 16)
+	label.add_theme_font_size_override("font_size", 15)
 	label.add_theme_color_override("font_color", Color(0.90, 0.86, 0.76, 1.0))
 	list.add_child(label)
+
 
 func _status_colour_hex(status_text: String) -> String:
 	match status_text:
@@ -346,15 +319,20 @@ func _lock_layout_sizes() -> void:
 
 func _add_styles() -> void:
 	var style: StyleBoxFlat = StyleBoxFlat.new()
-	style.bg_color = Color(0.0, 0.0, 0.0, 0.58)
+	# Dark translucent overlay: readable white text while still showing the Storehouse art underneath.
+	# Tune the alpha here if needed: 0.45 = more image, 0.65 = more readability.
+	style.bg_color = Color(0.0, 0.0, 0.0, 0.55)
 	style.border_color = Color(0.50, 0.82, 0.74, 0.32)
 	style.set_border_width_all(1)
 	style.set_corner_radius_all(12)
-	style.set_content_margin_all(6)
+	style.set_content_margin_all(4)
 	style.shadow_color = Color(0.0, 0.0, 0.0, 0.40)
 	style.shadow_size = 8
 	add_theme_stylebox_override("panel", style)
 
+	# Keep the Storehouse detail area visually as one box.
+	# The outer StorehouseView supplies the colour; the inner DetailPanel is transparent
+	# so opening a good does not create a second coloured rectangle.
 	if detail_panel:
 		var detail_style: StyleBoxFlat = StyleBoxFlat.new()
 		detail_style.bg_color = Color(0.0, 0.0, 0.0, 0.0)
@@ -364,14 +342,14 @@ func _add_styles() -> void:
 		detail_panel.add_theme_stylebox_override("panel", detail_style)
 
 	if heading_label:
-		heading_label.add_theme_font_size_override("font_size", 26)
+		heading_label.add_theme_font_size_override("font_size", 24)
 		heading_label.add_theme_color_override("font_color", Color(0.90, 0.86, 0.76, 1.0))
 	if detail_title:
-		detail_title.add_theme_font_size_override("font_size", 24)
+		detail_title.add_theme_font_size_override("font_size", 22)
 		detail_title.add_theme_color_override("font_color", Color(0.90, 0.86, 0.76, 1.0))
 	if detail_stats:
-		detail_stats.add_theme_font_size_override("normal_font_size", 17)
-		detail_stats.add_theme_font_size_override("bold_font_size", 17)
+		detail_stats.add_theme_font_size_override("normal_font_size", 16)
+		detail_stats.add_theme_font_size_override("bold_font_size", 16)
 	if empty_hint:
-		empty_hint.add_theme_font_size_override("normal_font_size", 17)
-		empty_hint.add_theme_font_size_override("bold_font_size", 18)
+		empty_hint.add_theme_font_size_override("normal_font_size", 15)
+		empty_hint.add_theme_font_size_override("bold_font_size", 16)

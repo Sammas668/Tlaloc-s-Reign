@@ -1,0 +1,63 @@
+{
+  "current_veintena": 1,
+  "estate_stockpiles": {
+    "maize": 220,
+    "wood": 90,
+    "cotton": 35,
+    "cacao": 16,
+    "obsidian": 8,
+    "cloth": 14,
+    "tools": 20,
+    "weapons": 2,
+    "ritual_goods": 2,
+    "fine_textiles": 0,
+    "captives": 0,
+    "looted_goods": 0
+  },
+  "market_stockpiles": {
+    "maize": 360,
+    "wood": 200,
+    "cotton": 145,
+    "cacao": 11,
+    "obsidian": 62,
+    "cloth": 38,
+    "tools": 45,
+    "weapons": 0,
+    "ritual_goods": 16,
+    "fine_textiles": 0,
+    "captives": 0,
+    "looted_goods": 0
+  },
+  "market_demand": {
+    "maize": 98,
+    "wood": 35,
+    "cotton": 35,
+    "cacao": 6,
+    "obsidian": 7,
+    "cloth": 13,
+    "tools": 14,
+    "weapons": 4,
+    "ritual_goods": 6,
+    "fine_textiles": 2,
+    "captives": 0,
+    "looted_goods": 0
+  },
+  "estate_buildings": {
+    "maize_chinampa": 2,
+    "cacao_garden": 1,
+    "cotton_chinampa": 0,
+    "basic_tool_workshop": 1,
+    "cloth_workshop": 0,
+    "weapon_yard": 0,
+    "fine_textile_house": 0
+  },
+  "population": {
+    "macehualtin": 180,
+    "tlacotin": 20,
+    "tolteca": 35,
+    "yaotequihuaqueh": 20,
+    "tlamacazqueh": 5,
+    "pipiltin": 5,
+    "malli": 0
+  }
+}

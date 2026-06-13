@@ -1,0 +1,58 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/ui/screens/BuildingView.gd" id="1_buildingview"]
+
+[node name="BuildingView" type="Control"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_buildingview")
+
+[node name="OverlayPanel" type="PanelContainer" parent="."]
+visible = false
+layout_mode = 1
+anchors_preset = -1
+anchor_left = 0.0
+anchor_top = 0.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Margin" type="MarginContainer" parent="OverlayPanel"]
+layout_mode = 2
+theme_override_constants/margin_left = 14
+theme_override_constants/margin_top = 12
+theme_override_constants/margin_right = 14
+theme_override_constants/margin_bottom = 12
+
+[node name="Stack" type="VBoxContainer" parent="OverlayPanel/Margin"]
+layout_mode = 2
+theme_override_constants/separation = 8
+
+[node name="Header" type="HBoxContainer" parent="OverlayPanel/Margin/Stack"]
+layout_mode = 2
+
+[node name="TitleLabel" type="Label" parent="OverlayPanel/Margin/Stack/Header"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Building"
+
+[node name="CloseButton" type="Button" parent="OverlayPanel/Margin/Stack/Header"]
+custom_minimum_size = Vector2(34, 30)
+layout_mode = 2
+text = "X"
+
+[node name="DetailText" type="RichTextLabel" parent="OverlayPanel/Margin/Stack"]
+custom_minimum_size = Vector2(0, 220)
+layout_mode = 2
+size_flags_vertical = 3
+bbcode_enabled = true
+scroll_active = true
+fit_content = false
+text = ""
+
+[node name="BuildButton" type="Button" parent="OverlayPanel/Margin/Stack"]
+custom_minimum_size = Vector2(0, 42)
+layout_mode = 2
+text = "Build"

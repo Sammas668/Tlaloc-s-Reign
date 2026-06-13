@@ -67,20 +67,24 @@ func _refresh() -> void:
 	if heading_label:
 		heading_label.text = _focus_title()
 
+	if focus_id == "reports":
+		_update_reports_detail()
+		return
+
 	if selected_good_id == "":
-		_show_market_overview()
+		_show_closed_detail()
 		return
 
 	var selected_good: Dictionary = _selected_good()
 	if selected_good.is_empty():
-		_show_market_overview()
+		_show_closed_detail()
 		return
 	_update_good_detail(selected_good)
 
 func _focus_title() -> String:
 	match focus_id:
 		"prices":
-			return "Market Prices"
+			return "Marketplace Prices"
 		"buy":
 			return "Buy Goods"
 		"sell":
@@ -88,18 +92,73 @@ func _focus_title() -> String:
 		"rivals":
 			return "Rival Procurement"
 		"reports":
-			return "Market Reports"
+			return "Marketplace Reports"
 		_:
-			return "Market Overview"
+			return "Marketplace Overview"
 
-func _show_market_overview() -> void:
-	visible = true
+func _show_closed_detail() -> void:
+	visible = false
 	if detail_panel:
 		detail_panel.visible = false
 	if empty_hint:
-		empty_hint.visible = true
-		empty_hint.bbcode_enabled = true
-		empty_hint.text = _build_overview_text()
+		empty_hint.visible = false
+
+
+func _update_reports_detail() -> void:
+	visible = true
+	if empty_hint:
+		empty_hint.visible = false
+	if detail_panel:
+		detail_panel.visible = true
+	if detail_title:
+		detail_title.text = "Marketplace Reports"
+	if detail_stats:
+		detail_stats.bbcode_enabled = true
+		detail_stats.text = _build_market_reports_text()
+	_clear_list(trade_list)
+	_add_list_heading(trade_list, "Read this screen as")
+	_add_list_line(trade_list, "Stock shows how much of the good is held in the shared market.")
+	_add_list_line(trade_list, "Demand / turn and coverage explain whether price pressure is rising or falling.")
+	_add_list_line(trade_list, "Current value is the usable barter value after scarcity is applied.")
+	_clear_list(rival_list)
+	_add_list_heading(rival_list, "Rival pressure")
+	for good_variant: Variant in market_goods:
+		var good: Dictionary = good_variant as Dictionary
+		var label: String = String(good.get("label", ""))
+		if label == "Crisis" or label == "Shortage":
+			_add_list_line(rival_list, String(good.get("name", "Good")) + ": " + String(good.get("rival_note", "No rival signal recorded.")))
+
+func _build_market_reports_text() -> String:
+	var crisis_goods: Array[String] = []
+	var shortage_goods: Array[String] = []
+	var high_value_goods: Array[String] = []
+	for good_variant: Variant in market_goods:
+		var good: Dictionary = good_variant as Dictionary
+		var name: String = String(good.get("name", "Good"))
+		var label: String = String(good.get("label", "Unknown"))
+		var current_value: float = float(good.get("current_value", 0.0))
+		var base_value: float = float(good.get("base_value", 1.0))
+		if label == "Crisis":
+			crisis_goods.append(name)
+		elif label == "Shortage":
+			shortage_goods.append(name)
+		if base_value > 0.0 and current_value >= base_value * 1.5:
+			high_value_goods.append(name + " (" + _fmt(current_value) + ")")
+	var text: String = "The marketplace is the shared regional exchange layer. Use it to see scarcity, barter value and rival buying pressure.
+"
+	if not crisis_goods.is_empty():
+		text += "
+Crisis goods: [color=" + BB_NEGATIVE + "][b]" + ", ".join(crisis_goods) + "[/b][/color]"
+	if not shortage_goods.is_empty():
+		text += "
+Shortage goods: [color=" + BB_TIGHT + "][b]" + ", ".join(shortage_goods) + "[/b][/color]"
+	if not high_value_goods.is_empty():
+		text += "
+High-value goods: [color=" + BB_POSITIVE + "][b]" + ", ".join(high_value_goods) + "[/b][/color]"
+	if crisis_goods.is_empty() and shortage_goods.is_empty() and high_value_goods.is_empty():
+		text += "
+No severe market warnings are currently visible."
+	return text
 
 func _update_good_detail(good: Dictionary) -> void:
 	visible = true
@@ -122,80 +181,29 @@ func _update_good_detail(good: Dictionary) -> void:
 	_add_list_heading(rival_list, "Rival signal")
 	_add_list_line(rival_list, String(good.get("rival_note", "No rival signal recorded yet.")))
 
-func _build_overview_text() -> String:
-	var visible_goods: Array[Dictionary] = _filtered_goods()
-	var crisis_count: int = 0
-	var tight_count: int = 0
-	var abundant_count: int = 0
-	var falling_count: int = 0
-	var rising_count: int = 0
-	var highest_value_name: String = "None"
-	var highest_value: float = -1.0
-
-	for good_variant: Variant in visible_goods:
-		var good: Dictionary = good_variant as Dictionary
-		var label: String = String(good.get("label", ""))
-		if label == "Crisis" or label == "Shortage":
-			crisis_count += 1
-		elif label == "Tight":
-			tight_count += 1
-		elif label == "Abundant":
-			abundant_count += 1
-
-		var incoming: float = float(good.get("incoming", 0.0))
-		var demand: float = float(good.get("demand", good.get("outgoing", 0.0)))
-		var net: float = incoming - demand
-		if net > 0.01:
-			rising_count += 1
-		elif net < -0.01:
-			falling_count += 1
-
-		var value: float = float(good.get("current_value", 0.0))
-		if value > highest_value:
-			highest_value = value
-			highest_value_name = String(good.get("name", "Good"))
-
-	var text: String = "[b]" + _focus_title() + "[/b]\n"
-	text += "Select a good from the market ledger on the right.\n\n"
-	text += "Visible goods: [b]" + str(visible_goods.size()) + "[/b]\n"
-	text += "Stock improving: [color=" + BB_POSITIVE + "][b]" + str(rising_count) + "[/b][/color]\n"
-	text += "Stock declining: [color=" + BB_NEGATIVE + "][b]" + str(falling_count) + "[/b][/color]\n"
-	text += "Crisis / shortage goods: [color=" + BB_NEGATIVE + "][b]" + str(crisis_count) + "[/b][/color]\n"
-	text += "Tight goods: [color=" + BB_WARNING + "][b]" + str(tight_count) + "[/b][/color]\n"
-	text += "Abundant goods: [color=" + BB_POSITIVE + "][b]" + str(abundant_count) + "[/b][/color]\n"
-	if highest_value >= 0.0:
-		text += "Highest current value: [b]" + highest_value_name + " (" + _fmt(highest_value) + ")[/b]\n"
-	text += "\nAdvance the Veintena to update market stock, coverage and values."
-	return text
-
 func _build_good_stats(good: Dictionary) -> String:
 	var market_stock: float = float(good.get("market_stock", 0.0))
-	var incoming: float = float(good.get("incoming", 0.0))
-	var demand: float = float(good.get("demand", good.get("outgoing", 0.0)))
-	var net: float = incoming - demand
-	var projected_stock: float = maxf(0.0, market_stock + net)
+	var demand: float = float(good.get("demand", 0.0))
 	var coverage: float = float(good.get("coverage", 0.0))
-	var multiplier: float = float(good.get("multiplier", 0.0))
 	var base_value: float = float(good.get("base_value", 0.0))
 	var current_value: float = float(good.get("current_value", 0.0))
 	var label: String = String(good.get("label", "Unknown"))
 	var trend: String = String(good.get("trend", "Stable"))
 
-	var net_colour: String = _net_colour_hex(net)
-	var state_colour: String = _state_colour_hex(label)
-
 	var text: String = ""
-	text += "Market stock: [b]" + _fmt(market_stock) + "[/b]\n"
-	text += "Incoming / turn: [color=" + BB_POSITIVE + "][b]+" + _fmt(incoming) + "[/b][/color]\n"
-	text += "Demand / turn: [color=" + BB_NEGATIVE + "][b]-" + _fmt(demand) + "[/b][/color]\n"
-	text += "Net market movement: [color=" + net_colour + "][b]" + _signed_fmt(net) + "[/b][/color]\n"
-	text += "Projected stock after turn: [b]" + _fmt(projected_stock) + "[/b]\n"
-	text += "Coverage: [b]" + _fmt(coverage) + " turns[/b]\n"
-	text += "Scarcity multiplier: [b]" + _fmt(multiplier) + "x[/b]\n"
-	text += "Base value: [b]" + _fmt(base_value) + "[/b]\n"
-	text += "Current value: [b]" + _fmt(current_value) + "[/b]\n"
-	text += "Market state: [color=" + state_colour + "][b]" + label + "[/b][/color]\n"
-	text += "Trend: [b]" + trend + "[/b]"
+	text += "Market stock: [b]" + _fmt(market_stock) + "[/b]
+"
+	text += "Demand / turn: [b]" + _fmt(demand) + "[/b]
+"
+	text += "Coverage: [b]" + _fmt(coverage) + " turns[/b]
+"
+	text += "Base value: [b]" + _fmt(base_value) + "[/b]
+"
+	text += "Current barter value: [color=" + _value_colour_hex(base_value, current_value) + "][b]" + _fmt(current_value) + "[/b][/color]
+"
+	text += "Market state: [color=" + _state_colour_hex(label) + "][b]" + label + "[/b][/color]
+"
+	text += "Trend: [color=" + _trend_colour_hex(trend, label) + "][b]" + trend + "[/b][/color]"
 	return text
 
 func _selected_good() -> Dictionary:
@@ -212,7 +220,7 @@ func _filtered_goods() -> Array[Dictionary]:
 		var category: String = String(good.get("category", ""))
 		var include_good: bool = false
 		match focus_id:
-			"overview", "prices", "buy", "sell", "rivals", "reports":
+			"overview", "prices", "buy", "sell", "rivals":
 				include_good = true
 			_:
 				include_good = category == focus_id
@@ -245,13 +253,6 @@ func _add_list_line(list: VBoxContainer, text: String) -> void:
 	label.add_theme_color_override("font_color", Color(0.90, 0.86, 0.76, 1.0))
 	list.add_child(label)
 
-func _net_colour_hex(value: float) -> String:
-	if value > 0.01:
-		return BB_POSITIVE
-	if value < -0.01:
-		return BB_NEGATIVE
-	return BB_MUTED
-
 func _state_colour_hex(state: String) -> String:
 	match state:
 		"Crisis":
@@ -267,19 +268,36 @@ func _state_colour_hex(state: String) -> String:
 		_:
 			return BB_MUTED
 
+func _trend_colour_hex(trend: String, state: String) -> String:
+	match trend:
+		"Critical":
+			return BB_NEGATIVE
+		"Rising":
+			return BB_WARNING
+		"Soft":
+			return BB_POSITIVE
+		"Stable":
+			return BB_TEAL
+		_:
+			return _state_colour_hex(state)
+
+func _value_colour_hex(base_value: float, current_value: float) -> String:
+	if base_value <= 0.0:
+		return BB_TEAL
+	if current_value >= base_value * 1.5:
+		return BB_POSITIVE
+	if current_value <= base_value * 0.8:
+		return BB_MUTED
+	return BB_TEAL
+
 func _fmt(value: float) -> String:
 	if is_equal_approx(value, roundf(value)):
 		return str(int(roundf(value)))
 	return "%.2f" % value
 
-func _signed_fmt(value: float) -> String:
-	if value >= 0.0:
-		return "+" + _fmt(value)
-	return "-" + _fmt(absf(value))
-
 func _lock_layout_sizes() -> void:
 	if detail_stats:
-		detail_stats.custom_minimum_size = Vector2(0, 255)
+		detail_stats.custom_minimum_size = Vector2(0, 220)
 		detail_stats.fit_content = false
 		detail_stats.scroll_active = true
 	if empty_hint:
@@ -314,6 +332,3 @@ func _add_styles() -> void:
 	if detail_stats:
 		detail_stats.add_theme_font_size_override("normal_font_size", 15)
 		detail_stats.add_theme_font_size_override("bold_font_size", 15)
-	if empty_hint:
-		empty_hint.add_theme_font_size_override("normal_font_size", 15)
-		empty_hint.add_theme_font_size_override("bold_font_size", 16)
