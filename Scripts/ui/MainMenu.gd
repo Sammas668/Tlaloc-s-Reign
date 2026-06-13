@@ -3,7 +3,7 @@
 # Suggested project path: res://scripts/ui/main_menu.gd
 extends Control
 
-@export_file("*.tscn") var game_scene_path: String = "res://scenes/main/Main.tscn"
+@export_file("*.tscn") var game_scene_path: String = "res://scenes/main/GameScreen.tscn"
 @export var background_image: Texture2D
 @export var title_text: String = "Tlaloc's Reign"
 @export var subtitle_text: String = "Maize. Rain. Tribute. Blood. Recognition."
@@ -111,9 +111,9 @@ func _prepare_overlay() -> void:
 		settings_panel.visible = false
 
 	if fullscreen_check:
-		fullscreen_check.button_pressed = DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN
+		fullscreen_check.set_pressed_no_signal(_current_window_is_fullscreen())
 	if vsync_check:
-		vsync_check.button_pressed = DisplayServer.window_get_vsync_mode() != DisplayServer.VSYNC_DISABLED
+		vsync_check.set_pressed_no_signal(DisplayServer.window_get_vsync_mode() != DisplayServer.VSYNC_DISABLED)
 
 
 func _start_music_if_needed() -> void:
@@ -316,8 +316,31 @@ func _go_to_game_scene() -> void:
 	get_tree().change_scene_to_file(game_scene_path)
 
 
+func _current_window_is_fullscreen() -> bool:
+	var mode := DisplayServer.window_get_mode()
+	return mode == DisplayServer.WINDOW_MODE_FULLSCREEN or mode == DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN
+
+
 func _on_fullscreen_toggled(enabled: bool) -> void:
-	DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN if enabled else DisplayServer.WINDOW_MODE_WINDOWED)
+	if enabled:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN)
+		await get_tree().process_frame
+		if not _current_window_is_fullscreen():
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	else:
+		DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		await get_tree().process_frame
+		DisplayServer.window_set_size(Vector2i(1280, 720))
+
+		var screen_index := DisplayServer.window_get_current_screen()
+		var screen_pos := DisplayServer.screen_get_position(screen_index)
+		var screen_size := DisplayServer.screen_get_size(screen_index)
+		var window_size := DisplayServer.window_get_size()
+		var centred_position := screen_pos + Vector2i(
+			(screen_size.x - window_size.x) / 2,
+			(screen_size.y - window_size.y) / 2
+		)
+		DisplayServer.window_set_position(centred_position)
 
 
 func _on_vsync_toggled(enabled: bool) -> void:
