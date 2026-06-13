@@ -1,0 +1,276 @@
+[gd_scene format=3 uid="uid://bmw1ya2kg1omy"]
+
+[ext_resource type="Script" uid="uid://vesuip85a4sb" path="res://scripts/ui/MainMenu.gd" id="1_mainmenu"]
+[ext_resource type="Texture2D" uid="uid://dltxubjvphxtu" path="res://Assets/main_menu/Main menu.png" id="2_y5k35"]
+
+[node name="MainMenu" type="Control" unique_id=1542018966]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("1_mainmenu")
+
+[node name="BackgroundColour" type="ColorRect" parent="." unique_id=1838992344]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.02, 0.08, 0.085, 1)
+
+[node name="Background" type="TextureRect" parent="." unique_id=1010380576]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+texture = ExtResource("2_y5k35")
+expand_mode = 1
+stretch_mode = 6
+
+[node name="Dim" type="ColorRect" parent="." unique_id=56927680]
+z_index = 1
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.52)
+
+[node name="MenuPanel" type="PanelContainer" parent="." unique_id=1103983626]
+z_index = 2
+custom_minimum_size = Vector2(460, 0)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -230.0
+offset_top = -185.0
+offset_right = 230.0
+offset_bottom = 185.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Margin" type="MarginContainer" parent="MenuPanel" unique_id=1196146883]
+layout_mode = 2
+theme_override_constants/margin_left = 24
+theme_override_constants/margin_top = 22
+theme_override_constants/margin_right = 24
+theme_override_constants/margin_bottom = 22
+
+[node name="VBox" type="VBoxContainer" parent="MenuPanel/Margin" unique_id=1725614264]
+layout_mode = 2
+theme_override_constants/separation = 12
+alignment = 1
+
+[node name="Title" type="Label" parent="MenuPanel/Margin/VBox" unique_id=1134249603]
+layout_mode = 2
+text = "Tlaloc's Reign"
+horizontal_alignment = 1
+
+[node name="Subtitle" type="Label" parent="MenuPanel/Margin/VBox" unique_id=1512136420]
+layout_mode = 2
+text = "Maize. Rain. Tribute. Blood. Recognition."
+horizontal_alignment = 1
+autowrap_mode = 3
+
+[node name="Spacer" type="Control" parent="MenuPanel/Margin/VBox" unique_id=1664706741]
+custom_minimum_size = Vector2(0, 8)
+layout_mode = 2
+
+[node name="NewGameButton" type="Button" parent="MenuPanel/Margin/VBox" unique_id=1599294115]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "New Game"
+
+[node name="ContinueButton" type="Button" parent="MenuPanel/Margin/VBox" unique_id=1427419677]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "Continue"
+
+[node name="LoadButton" type="Button" parent="MenuPanel/Margin/VBox" unique_id=398025024]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "Load"
+
+[node name="SettingsButton" type="Button" parent="MenuPanel/Margin/VBox" unique_id=394251235]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "Settings"
+
+[node name="QuitButton" type="Button" parent="MenuPanel/Margin/VBox" unique_id=461956329]
+custom_minimum_size = Vector2(0, 48)
+layout_mode = 2
+text = "Quit"
+
+[node name="Footer" type="HBoxContainer" parent="." unique_id=748578101]
+z_index = 2
+layout_mode = 1
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_left = 20.0
+offset_top = -44.0
+offset_right = -20.0
+offset_bottom = -16.0
+grow_horizontal = 2
+grow_vertical = 0
+
+[node name="VersionLabel" type="Label" parent="Footer" unique_id=477067862]
+layout_mode = 2
+text = "v0.1"
+
+[node name="FooterSpacer" type="Control" parent="Footer" unique_id=450949594]
+layout_mode = 2
+size_flags_horizontal = 3
+
+[node name="LatestSaveLabel" type="Label" parent="Footer" unique_id=1837709173]
+layout_mode = 2
+text = "No saves found"
+horizontal_alignment = 2
+
+[node name="Music" type="AudioStreamPlayer" parent="." unique_id=1533944722]
+
+[node name="Overlay" type="Control" parent="." unique_id=854302794]
+visible = false
+z_index = 10
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="ModalDim" type="ColorRect" parent="Overlay" unique_id=471651072]
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0, 0, 0, 0.62)
+
+[node name="LoadPanel" type="PanelContainer" parent="Overlay" unique_id=1045752407]
+visible = false
+custom_minimum_size = Vector2(640, 480)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -320.0
+offset_top = -240.0
+offset_right = 320.0
+offset_bottom = 240.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Margin" type="MarginContainer" parent="Overlay/LoadPanel" unique_id=1642882955]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="VBox" type="VBoxContainer" parent="Overlay/LoadPanel/Margin" unique_id=699516411]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Header" type="HBoxContainer" parent="Overlay/LoadPanel/Margin/VBox" unique_id=879102786]
+layout_mode = 2
+
+[node name="Title" type="Label" parent="Overlay/LoadPanel/Margin/VBox/Header" unique_id=2097610904]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Load Game"
+
+[node name="CloseButton" type="Button" parent="Overlay/LoadPanel/Margin/VBox/Header" unique_id=606220497]
+layout_mode = 2
+text = "Close"
+
+[node name="LoadStatusLabel" type="Label" parent="Overlay/LoadPanel/Margin/VBox" unique_id=2120850016]
+layout_mode = 2
+text = "No saves found yet."
+autowrap_mode = 3
+
+[node name="Scroll" type="ScrollContainer" parent="Overlay/LoadPanel/Margin/VBox" unique_id=1240351651]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="SlotList" type="VBoxContainer" parent="Overlay/LoadPanel/Margin/VBox/Scroll" unique_id=259010771]
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
+
+[node name="SettingsPanel" type="PanelContainer" parent="Overlay" unique_id=1778849787]
+visible = false
+custom_minimum_size = Vector2(420, 260)
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -210.0
+offset_top = -130.0
+offset_right = 210.0
+offset_bottom = 130.0
+grow_horizontal = 2
+grow_vertical = 2
+
+[node name="Margin" type="MarginContainer" parent="Overlay/SettingsPanel" unique_id=819914611]
+layout_mode = 2
+theme_override_constants/margin_left = 18
+theme_override_constants/margin_top = 18
+theme_override_constants/margin_right = 18
+theme_override_constants/margin_bottom = 18
+
+[node name="VBox" type="VBoxContainer" parent="Overlay/SettingsPanel/Margin" unique_id=1582744901]
+layout_mode = 2
+theme_override_constants/separation = 12
+
+[node name="Title" type="Label" parent="Overlay/SettingsPanel/Margin/VBox" unique_id=1501148823]
+layout_mode = 2
+text = "Settings"
+horizontal_alignment = 1
+
+[node name="FullscreenRow" type="HBoxContainer" parent="Overlay/SettingsPanel/Margin/VBox" unique_id=801352132]
+layout_mode = 2
+
+[node name="FullscreenLabel" type="Label" parent="Overlay/SettingsPanel/Margin/VBox/FullscreenRow" unique_id=1762291105]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Fullscreen"
+
+[node name="FullscreenCheck" type="CheckBox" parent="Overlay/SettingsPanel/Margin/VBox/FullscreenRow" unique_id=1642904804]
+layout_mode = 2
+
+[node name="VSyncRow" type="HBoxContainer" parent="Overlay/SettingsPanel/Margin/VBox" unique_id=211254250]
+layout_mode = 2
+
+[node name="VSyncLabel" type="Label" parent="Overlay/SettingsPanel/Margin/VBox/VSyncRow" unique_id=1357480267]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "VSync"
+
+[node name="VSyncCheck" type="CheckBox" parent="Overlay/SettingsPanel/Margin/VBox/VSyncRow" unique_id=1688946120]
+layout_mode = 2
+
+[node name="SettingsSpacer" type="Control" parent="Overlay/SettingsPanel/Margin/VBox" unique_id=312714161]
+layout_mode = 2
+size_flags_vertical = 3
+
+[node name="CloseButton" type="Button" parent="Overlay/SettingsPanel/Margin/VBox" unique_id=2090351189]
+custom_minimum_size = Vector2(0, 44)
+layout_mode = 2
+text = "Close"
