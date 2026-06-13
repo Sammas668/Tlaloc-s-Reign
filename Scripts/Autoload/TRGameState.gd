@@ -8,6 +8,8 @@ signal state_changed
 signal turn_advanced(report: Array)
 signal build_completed(building_id: String)
 signal build_failed(building_id: String, reason: String)
+signal destroy_completed(building_id: String)
+signal destroy_failed(building_id: String, reason: String)
 
 const RESOURCE_DATA_PATH: String = "res://Data/Prototype0/resources.json"
 const BUILDING_DATA_PATH: String = "res://Data/Prototype0/buildings.json"
@@ -327,6 +329,10 @@ func _building_view_data(building_id: String) -> Dictionary:
 	var definition: Dictionary = buildings[building_id] as Dictionary
 	var count: int = int(estate_buildings.get(building_id, 0))
 	var status: Dictionary = _estimate_building_status(building_id)
+	var staff: Dictionary = definition.get("staff", {}) as Dictionary
+	var inputs: Dictionary = definition.get("inputs", {}) as Dictionary
+	var outputs: Dictionary = definition.get("outputs", {}) as Dictionary
+	var build_time: int = int(definition.get("build_time_veintenas", definition.get("build_time", 0)))
 	return {
 		"id": building_id,
 		"name": String(definition.get("name", building_id.capitalize())),
@@ -334,12 +340,24 @@ func _building_view_data(building_id: String) -> Dictionary:
 		"category": String(definition.get("category", "")),
 		"description": String(definition.get("description", "")),
 		"count": count,
-		"staff": definition.get("staff", {}) as Dictionary,
-		"inputs": definition.get("inputs", {}) as Dictionary,
-		"outputs": definition.get("outputs", {}) as Dictionary,
+		"staff": staff,
+		"inputs": inputs,
+		"outputs": outputs,
+		"staff_total": _multiply_dictionary(staff, count),
+		"inputs_total": _multiply_dictionary(inputs, count),
+		"outputs_total": _multiply_dictionary(outputs, count),
+		"staff_after_build": _multiply_dictionary(staff, count + 1),
+		"inputs_after_build": _multiply_dictionary(inputs, count + 1),
+		"outputs_after_build": _multiply_dictionary(outputs, count + 1),
+		"staff_after_destroy": _multiply_dictionary(staff, max(0, count - 1)),
+		"inputs_after_destroy": _multiply_dictionary(inputs, max(0, count - 1)),
+		"outputs_after_destroy": _multiply_dictionary(outputs, max(0, count - 1)),
 		"build_cost": definition.get("build_cost", {}) as Dictionary,
+		"build_time_veintenas": build_time,
 		"can_build": can_build(building_id),
 		"build_status": build_status_text(building_id),
+		"can_destroy": can_destroy(building_id),
+		"destroy_status": destroy_status_text(building_id),
 		"operating": int(status.get("operating", 0)),
 		"blocked": int(status.get("blocked", 0)),
 		"status_text": String(status.get("status_text", ""))
@@ -391,6 +409,34 @@ func build_building(building_id: String) -> bool:
 	var message: String = "Built " + get_building_name(building_id) + "."
 	last_report.append(message)
 	emit_signal("build_completed", building_id)
+	emit_signal("state_changed")
+	return true
+
+func can_destroy(building_id: String) -> bool:
+	if not buildings.has(building_id):
+		return false
+	return int(estate_buildings.get(building_id, 0)) > 0
+
+func destroy_status_text(building_id: String) -> String:
+	if not buildings.has(building_id):
+		return "Unknown building."
+	if can_destroy(building_id):
+		return "Can destroy one. No refund in this prototype."
+	return "None built."
+
+func destroy_building(building_id: String) -> bool:
+	if not buildings.has(building_id):
+		emit_signal("destroy_failed", building_id, "Unknown building.")
+		return false
+	if not can_destroy(building_id):
+		var reason: String = destroy_status_text(building_id)
+		last_report.append(get_building_name(building_id) + " not destroyed. " + reason)
+		emit_signal("destroy_failed", building_id, reason)
+		emit_signal("state_changed")
+		return false
+	estate_buildings[building_id] = max(0, int(estate_buildings.get(building_id, 0)) - 1)
+	last_report.append("Destroyed one " + get_building_name(building_id) + ". No refund given.")
+	emit_signal("destroy_completed", building_id)
 	emit_signal("state_changed")
 	return true
 
@@ -545,6 +591,14 @@ func _estimate_building_status(building_id: String) -> Dictionary:
 		status_text += "; blocked " + str(blocked)
 	return {"operating": operating, "blocked": blocked, "status_text": status_text}
 
+
+
+func _multiply_dictionary(values: Dictionary, multiplier: int) -> Dictionary:
+	var result: Dictionary = {}
+	for key_variant: Variant in values.keys():
+		var key: String = String(key_variant)
+		result[key] = float(values[key_variant]) * float(multiplier)
+	return result
 
 func add_looted_goods_bundle(loot: Dictionary) -> void:
 	# Flower Wars should not create a separate "Looted Goods" stockpile.

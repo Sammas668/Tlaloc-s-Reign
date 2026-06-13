@@ -66,6 +66,7 @@ var current_location_id: String = "estate"
 var current_focus_by_location: Dictionary = {}
 var selected_storehouse_good_id: String = ""
 var selected_market_good_id: String = ""
+var selected_production_report_id: String = ""
 var selected_building_id_by_location: Dictionary = {}
 
 var storehouse_view: Control = null
@@ -253,7 +254,10 @@ func show_focus(location_id: String, focus_id: String) -> void:
 		selected_storehouse_good_id = ""
 	if location_id == "market":
 		selected_market_good_id = ""
-	if location_id == "production" or location_id == "housing":
+	if location_id == "production":
+		selected_production_report_id = ""
+		selected_building_id_by_location[location_id] = ""
+	if location_id == "housing":
 		selected_building_id_by_location[location_id] = ""
 	_refresh_all()
 
@@ -357,7 +361,38 @@ func _refresh_main_content() -> void:
 	else:
 		_show_text_content(profile)
 
+func _set_content_root_layout(expanded: bool) -> void:
+	if content_root == null:
+		return
+
+	# ContentRoot sits over the image area. Most screens use a lower overlay;
+	# Production Overview reports use the full left image area, like a larger
+	# version of the Storehouse/Market detail panel.
+	content_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	content_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	content_root.custom_minimum_size = Vector2.ZERO
+
+	if expanded:
+		content_root.anchor_left = 0.0
+		content_root.anchor_top = 0.0
+		content_root.anchor_right = 1.0
+		content_root.anchor_bottom = 1.0
+		content_root.offset_left = 18.0
+		content_root.offset_top = 18.0
+		content_root.offset_right = -18.0
+		content_root.offset_bottom = -18.0
+	else:
+		content_root.anchor_left = 0.0
+		content_root.anchor_top = 1.0
+		content_root.anchor_right = 1.0
+		content_root.anchor_bottom = 1.0
+		content_root.offset_left = 18.0
+		content_root.offset_top = -280.0
+		content_root.offset_right = -18.0
+		content_root.offset_bottom = -18.0
+
 func _show_text_content(profile: Dictionary) -> void:
+	_set_content_root_layout(false)
 	if content_root:
 		content_root.visible = true
 	if content_text:
@@ -365,64 +400,137 @@ func _show_text_content(profile: Dictionary) -> void:
 		content_text.bbcode_enabled = true
 		content_text.scroll_active = true
 		content_text.fit_content = false
+		content_text.custom_minimum_size = Vector2(0, 230)
 		content_text.text = _build_standard_text(profile)
 
 func _show_production_overview_content() -> void:
+	_set_content_root_layout(true)
+	if content_text:
+		content_text.visible = false
+
+	if selected_production_report_id == "":
+		if content_root:
+			content_root.visible = false
+		return
+
 	if content_root:
 		content_root.visible = true
-	if content_text:
-		content_text.visible = true
-		content_text.bbcode_enabled = true
-		content_text.scroll_active = true
-		content_text.fit_content = false
-		content_text.text = _build_production_overview_text()
+	if dynamic_view_host == null:
+		return
 
-func _build_production_overview_text() -> String:
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.62), Color(0.50, 0.82, 0.74, 0.35), 14))
+	dynamic_view_host.add_child(panel)
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_bottom", 14)
+	panel.add_child(margin)
+
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	stack.add_theme_constant_override("separation", 10)
+	margin.add_child(stack)
+
+	var header: HBoxContainer = HBoxContainer.new()
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_theme_constant_override("separation", 12)
+	stack.add_child(header)
+
+	var title_label: Label = Label.new()
+	title_label.text = _production_report_title(selected_production_report_id)
+	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_label.add_theme_font_size_override("font_size", 27)
+	title_label.clip_text = true
+	header.add_child(title_label)
+
+	var close_button: Button = Button.new()
+	close_button.text = "X"
+	close_button.custom_minimum_size = Vector2(46, 42)
+	close_button.add_theme_font_size_override("font_size", 22)
+	close_button.pressed.connect(_on_production_report_closed)
+	header.add_child(close_button)
+
+	var body: RichTextLabel = RichTextLabel.new()
+	body.bbcode_enabled = true
+	body.fit_content = false
+	body.scroll_active = true
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_theme_font_size_override("normal_font_size", 22)
+	body.add_theme_font_size_override("bold_font_size", 24)
+	body.add_theme_constant_override("line_separation", 6)
+	body.text = _build_production_report_detail_text(selected_production_report_id)
+	stack.add_child(body)
+
+func _build_production_report_detail_text(report_id: String) -> String:
+	match report_id:
+		"expected_output":
+			return _build_expected_output_report_text()
+		"input_demand":
+			return _build_input_demand_report_text()
+		"labour_pressure":
+			return _build_labour_pressure_report_text()
+		"building_times":
+			return _build_building_times_report_text()
+	return "Select a production report from the right-hand panel."
+
+func _build_expected_output_report_text() -> String:
 	var text: String = ""
-	text += "[b]Production Overview[/b]\n"
-	text += "A dashboard of what the estate is expected to make this Veintena and what may stop production. Use Chinampas or Workshops to select individual buildings; use Labour to inspect the productive workforce.\n\n"
-
-	var outputs: Dictionary = _production_output_totals()
 	text += "[b]Expected Output This Veintena[/b]\n"
-	text += _resource_dictionary_lines(outputs, "No expected production output yet.", 8)
+	text += "This shows what built and operating production buildings are expected to add to the estate Storehouse when the Veintena advances.\n\n"
+	text += _resource_dictionary_lines(_production_output_totals(), "No output expected. Build or staff productive buildings first.", 10)
 	text += "\n"
+	var summary: Dictionary = _production_building_summary()
+	text += "[b]Operating read[/b]\n"
+	text += "• Built production buildings: " + str(int(summary.get("built", 0))) + "\n"
+	text += "• Expected operating instances: " + str(int(summary.get("operating", 0))) + "\n"
+	text += "• Blocked instances: " + str(int(summary.get("blocked", 0))) + "\n"
+	return text.strip_edges()
 
+func _build_input_demand_report_text() -> String:
+	var text: String = ""
 	var inputs: Dictionary = _production_input_totals()
 	text += "[b]Input Demand This Veintena[/b]\n"
-	text += _resource_dictionary_lines(inputs, "No production input demand yet.", 8)
+	text += "These goods will be consumed by productive buildings before output is created. This does not include population upkeep or construction costs.\n\n"
+	text += _resource_dictionary_lines(inputs, "No production inputs currently required.", 10)
 	text += "\n"
-
-	var building_summary: Dictionary = _production_building_summary()
-	text += "[b]Operating Status[/b]\n"
-	text += "• Built production buildings: " + str(int(building_summary.get("built", 0))) + "\n"
-	text += "• Expected operating instances: " + str(int(building_summary.get("operating", 0))) + "\n"
-	text += "• Blocked instances: " + str(int(building_summary.get("blocked", 0))) + "\n"
-
-	var blocked_lines: Array = building_summary.get("blocked_lines", []) as Array
-	if blocked_lines.is_empty():
-		text += "• No built production buildings are currently blocked.\n"
+	text += "[b]Input pressure[/b]\n"
+	var pressure_lines: Array[String] = _input_pressure_lines(inputs)
+	if pressure_lines.is_empty():
+		text += "• No input pressure detected.\n"
 	else:
-		for blocked_line_variant: Variant in blocked_lines:
-			text += "• " + String(blocked_line_variant) + "\n"
-	text += "\n"
+		for line: String in pressure_lines:
+			text += "• " + line + "\n"
+	return text.strip_edges()
 
-	text += "[b]Production Chains Not Yet Built[/b]\n"
-	var unbuilt_lines: Array = building_summary.get("unbuilt_lines", []) as Array
-	if unbuilt_lines.is_empty():
-		text += "• All listed production chains have at least one building.\n"
-	else:
-		for unbuilt_line_variant: Variant in unbuilt_lines:
-			text += "• " + String(unbuilt_line_variant) + "\n"
-	text += "\n"
-
+func _build_labour_pressure_report_text() -> String:
+	var text: String = ""
 	text += "[b]Labour Pressure[/b]\n"
-	var labour_lines: Array[String] = _production_labour_summary_lines()
+	text += "This reads the productive workforce attached to chinampas and workshops. It should help show whether production is limited by people rather than goods.\n\n"
+	var labour_lines: Array[String] = _production_labour_dashboard_lines(12)
 	if labour_lines.is_empty():
-		text += "• No productive labour data available.\n"
+		text += "• Labour data is not connected yet.\n"
 	else:
 		for labour_line: String in labour_lines:
 			text += "• " + labour_line + "\n"
+	return text.strip_edges()
 
+func _build_building_times_report_text() -> String:
+	var text: String = ""
+	text += "[b]Building Times / Build Readiness[/b]\n"
+	text += "This panel separates building readiness from the Chinampas and Workshops construction ledgers. In the current prototype, new buildings complete immediately when built; this section is ready for multi-Veintena build timers later.\n\n"
+	var build_lines: Array[String] = _production_build_time_lines(12)
+	if build_lines.is_empty():
+		text += "• No production buildings are available yet.\n"
+	else:
+		for build_line: String in build_lines:
+			text += "• " + build_line + "\n"
 	return text.strip_edges()
 
 func _build_standard_text(profile: Dictionary) -> String:
@@ -438,6 +546,7 @@ func _build_standard_text(profile: Dictionary) -> String:
 	return text.strip_edges()
 
 func _show_storehouse_view() -> void:
+	_set_content_root_layout(false)
 	if content_root:
 		content_root.visible = true
 	if content_text:
@@ -458,6 +567,7 @@ func _show_storehouse_view() -> void:
 		storehouse_view.call("setup", _storehouse_goods(), _current_focus_id(), selected_storehouse_good_id)
 
 func _show_market_view() -> void:
+	_set_content_root_layout(false)
 	if content_root:
 		content_root.visible = true
 	if content_text:
@@ -478,6 +588,7 @@ func _show_market_view() -> void:
 		market_view.call("setup", _market_goods(), _current_focus_id(), selected_market_good_id)
 
 func _show_building_view(profile: Dictionary) -> void:
+	_set_content_root_layout(false)
 	if content_root:
 		content_root.visible = true
 	if content_text:
@@ -492,6 +603,8 @@ func _show_building_view(profile: Dictionary) -> void:
 	dynamic_view_host.add_child(building_view)
 	if building_view.has_signal("build_requested"):
 		building_view.connect("build_requested", Callable(self, "_on_build_requested"))
+	if building_view.has_signal("destroy_requested"):
+		building_view.connect("destroy_requested", Callable(self, "_on_destroy_requested"))
 	if building_view.has_signal("building_closed"):
 		building_view.connect("building_closed", Callable(self, "_on_building_closed"))
 	var building_data: Array[Dictionary] = _buildings_for_current_screen(profile)
@@ -610,45 +723,114 @@ func _report_title_for_current_focus(profile: Dictionary) -> String:
 	return "Production Reports"
 
 func _build_production_overview_reports() -> void:
-	var messages: Array[String] = _production_overview_report_messages()
-	for message: String in messages:
-		_add_notification(message)
+	for report: Dictionary in _production_report_definitions():
+		_add_production_report_button(report)
+	if selected_production_report_id != "":
+		var close_button: Button = Button.new()
+		close_button.text = "Close Report"
+		close_button.custom_minimum_size = Vector2(0, 54)
+		close_button.add_theme_font_size_override("font_size", 19)
+		close_button.pressed.connect(_on_production_report_closed)
+		notification_list.add_child(close_button)
+
+func _production_report_definitions() -> Array[Dictionary]:
+	return [
+		{"id": "expected_output", "title": "Expected Output", "subtitle": _production_report_subtitle("expected_output")},
+		{"id": "input_demand", "title": "Input Demand", "subtitle": _production_report_subtitle("input_demand")},
+		{"id": "labour_pressure", "title": "Labour Pressure", "subtitle": _production_report_subtitle("labour_pressure")},
+		{"id": "building_times", "title": "Building Times", "subtitle": _production_report_subtitle("building_times")}
+	]
+
+func _production_report_title(report_id: String) -> String:
+	match report_id:
+		"expected_output":
+			return "Expected Output"
+		"input_demand":
+			return "Input Demand"
+		"labour_pressure":
+			return "Labour Pressure"
+		"building_times":
+			return "Building Times / Build Readiness"
+	return "Production Report"
+
+func _production_report_subtitle(report_id: String) -> String:
+	match report_id:
+		"expected_output":
+			var output_summary: String = _resource_dictionary_inline(_production_output_totals(), 3)
+			if output_summary == "":
+				return "No output expected"
+			return output_summary
+		"input_demand":
+			var input_summary: String = _resource_dictionary_inline(_production_input_totals(), 3)
+			if input_summary == "":
+				return "No inputs consumed"
+			return input_summary
+		"labour_pressure":
+			var labour_lines: Array[String] = _production_labour_dashboard_lines(1)
+			if labour_lines.is_empty():
+				return "No labour data yet"
+			return labour_lines[0]
+		"building_times":
+			var buildable_count: int = _production_buildable_count()
+			if buildable_count > 0:
+				return str(buildable_count) + " buildable now"
+			return "No build fully affordable"
+	return "Open report"
+
+func _add_production_report_button(report: Dictionary) -> void:
+	if notification_list == null:
+		return
+	var report_id: String = String(report.get("id", ""))
+	var selected: bool = report_id == selected_production_report_id
+	var button: Button = Button.new()
+	button.text = String(report.get("title", "Report")) + "\n" + String(report.get("subtitle", "Open report"))
+	button.custom_minimum_size = Vector2(0, 94)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.toggle_mode = true
+	button.button_pressed = selected
+	button.clip_text = true
+	button.add_theme_font_size_override("font_size", 19)
+	var border: Color = Color(0.34, 0.71, 0.63, 0.45)
+	if selected:
+		border = Color(0.76, 0.63, 0.32, 0.86)
+	button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.04, 0.07, 0.065, 0.93), border, 10))
+	button.add_theme_stylebox_override("hover", _make_panel_style(Color(0.06, 0.095, 0.085, 0.96), Color(0.50, 0.82, 0.74, 0.75), 10))
+	button.add_theme_stylebox_override("pressed", _make_panel_style(Color(0.10, 0.12, 0.095, 0.98), Color(0.76, 0.63, 0.32, 0.86), 10))
+	button.pressed.connect(func() -> void:
+		_on_production_report_selected(report_id)
+	)
+	notification_list.add_child(button)
 
 func _production_overview_report_messages() -> Array[String]:
 	var output: Array[String] = []
 	var outputs: Dictionary = _production_output_totals()
 	var inputs: Dictionary = _production_input_totals()
 	var summary: Dictionary = _production_building_summary()
-	var labour_lines: Array[String] = _production_labour_summary_lines()
 
 	var output_summary: String = _resource_dictionary_inline(outputs, 4)
 	if output_summary == "":
-		output.append("No production output is currently expected. Build chinampas or workshops to start producing goods.")
+		output.append("No expected output. Build production buildings or check staffing.")
 	else:
-		output.append("Expected output: " + output_summary + ".")
+		output.append("Output this Veintena: " + output_summary + ".")
 
 	var input_summary: String = _resource_dictionary_inline(inputs, 4)
 	if input_summary == "":
-		output.append("No production inputs are currently being consumed by built production buildings.")
+		output.append("No production input demand this Veintena.")
 	else:
-		output.append("Production inputs needed this Veintena: " + input_summary + ".")
+		output.append("Inputs consumed: " + input_summary + ".")
 
-	output.append("Built production buildings: " + str(int(summary.get("built", 0))) + "; operating: " + str(int(summary.get("operating", 0))) + "; blocked: " + str(int(summary.get("blocked", 0))) + ".")
-
-	var blocked_lines: Array = summary.get("blocked_lines", []) as Array
-	if blocked_lines.is_empty():
+	var blocked_count: int = int(summary.get("blocked", 0))
+	if blocked_count > 0:
+		var blocked_lines: Array = summary.get("blocked_lines", []) as Array
+		output.append("Blocked production: " + _join_string_items(blocked_lines, "; ", 2) + ".")
+	else:
 		output.append("No built production buildings are currently blocked.")
-	else:
-		output.append("Blocked production: " + _join_string_items(blocked_lines, "; ", 0) + ".")
 
-	var unbuilt_lines: Array = summary.get("unbuilt_lines", []) as Array
-	if not unbuilt_lines.is_empty():
-		output.append("Unbuilt chains: " + _join_string_items(unbuilt_lines, "; ", 3) + ".")
-
-	if labour_lines.is_empty():
-		output.append("Labour pressure is not available yet.")
+	var buildable_count: int = _production_buildable_count()
+	if buildable_count > 0:
+		output.append(str(buildable_count) + " production buildings can be built now. Open Chinampas or Workshops to choose one.")
 	else:
-		output.append("Labour read: " + "; ".join(labour_lines.slice(0, mini(3, labour_lines.size()))) + ".")
+		output.append("No new production building is fully affordable right now.")
 
 	return output
 
@@ -709,6 +891,34 @@ func _production_building_summary() -> Dictionary:
 	result["unbuilt_lines"] = unbuilt_lines
 	return result
 
+func _input_pressure_lines(inputs: Dictionary) -> Array[String]:
+	var lines: Array[String] = []
+	if inputs.is_empty():
+		return lines
+	for key_variant: Variant in inputs.keys():
+		var resource_id: String = String(key_variant)
+		var needed: float = float(inputs[key_variant])
+		if needed <= 0.001:
+			continue
+		var stored: float = _storehouse_value_for(resource_id, "stored")
+		var free: float = _storehouse_value_for(resource_id, "free")
+		var projected: float = stored - needed
+		var line: String = _resource_name(resource_id) + ": needs " + _format_float(needed) + "; stored " + _format_float(stored) + "; free " + _format_float(free)
+		if projected < 0.0:
+			line += " — shortage risk"
+		elif free < needed:
+			line += " — tight after reserves"
+		else:
+			line += " — covered"
+		lines.append(line)
+	return lines
+
+func _storehouse_value_for(resource_id: String, field_name: String) -> float:
+	for good: Dictionary in _storehouse_goods():
+		if String(good.get("id", "")) == resource_id:
+			return float(good.get(field_name, 0.0))
+	return 0.0
+
 func _production_labour_summary_lines() -> Array[String]:
 	var output: Array[String] = []
 	var state: Node = _state()
@@ -721,6 +931,90 @@ func _production_labour_summary_lines() -> Array[String]:
 		var status: String = String(row.get("status_text", ""))
 		output.append(name + " — " + status)
 	return output
+
+func _production_labour_dashboard_lines(max_items: int = 5) -> Array[String]:
+	var output: Array[String] = []
+	var state: Node = _state()
+	if state == null or not state.has_method("get_productive_labour_rows"):
+		return output
+	var rows: Array = state.call("get_productive_labour_rows") as Array
+	for row_variant: Variant in rows:
+		if output.size() >= max_items:
+			break
+		var row: Dictionary = row_variant as Dictionary
+		var name: String = String(row.get("name", "Labour"))
+		var staff: Dictionary = row.get("staff", {}) as Dictionary
+		var total: int = int(staff.get("total_population", row.get("count", 0)))
+		var required: int = int(staff.get("required_by_built_production", row.get("operating", 0)))
+		var free: int = int(staff.get("free_or_background_labour", max(0, total - required)))
+		var status: String = String(row.get("status_text", ""))
+		var short_status: String = "available"
+		if status.find("Overstretched") >= 0:
+			short_status = "overstretched"
+		elif status.find("Fully") >= 0:
+			short_status = "fully assigned"
+		elif status.find("Tight") >= 0:
+			short_status = "tight"
+		elif status.find("Absent") >= 0:
+			short_status = "absent"
+		output.append(name + ": " + str(required) + " required / " + str(total) + " available; " + str(free) + " free — " + short_status + ".")
+	return output
+
+func _production_build_time_lines(max_items: int = 7) -> Array[String]:
+	var output: Array[String] = []
+	var buildings_for_view: Array[Dictionary] = _production_building_rows()
+	var buildable: Array[String] = []
+	var blocked: Array[String] = []
+	var operating_notes: Array[String] = []
+
+	for building: Dictionary in buildings_for_view:
+		var name: String = String(building.get("name", "Building"))
+		var count: int = int(building.get("count", 0))
+		var operating: int = int(building.get("operating", 0))
+		var blocked_instances: int = int(building.get("blocked", 0))
+		var can_build: bool = bool(building.get("can_build", false))
+		var build_status: String = String(building.get("build_status", ""))
+		if count > 0:
+			var status_line: String = name + ": built " + str(count) + ", operating " + str(operating) + " / " + str(count)
+			if blocked_instances > 0:
+				status_line += "; " + str(blocked_instances) + " blocked"
+			operating_notes.append(status_line)
+		if can_build:
+			buildable.append(name + " — buildable now; completes immediately in this prototype.")
+		elif build_status != "":
+			blocked.append(name + " — " + build_status)
+
+	output.append("Current prototype timing: new buildings complete immediately when built. This section is ready for multi-Veintena build timers later.")
+	if not operating_notes.is_empty():
+		output.append("Operating now: " + _join_string_items(operating_notes, "; ", 2) + ".")
+	if not buildable.is_empty():
+		output.append("Buildable now: " + _join_string_items(buildable, "; ", 2) + ".")
+	if not blocked.is_empty():
+		output.append("Blocked next builds: " + _join_string_items(blocked, "; ", 3) + ".")
+
+	while output.size() > max_items:
+		output.pop_back()
+	return output
+
+func _production_building_rows() -> Array[Dictionary]:
+	var output: Array[Dictionary] = []
+	var state: Node = _state()
+	if state == null or not state.has_method("get_buildings_for_screen"):
+		return output
+	var chinampas: Array = state.call("get_buildings_for_screen", "chinampas", "overview") as Array
+	for item_variant: Variant in chinampas:
+		output.append(item_variant as Dictionary)
+	var workshops: Array = state.call("get_buildings_for_screen", "workshops", "overview") as Array
+	for item_variant: Variant in workshops:
+		output.append(item_variant as Dictionary)
+	return output
+
+func _production_buildable_count() -> int:
+	var total: int = 0
+	for building: Dictionary in _production_building_rows():
+		if bool(building.get("can_build", false)):
+			total += 1
+	return total
 
 func _resource_dictionary_lines(values: Dictionary, empty_text: String, max_items: int = 8) -> String:
 	var keys: Array = values.keys()
@@ -944,6 +1238,14 @@ func _filtered_market_goods(focus_id: String) -> Array[Dictionary]:
 			output.append(good)
 	return output
 
+func _on_production_report_selected(report_id: String) -> void:
+	selected_production_report_id = report_id
+	_refresh_all()
+
+func _on_production_report_closed() -> void:
+	selected_production_report_id = ""
+	_refresh_all()
+
 func _on_storehouse_good_selected(good_id: String) -> void:
 	selected_storehouse_good_id = good_id
 	if storehouse_view != null and storehouse_view.has_method("select_good"):
@@ -978,6 +1280,12 @@ func _on_build_requested(building_id: String) -> void:
 	var state: Node = _state()
 	if state != null and state.has_method("build_building"):
 		state.call("build_building", building_id)
+	_refresh_all()
+
+func _on_destroy_requested(building_id: String) -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("destroy_building"):
+		state.call("destroy_building", building_id)
 	_refresh_all()
 
 func _on_advance_turn_pressed() -> void:
