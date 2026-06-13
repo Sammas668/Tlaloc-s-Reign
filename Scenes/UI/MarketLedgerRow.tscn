@@ -4,7 +4,7 @@
 
 [node name="MarketLedgerRow" type="Button"]
 clip_contents = true
-custom_minimum_size = Vector2(0, 132)
+custom_minimum_size = Vector2(0, 150)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 0
@@ -19,72 +19,111 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 8
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 8
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 9
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 9
 
 [node name="Stack" type="VBoxContainer" parent="Margin"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme_override_constants/separation = 6
-alignment = 1
+theme_override_constants/separation = 8
 
 [node name="NameLabel" type="Label" parent="Margin/Stack"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Maize"
+text = "Good"
 horizontal_alignment = 0
 clip_text = true
 text_overrun_behavior = 3
 
-[node name="MetricGrid" type="GridContainer" parent="Margin/Stack"]
+[node name="Metrics" type="VBoxContainer" parent="Margin/Stack"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_vertical = 3
-theme_override_constants/h_separation = 8
-theme_override_constants/v_separation = 3
-columns = 2
+theme_override_constants/separation = 3
 
-[node name="StockLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+[node name="StockRow" type="HBoxContainer" parent="Margin/Stack/Metrics"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Stock 0"
+
+[node name="Title" type="Label" parent="Margin/Stack/Metrics/StockRow"]
+custom_minimum_size = Vector2(72, 0)
+layout_mode = 2
+text = "Stock"
+
+[node name="Value" type="Label" parent="Margin/Stack/Metrics/StockRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "0"
+horizontal_alignment = 2
 clip_text = true
 text_overrun_behavior = 3
 
-[node name="DemandLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+[node name="ValueRow" type="HBoxContainer" parent="Margin/Stack/Metrics"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Demand 0"
+
+[node name="Title" type="Label" parent="Margin/Stack/Metrics/ValueRow"]
+custom_minimum_size = Vector2(72, 0)
+layout_mode = 2
+text = "Value"
+
+[node name="Value" type="Label" parent="Margin/Stack/Metrics/ValueRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "0"
+horizontal_alignment = 2
 clip_text = true
 text_overrun_behavior = 3
 
-[node name="ValueLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+[node name="CoverageRow" type="HBoxContainer" parent="Margin/Stack/Metrics"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Value 0"
+
+[node name="Title" type="Label" parent="Margin/Stack/Metrics/CoverageRow"]
+custom_minimum_size = Vector2(72, 0)
+layout_mode = 2
+text = "Cover"
+
+[node name="Value" type="Label" parent="Margin/Stack/Metrics/CoverageRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "0"
+horizontal_alignment = 2
 clip_text = true
 text_overrun_behavior = 3
 
-[node name="CoverageLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+[node name="NetRow" type="HBoxContainer" parent="Margin/Stack/Metrics"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Cover 0"
+
+[node name="Title" type="Label" parent="Margin/Stack/Metrics/NetRow"]
+custom_minimum_size = Vector2(72, 0)
+layout_mode = 2
+text = "Net"
+
+[node name="Value" type="Label" parent="Margin/Stack/Metrics/NetRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "0"
+horizontal_alignment = 2
 clip_text = true
 text_overrun_behavior = 3
 
-[node name="LabelLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+[node name="StateRow" type="HBoxContainer" parent="Margin/Stack/Metrics"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Comfortable"
-clip_text = true
-text_overrun_behavior = 3
 
-[node name="TrendLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+[node name="Title" type="Label" parent="Margin/Stack/Metrics/StateRow"]
+custom_minimum_size = Vector2(72, 0)
+layout_mode = 2
+text = "State"
+
+[node name="Value" type="Label" parent="Margin/Stack/Metrics/StateRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Stable"
+text = "State"
+horizontal_alignment = 2
 clip_text = true
 text_overrun_behavior = 3

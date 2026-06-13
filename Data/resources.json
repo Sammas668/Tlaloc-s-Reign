@@ -1,0 +1,165 @@
+{
+  "resource_order": [
+    "maize",
+    "wood",
+    "cotton",
+    "cacao",
+    "obsidian",
+    "cloth",
+    "tools",
+    "weapons",
+    "ritual_goods",
+    "fine_textiles",
+    "captives",
+    "looted_goods"
+  ],
+  "market_order": [
+    "maize",
+    "wood",
+    "cotton",
+    "cloth",
+    "tools",
+    "obsidian",
+    "weapons",
+    "ritual_goods",
+    "cacao",
+    "fine_textiles"
+  ],
+  "resources": {
+    "maize": {
+      "name": "Maize",
+      "category": "food",
+      "base_value": 1.0,
+      "uses": [
+        "Feed population",
+        "Offer to Tlaloc",
+        "Hold against drought",
+        "Trade at market",
+        "Deliver as tribute if demanded"
+      ]
+    },
+    "wood": {
+      "name": "Wood",
+      "category": "raw",
+      "base_value": 1.5,
+      "uses": [
+        "Construction",
+        "Tool production",
+        "Shrines and housing",
+        "Market trade"
+      ]
+    },
+    "cotton": {
+      "name": "Cotton",
+      "category": "raw",
+      "base_value": 2.0,
+      "uses": [
+        "Cloth production",
+        "Fine textile production",
+        "Low-status upkeep",
+        "Trade"
+      ]
+    },
+    "cacao": {
+      "name": "Cacao",
+      "category": "raw",
+      "base_value": 15.0,
+      "uses": [
+        "Noble upkeep",
+        "Ritual goods",
+        "Fine textiles",
+        "Palace tribute",
+        "High-value barter"
+      ]
+    },
+    "obsidian": {
+      "name": "Obsidian",
+      "category": "raw",
+      "base_value": 8.0,
+      "uses": [
+        "Weapons",
+        "High-value trade",
+        "War Rival pressure"
+      ]
+    },
+    "cloth": {
+      "name": "Cloth",
+      "category": "processed",
+      "base_value": 5.0,
+      "uses": [
+        "Population upkeep",
+        "Construction",
+        "Weapons",
+        "Noble support",
+        "Palace goods"
+      ]
+    },
+    "tools": {
+      "name": "Tools",
+      "category": "processed",
+      "base_value": 7.0,
+      "uses": [
+        "Building operation",
+        "Construction",
+        "Production chains",
+        "Market leverage"
+      ]
+    },
+    "weapons": {
+      "name": "Weapons",
+      "category": "processed",
+      "base_value": 18.0,
+      "uses": [
+        "Warrior support",
+        "Flower Wars",
+        "Captive holding",
+        "War prestige"
+      ]
+    },
+    "ritual_goods": {
+      "name": "Ritual Goods",
+      "category": "luxury",
+      "base_value": 12.0,
+      "uses": [
+        "Shrine upkeep",
+        "Offerings",
+        "Priest support",
+        "Palace display"
+      ]
+    },
+    "fine_textiles": {
+      "name": "Fine Textiles",
+      "category": "luxury",
+      "base_value": 35.0,
+      "uses": [
+        "Palace demands",
+        "Noble residence",
+        "Prestige",
+        "High-value barter"
+      ]
+    },
+    "captives": {
+      "name": "Captives",
+      "category": "special",
+      "base_value": 0.0,
+      "uses": [
+        "Sacrifice",
+        "Prestige",
+        "Palace opportunities",
+        "Future systems"
+      ]
+    },
+    "looted_goods": {
+      "name": "Looted Goods",
+      "category": "special",
+      "base_value": 0.0,
+      "uses": [
+        "Estate development",
+        "Ritual spending",
+        "Worker rewards",
+        "Weapon replacement",
+        "Palace obligations"
+      ]
+    }
+  }
+}

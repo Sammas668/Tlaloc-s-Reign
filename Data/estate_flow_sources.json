@@ -1,0 +1,263 @@
+{
+  "incoming": [
+    {
+      "good_id": "maize",
+      "source": "Maize fields",
+      "amount": 38.0
+    },
+    {
+      "good_id": "wood",
+      "source": "Woodcutting yard",
+      "amount": 16.0
+    },
+    {
+      "good_id": "cotton",
+      "source": "Cotton field",
+      "amount": 10.0
+    },
+    {
+      "good_id": "cacao",
+      "source": "Cacao garden",
+      "amount": 2.0
+    },
+    {
+      "good_id": "obsidian",
+      "source": "Obsidian access",
+      "amount": 4.0
+    },
+    {
+      "good_id": "cloth",
+      "source": "Cloth workshop",
+      "amount": 4.0
+    },
+    {
+      "good_id": "tools",
+      "source": "Basic tool workshop",
+      "amount": 8.0
+    },
+    {
+      "good_id": "ritual_goods",
+      "source": "Ritual workshop",
+      "amount": 1.0
+    }
+  ],
+  "outgoing": [
+    {
+      "good_id": "maize",
+      "source": "Population upkeep",
+      "amount": 29.0
+    },
+    {
+      "good_id": "wood",
+      "source": "Basic tool workshop input",
+      "amount": 10.0
+    },
+    {
+      "good_id": "wood",
+      "source": "Repairs and minor support",
+      "amount": 2.0
+    },
+    {
+      "good_id": "cotton",
+      "source": "Status upkeep",
+      "amount": 2.0
+    },
+    {
+      "good_id": "cotton",
+      "source": "Cloth workshop input",
+      "amount": 5.0
+    },
+    {
+      "good_id": "cacao",
+      "source": "Noble support",
+      "amount": 2.0
+    },
+    {
+      "good_id": "cacao",
+      "source": "Ritual plan",
+      "amount": 1.0
+    },
+    {
+      "good_id": "obsidian",
+      "source": "Weapon preparation",
+      "amount": 3.0
+    },
+    {
+      "good_id": "cloth",
+      "source": "Status upkeep",
+      "amount": 4.0
+    },
+    {
+      "good_id": "cloth",
+      "source": "Construction draw",
+      "amount": 3.0
+    },
+    {
+      "good_id": "tools",
+      "source": "Field/tool upkeep",
+      "amount": 2.0
+    },
+    {
+      "good_id": "tools",
+      "source": "Construction draw",
+      "amount": 3.0
+    },
+    {
+      "good_id": "weapons",
+      "source": "Warrior readiness upkeep",
+      "amount": 1.0
+    },
+    {
+      "good_id": "ritual_goods",
+      "source": "Shrine/offering use",
+      "amount": 2.0
+    },
+    {
+      "good_id": "fine_textiles",
+      "source": "Palace/status pressure",
+      "amount": 1.0
+    }
+  ],
+  "reservations": [
+    {
+      "good_id": "maize",
+      "source": "Population upkeep",
+      "amount": 29.0,
+      "priority": 100,
+      "required": true
+    },
+    {
+      "good_id": "maize",
+      "source": "Safety reserve",
+      "amount": 12.0,
+      "priority": 50,
+      "required": false
+    },
+    {
+      "good_id": "maize",
+      "source": "Planned Tlaloc offering",
+      "amount": 5.0,
+      "priority": 60,
+      "required": false
+    },
+    {
+      "good_id": "wood",
+      "source": "Basic tool workshop input",
+      "amount": 10.0,
+      "priority": 90,
+      "required": true
+    },
+    {
+      "good_id": "wood",
+      "source": "Commoner housing reserve",
+      "amount": 14.0,
+      "priority": 70,
+      "required": false
+    },
+    {
+      "good_id": "cotton",
+      "source": "Cloth workshop reserve",
+      "amount": 10.0,
+      "priority": 90,
+      "required": true
+    },
+    {
+      "good_id": "cotton",
+      "source": "Safety reserve",
+      "amount": 2.0,
+      "priority": 50,
+      "required": false
+    },
+    {
+      "good_id": "cacao",
+      "source": "Noble support",
+      "amount": 2.0,
+      "priority": 85,
+      "required": true
+    },
+    {
+      "good_id": "cacao",
+      "source": "Ritual plan",
+      "amount": 1.0,
+      "priority": 60,
+      "required": false
+    },
+    {
+      "good_id": "cacao",
+      "source": "Palace reserve",
+      "amount": 2.0,
+      "priority": 70,
+      "required": false
+    },
+    {
+      "good_id": "obsidian",
+      "source": "Future weapon yard input",
+      "amount": 8.0,
+      "priority": 75,
+      "required": false
+    },
+    {
+      "good_id": "cloth",
+      "source": "Status upkeep",
+      "amount": 4.0,
+      "priority": 90,
+      "required": true
+    },
+    {
+      "good_id": "cloth",
+      "source": "Construction reserve",
+      "amount": 5.0,
+      "priority": 70,
+      "required": false
+    },
+    {
+      "good_id": "cloth",
+      "source": "Weapon input reserve",
+      "amount": 2.0,
+      "priority": 75,
+      "required": false
+    },
+    {
+      "good_id": "tools",
+      "source": "Field/tool upkeep",
+      "amount": 2.0,
+      "priority": 90,
+      "required": true
+    },
+    {
+      "good_id": "tools",
+      "source": "Construction reserve",
+      "amount": 5.0,
+      "priority": 70,
+      "required": false
+    },
+    {
+      "good_id": "weapons",
+      "source": "Warrior House reserve",
+      "amount": 1.0,
+      "priority": 85,
+      "required": true
+    },
+    {
+      "good_id": "weapons",
+      "source": "Captive holding security",
+      "amount": 1.0,
+      "priority": 65,
+      "required": false
+    },
+    {
+      "good_id": "ritual_goods",
+      "source": "Priest House support",
+      "amount": 1.0,
+      "priority": 85,
+      "required": true
+    },
+    {
+      "good_id": "ritual_goods",
+      "source": "Offering reserve",
+      "amount": 2.0,
+      "priority": 60,
+      "required": false
+    }
+  ]
+}

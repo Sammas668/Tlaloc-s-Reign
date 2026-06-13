@@ -15,6 +15,10 @@ run/main_scene="res://Scenes/Main/MainMenu.tscn"
 config/features=PackedStringArray("4.6", "GL Compatibility")
 config/icon="res://icon.svg"
 
+[autoload]
+
+GameState="*res://Scripts/state/GameState.gd"
+
 [physics]
 
 3d/physics_engine="Jolt Physics"

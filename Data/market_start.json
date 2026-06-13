@@ -1,0 +1,94 @@
+{
+  "stockpiles": {
+    "maize": {
+      "stock": 360.0,
+      "incoming": 135.5,
+      "outgoing": 98.0,
+      "base_value": 1.0,
+      "buy_note": "Safe emergency food purchase if the estate is short.",
+      "sell_note": "Low-profit sale unless the estate has true surplus.",
+      "rival_note": "All houses watch maize during drought or population pressure."
+    },
+    "wood": {
+      "stock": 200.0,
+      "incoming": 62.5,
+      "outgoing": 35.0,
+      "base_value": 1.5,
+      "buy_note": "Useful for construction and tools.",
+      "sell_note": "Poor sale value while abundant.",
+      "rival_note": "Cunning and Diplomatic houses buy wood for early building chains."
+    },
+    "cotton": {
+      "stock": 145.0,
+      "incoming": 49.53,
+      "outgoing": 35.0,
+      "base_value": 2.0,
+      "buy_note": "Feeds cloth and fine textile chains.",
+      "sell_note": "Useful sale only if the estate does not need cloth soon.",
+      "rival_note": "Diplomatic Rival wants cotton for fine textiles."
+    },
+    "cloth": {
+      "stock": 38.0,
+      "incoming": 12.39,
+      "outgoing": 13.0,
+      "base_value": 5.0,
+      "buy_note": "Important for upkeep, buildings and palace goods.",
+      "sell_note": "Sell only if it is genuine surplus.",
+      "rival_note": "Cunning Rival can pressure cloth as a practical bottleneck."
+    },
+    "tools": {
+      "stock": 45.0,
+      "incoming": 15.5,
+      "outgoing": 14.0,
+      "base_value": 7.0,
+      "buy_note": "Tools prevent construction and production paralysis.",
+      "sell_note": "Useful sale only once reserves are safe.",
+      "rival_note": "Cunning Rival hoards and manipulates tool supply."
+    },
+    "obsidian": {
+      "stock": 62.0,
+      "incoming": 10.44,
+      "outgoing": 7.0,
+      "base_value": 8.0,
+      "buy_note": "Strategic war-chain input.",
+      "sell_note": "Not high value while abundant, but war demand can change quickly.",
+      "rival_note": "War Rival wants obsidian for weapons."
+    },
+    "weapons": {
+      "stock": 0.0,
+      "incoming": 1.72,
+      "outgoing": 4.0,
+      "base_value": 18.0,
+      "buy_note": "Buy only for urgent warrior or Flower Wars needs.",
+      "sell_note": "Very profitable if the estate can spare them, but dangerous.",
+      "rival_note": "War Rival aggressively seeks weapons."
+    },
+    "ritual_goods": {
+      "stock": 16.0,
+      "incoming": 5.89,
+      "outgoing": 6.0,
+      "base_value": 12.0,
+      "buy_note": "Useful for shrines and offerings.",
+      "sell_note": "Good sale if not needed for favour.",
+      "rival_note": "Diplomatic and Cunning houses may pressure ritual supply."
+    },
+    "cacao": {
+      "stock": 11.0,
+      "incoming": 5.17,
+      "outgoing": 6.0,
+      "base_value": 15.0,
+      "buy_note": "Status, ritual and palace-facing good.",
+      "sell_note": "Profitable but politically useful to keep.",
+      "rival_note": "Diplomatic Rival wants cacao for court/status production."
+    },
+    "fine_textiles": {
+      "stock": 0.0,
+      "incoming": 0.94,
+      "outgoing": 2.0,
+      "base_value": 35.0,
+      "buy_note": "Extremely expensive but palace-relevant.",
+      "sell_note": "Highly profitable if produced, but usually needed for recognition.",
+      "rival_note": "Diplomatic Rival should chase fine textiles early."
+    }
+  }
+}

@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://bxlscu40nsrgd"]
 
-[ext_resource type="Script" uid="uid://cvoiiw875iubp" path="res://Scripts/ui/GameScreen.gd" id="1_gamescreen"]
+[ext_resource type="Script" path="res://Scripts/ui/GameScreenStateDriven.gd" id="1_gamescreen"]
 [ext_resource type="Texture2D" uid="uid://dltxubjvphxtu" path="res://Assets/main_menu/Main menu.png" id="2_kljcf"]
 [ext_resource type="Texture2D" uid="uid://dktggms541iil" path="res://Assets/main_menu/Storehouse.png" id="3_0e7bs"]
 [ext_resource type="Texture2D" uid="uid://bv0dsqj0166d" path="res://Assets/main_menu/Marketpalce.png" id="4_reg34"]
@@ -14,8 +14,14 @@ grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_gamescreen")
 estate_art = ExtResource("2_kljcf")
+fields_art = ExtResource("2_kljcf")
 storehouse_art = ExtResource("3_0e7bs")
+workshops_art = ExtResource("3_0e7bs")
+shrines_art = ExtResource("2_kljcf")
+warriors_art = ExtResource("2_kljcf")
 market_art = ExtResource("4_reg34")
+palace_art = ExtResource("2_kljcf")
+rivals_art = ExtResource("2_kljcf")
 
 [node name="BackgroundColour" type="ColorRect" parent="." unique_id=84966344]
 layout_mode = 1
@@ -173,7 +179,7 @@ size_flags_horizontal = 3
 theme_override_constants/separation = 8
 
 [node name="BottomNav" type="PanelContainer" parent="SafeArea/MainVBox" unique_id=9680304]
-custom_minimum_size = Vector2(0, 76)
+custom_minimum_size = Vector2(0, 80)
 layout_mode = 2
 
 [node name="Margin" type="MarginContainer" parent="SafeArea/MainVBox/BottomNav" unique_id=1206503840]
@@ -185,52 +191,57 @@ theme_override_constants/margin_bottom = 10
 
 [node name="ButtonRow" type="HBoxContainer" parent="SafeArea/MainVBox/BottomNav/Margin" unique_id=887964462]
 layout_mode = 2
-theme_override_constants/separation = 7
+theme_override_constants/separation = 5
 
 [node name="EstateButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=2089471462]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Estate"
 
-[node name="FieldsButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=1316632348]
+[node name="ChinampaButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Fields"
-
-[node name="StorehouseButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=2095050359]
-layout_mode = 2
-size_flags_horizontal = 3
-text = "Storehouse"
+text = "Chinampa"
 
 [node name="WorkshopsButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=464200777]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Workshops"
 
-[node name="ShrinesButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=161355421]
+[node name="StorehouseButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=2095050359]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Shrines"
+text = "Storehouse"
 
-[node name="WarriorsButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=1900538034]
+[node name="HousingButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Warriors"
+text = "Housing"
+
+[node name="TeocalliButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Teocalli"
+
+[node name="CalmecacButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Calmecac"
 
 [node name="MarketButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=1730653257]
 layout_mode = 2
 size_flags_horizontal = 3
 text = "Market"
 
-[node name="PalaceButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=284966943]
+[node name="TecpanButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Palace"
+text = "Tecpan"
 
-[node name="RivalsButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=1677135405]
+[node name="YaotlButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Rivals"
+text = "Yaotl"
 
 [node name="AdvanceTurnButton" type="Button" parent="SafeArea/MainVBox/BottomNav/Margin/ButtonRow" unique_id=483333489]
 layout_mode = 2

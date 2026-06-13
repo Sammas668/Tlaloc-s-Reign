@@ -4,7 +4,7 @@
 
 [node name="StockpileLedgerRow" type="Button"]
 clip_contents = true
-custom_minimum_size = Vector2(0, 132)
+custom_minimum_size = Vector2(0, 188)
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 0
@@ -19,72 +19,128 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
-theme_override_constants/margin_left = 10
-theme_override_constants/margin_top = 8
-theme_override_constants/margin_right = 10
-theme_override_constants/margin_bottom = 8
+theme_override_constants/margin_left = 12
+theme_override_constants/margin_top = 9
+theme_override_constants/margin_right = 12
+theme_override_constants/margin_bottom = 9
 
 [node name="Stack" type="VBoxContainer" parent="Margin"]
 layout_mode = 2
 size_flags_horizontal = 3
 size_flags_vertical = 3
-theme_override_constants/separation = 6
-alignment = 1
+theme_override_constants/separation = 8
 
 [node name="NameLabel" type="Label" parent="Margin/Stack"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Maize"
+text = "Good"
 horizontal_alignment = 0
 clip_text = true
 text_overrun_behavior = 3
 
-[node name="MetricGrid" type="GridContainer" parent="Margin/Stack"]
+[node name="Metrics" type="VBoxContainer" parent="Margin/Stack"]
 layout_mode = 2
 size_flags_horizontal = 3
-size_flags_vertical = 3
-theme_override_constants/h_separation = 8
-theme_override_constants/v_separation = 3
-columns = 2
+theme_override_constants/separation = 3
 
-[node name="StoredLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+[node name="StatusRow" type="HBoxContainer" parent="Margin/Stack/Metrics"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Stored 0"
+
+[node name="Title" type="Label" parent="Margin/Stack/Metrics/StatusRow"]
+custom_minimum_size = Vector2(92, 0)
+layout_mode = 2
+text = "Status"
+
+[node name="Value" type="Label" parent="Margin/Stack/Metrics/StatusRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Stable"
+horizontal_alignment = 2
 clip_text = true
 text_overrun_behavior = 3
 
-[node name="FreeLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+[node name="StoredRow" type="HBoxContainer" parent="Margin/Stack/Metrics"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Free 0"
+
+[node name="Title" type="Label" parent="Margin/Stack/Metrics/StoredRow"]
+custom_minimum_size = Vector2(92, 0)
+layout_mode = 2
+text = "Stored"
+
+[node name="Value" type="Label" parent="Margin/Stack/Metrics/StoredRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "0"
+horizontal_alignment = 2
 clip_text = true
 text_overrun_behavior = 3
 
-[node name="IncomingLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+[node name="FreeRow" type="HBoxContainer" parent="Margin/Stack/Metrics"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "In +0"
+
+[node name="Title" type="Label" parent="Margin/Stack/Metrics/FreeRow"]
+custom_minimum_size = Vector2(92, 0)
+layout_mode = 2
+text = "Free"
+
+[node name="Value" type="Label" parent="Margin/Stack/Metrics/FreeRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "0"
+horizontal_alignment = 2
 clip_text = true
 text_overrun_behavior = 3
 
-[node name="OutgoingLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+[node name="ProjectedRow" type="HBoxContainer" parent="Margin/Stack/Metrics"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Out -0"
+
+[node name="Title" type="Label" parent="Margin/Stack/Metrics/ProjectedRow"]
+custom_minimum_size = Vector2(92, 0)
+layout_mode = 2
+text = "Projected"
+
+[node name="Value" type="Label" parent="Margin/Stack/Metrics/ProjectedRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "0"
+horizontal_alignment = 2
 clip_text = true
 text_overrun_behavior = 3
 
-[node name="NetLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+[node name="NetRow" type="HBoxContainer" parent="Margin/Stack/Metrics"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Net +0"
+
+[node name="Title" type="Label" parent="Margin/Stack/Metrics/NetRow"]
+custom_minimum_size = Vector2(92, 0)
+layout_mode = 2
+text = "Net"
+
+[node name="Value" type="Label" parent="Margin/Stack/Metrics/NetRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "+0"
+horizontal_alignment = 2
 clip_text = true
 text_overrun_behavior = 3
 
-[node name="ReservedLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+[node name="ReservedRow" type="HBoxContainer" parent="Margin/Stack/Metrics"]
 layout_mode = 2
 size_flags_horizontal = 3
-text = "Reserved 0"
+
+[node name="Title" type="Label" parent="Margin/Stack/Metrics/ReservedRow"]
+custom_minimum_size = Vector2(92, 0)
+layout_mode = 2
+text = "Reserved"
+
+[node name="Value" type="Label" parent="Margin/Stack/Metrics/ReservedRow"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "0"
+horizontal_alignment = 2
 clip_text = true
 text_overrun_behavior = 3
