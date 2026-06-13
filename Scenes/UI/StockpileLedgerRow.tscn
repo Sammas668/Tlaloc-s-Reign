@@ -1,0 +1,90 @@
+[gd_scene load_steps=2 format=3]
+
+[ext_resource type="Script" path="res://Scripts/ui/StockpileLedgerRow.gd" id="1_row_script"]
+
+[node name="StockpileLedgerRow" type="Button"]
+clip_contents = true
+custom_minimum_size = Vector2(0, 132)
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 0
+toggle_mode = true
+text = ""
+script = ExtResource("1_row_script")
+
+[node name="Margin" type="MarginContainer" parent="."]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+theme_override_constants/margin_left = 10
+theme_override_constants/margin_top = 8
+theme_override_constants/margin_right = 10
+theme_override_constants/margin_bottom = 8
+
+[node name="Stack" type="VBoxContainer" parent="Margin"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/separation = 6
+alignment = 1
+
+[node name="NameLabel" type="Label" parent="Margin/Stack"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Maize"
+horizontal_alignment = 0
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="MetricGrid" type="GridContainer" parent="Margin/Stack"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+theme_override_constants/h_separation = 8
+theme_override_constants/v_separation = 3
+columns = 2
+
+[node name="StoredLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Stored 0"
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="FreeLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Free 0"
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="IncomingLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "In +0"
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="OutgoingLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Out -0"
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="NetLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Net +0"
+clip_text = true
+text_overrun_behavior = 3
+
+[node name="ReservedLabel" type="Label" parent="Margin/Stack/MetricGrid"]
+layout_mode = 2
+size_flags_horizontal = 3
+text = "Reserved 0"
+clip_text = true
+text_overrun_behavior = 3
