@@ -111,7 +111,11 @@ func _load_start_state() -> void:
 	labour_assignments = _nested_int_dictionary(data.get("labour_assignments", {}) as Dictionary)
 	_ensure_all_resource_keys()
 	_ensure_all_building_keys()
-	_ensure_labour_assignments()
+	# New-game start states should not begin with productive buildings idle just
+	# because a previous patch or save file left empty labour assignment entries.
+	# Default setup staffs production automatically in priority order, with maize
+	# protected first, then other production buildings until population runs out.
+	_auto_staff_all_productive_buildings()
 
 func _float_dictionary(source: Dictionary) -> Dictionary:
 	var output: Dictionary = {}
@@ -506,33 +510,16 @@ func set_staffed_building_count_for_field_labour(building_id: String, requested_
 	var count: int = int(estate_buildings.get(building_id, 0))
 	if count <= 0:
 		return false
-	var wanted: int = clampi(requested_count, 0, count)
+	var max_allowed: int = _max_staffable_count_for_field_labour(building_id)
+	var wanted: int = clampi(requested_count, 0, mini(count, max_allowed))
 	var current: Dictionary = _staff_assignments_for_building(building_id)
 
-	# Replace the combined field-labour allocation on this building while leaving
-	# any non-field specialist assignment alone. In current Prototype 0 data this
-	# mainly affects chinampas/raw production buildings.
+	# Replace any old per-member field assignments with one combined pool value.
 	for member_id: String in _field_labour_group_ids():
 		current.erase(member_id)
-
-	var assigned_elsewhere: Dictionary = _assigned_labour_by_group_excluding(building_id)
-	var remaining: int = wanted
-	for member_id: String in _field_labour_group_ids():
-		if remaining <= 0:
-			break
-		if not _allowed_worker_groups_for_building(building_id).has(member_id):
-			continue
-		var needed_per: int = _staff_required_per_copy_for_group(building_id, member_id)
-		if needed_per <= 0:
-			continue
-		var total_pop: int = int(population.get(member_id, 0))
-		var already_elsewhere: int = int(assigned_elsewhere.get(member_id, 0))
-		var available_pop: int = max(0, total_pop - already_elsewhere)
-		var possible: int = int(floor(float(available_pop) / float(needed_per)))
-		var use_count: int = mini(remaining, possible)
-		if use_count > 0:
-			current[member_id] = use_count
-			remaining -= use_count
+	current.erase("field_labour")
+	if wanted > 0:
+		current["field_labour"] = wanted
 
 	# Do not overfill building slots if future data allows mixed specialist and
 	# field-labour staffing on the same building.
@@ -540,14 +527,7 @@ func set_staffed_building_count_for_field_labour(building_id: String, requested_
 	for key_variant: Variant in current.keys():
 		used_slots += int(current[key_variant])
 	if used_slots > count:
-		var excess: int = used_slots - count
-		for member_id: String in _field_labour_group_ids():
-			if excess <= 0:
-				break
-			var value: int = int(current.get(member_id, 0))
-			var reduction: int = mini(value, excess)
-			current[member_id] = value - reduction
-			excess -= reduction
+		current["field_labour"] = max(0, int(current.get("field_labour", 0)) - (used_slots - count))
 
 	for key_variant: Variant in current.keys().duplicate():
 		if int(current[key_variant]) <= 0:
@@ -567,6 +547,75 @@ func _productive_labour_group_ids() -> Array[String]:
 	# Warriors are deliberately excluded here. They belong to Barracks and Flower
 	# Wars. Production labour is commoner/bonded labour and skilled artisans.
 	return ["macehualtin", "tlacotin", "tolteca"]
+
+
+func _max_staffable_count_for_field_labour_with_used(building_id: String, used_by_group: Dictionary) -> int:
+	if not buildings.has(building_id):
+		return 0
+	if not _building_can_use_field_labour(building_id):
+		return 0
+	var count: int = int(estate_buildings.get(building_id, 0))
+	var needed_per: int = _field_labour_fallback_staff_required(building_id)
+	if needed_per <= 0:
+		return 0
+	var available_total: int = 0
+	for member_id: String in _field_labour_group_ids():
+		var total_pop: int = int(population.get(member_id, 0))
+		var already: int = int(used_by_group.get(member_id, 0))
+		available_total += max(0, total_pop - already)
+	return mini(count, int(floor(float(available_total) / float(needed_per))))
+
+func _field_labour_population_split_for_building(building_id: String, staffed_copies: int, used_by_group: Dictionary = {}) -> Dictionary:
+	var result: Dictionary = {}
+	var needed_per: int = _field_labour_fallback_staff_required(building_id)
+	if needed_per <= 0 or staffed_copies <= 0:
+		return result
+	var remaining_people: int = staffed_copies * needed_per
+	for member_id: String in _field_labour_group_ids():
+		if remaining_people <= 0:
+			break
+		var total_pop: int = int(population.get(member_id, 0))
+		var already: int = int(used_by_group.get(member_id, 0))
+		var available_pop: int = max(0, total_pop - already)
+		var use_pop: int = mini(remaining_people, available_pop)
+		if use_pop > 0:
+			result[member_id] = use_pop
+			remaining_people -= use_pop
+	return result
+
+func _field_labour_distribution_for_building(target_building_id: String, target_copies: int) -> Dictionary:
+	# Work through buildings in a stable order so the displayed Macehualtin/Tlacotin
+	# split is deterministic and does not double-count the same population.
+	var used_by_group: Dictionary = {}
+	for building_id: String in building_order:
+		if not _is_productive_building_id(building_id):
+			continue
+		var assignments: Dictionary = _staff_assignments_for_building(building_id)
+		var copies: int = int(assignments.get("field_labour", 0))
+		if building_id == target_building_id:
+			copies = target_copies
+		if copies <= 0:
+			if building_id == target_building_id:
+				return {}
+			continue
+		var split: Dictionary = _field_labour_population_split_for_building(building_id, copies, used_by_group)
+		if building_id == target_building_id:
+			return split
+		for member_variant: Variant in split.keys():
+			var member_id: String = String(member_variant)
+			used_by_group[member_id] = int(used_by_group.get(member_id, 0)) + int(split[member_id])
+	return {}
+
+func _field_labour_fallback_staff_required(building_id: String) -> int:
+	# If old building data only lists one field-labour member, use that same
+	# per-building requirement for the combined pool. The shipped buildings.json in
+	# this patch lists both Macehualtin and Tlacotin for chinampas, but this keeps
+	# older local data from breaking the combined pool.
+	for member_id: String in _field_labour_group_ids():
+		var amount: int = _staff_required_per_copy_for_group(building_id, member_id)
+		if amount > 0:
+			return amount
+	return 0
 
 func _field_labour_group_ids() -> Array[String]:
 	return ["macehualtin", "tlacotin"]
@@ -731,8 +780,16 @@ func build_building(building_id: String) -> bool:
 	for resource_variant: Variant in cost.keys():
 		var resource_id: String = String(resource_variant)
 		_add_stock(resource_id, -float(cost[resource_id]))
-	estate_buildings[building_id] = int(estate_buildings.get(building_id, 0)) + 1
-	_ensure_labour_assignments()
+	var previous_count: int = int(estate_buildings.get(building_id, 0))
+	var previous_staffed: int = _staffed_count_for_building(building_id)
+	estate_buildings[building_id] = previous_count + 1
+	# If this building type was previously fully staffed, try to staff the new
+	# copy automatically. If the player had deliberately left copies unstaffed,
+	# keep that manual choice instead of silently overriding it.
+	if _is_productive_building_id(building_id) and previous_staffed >= previous_count:
+		_auto_staff_single_building_to_max(building_id)
+	else:
+		_ensure_labour_assignments()
 	var message: String = "Built " + get_building_name(building_id) + "."
 	last_report.append(message)
 	emit_signal("build_completed", building_id)
@@ -796,32 +853,159 @@ func estimate_population_upkeep() -> Dictionary:
 	return result
 
 func estimate_building_inputs() -> Dictionary:
-	_ensure_labour_assignments()
-	var result: Dictionary = {}
-	for building_id: String in building_order:
-		var operating_count: int = _estimated_operating_count_for_building(building_id)
-		if operating_count <= 0:
-			continue
-		var definition: Dictionary = buildings[building_id] as Dictionary
-		var inputs: Dictionary = definition.get("inputs", {}) as Dictionary
-		for resource_variant: Variant in inputs.keys():
-			var resource_id: String = String(resource_variant)
-			result[resource_id] = float(result.get(resource_id, 0.0)) + float(inputs[resource_id]) * float(operating_count)
-	return result
+	# Single source of truth for Storehouse / Production / Labour previews.
+	# This now uses the same dry-run resolver as the rest of the UI, so input
+	# demand reflects staffed buildings, population upkeep paid first, and shared
+	# input goods being consumed by earlier buildings in building_order.
+	var resolution: Dictionary = estimate_production_resolution()
+	return (resolution.get("inputs", {}) as Dictionary).duplicate(true)
 
 func estimate_building_outputs() -> Dictionary:
+	# Single source of truth for Storehouse / Production / Labour previews.
+	# This now uses the same dry-run resolver as the rest of the UI, so output
+	# only comes from buildings that are both staffed and supplied in the shared
+	# temporary stockpile.
+	var resolution: Dictionary = estimate_production_resolution()
+	return (resolution.get("outputs", {}) as Dictionary).duplicate(true)
+
+func estimate_production_resolution() -> Dictionary:
+	# Authoritative production preview. This mirrors Advance Veintena order:
+	# 1. copy current stockpiles
+	# 2. pay population upkeep from the copied stockpile
+	# 3. process staffed production buildings in building_order
+	# 4. consume inputs from the copied stockpile
+	# 5. add outputs to the copied stockpile
+	# 6. record exactly what would operate, block, or sit unstaffed
 	_ensure_labour_assignments()
-	var result: Dictionary = {}
+	var temp_stockpile: Dictionary = _copy_stockpile_dictionary(estate_stockpiles)
+	var upkeep_needed: Dictionary = estimate_population_upkeep()
+	var upkeep_paid: Dictionary = {}
+	var upkeep_shortfalls: Dictionary = {}
+
+	for resource_variant: Variant in upkeep_needed.keys():
+		var resource_id: String = String(resource_variant)
+		var needed: float = float(upkeep_needed[resource_variant])
+		var available: float = float(temp_stockpile.get(resource_id, 0.0))
+		var paid: float = minf(available, needed)
+		temp_stockpile[resource_id] = available - paid
+		upkeep_paid[resource_id] = paid
+		if paid < needed:
+			upkeep_shortfalls[resource_id] = needed - paid
+
+	var total_inputs: Dictionary = {}
+	var total_outputs: Dictionary = {}
+	var building_statuses: Dictionary = {}
+	var report_lines: Array[String] = []
+
 	for building_id: String in building_order:
-		var operating_count: int = _estimated_operating_count_for_building(building_id)
-		if operating_count <= 0:
+		if not buildings.has(building_id):
 			continue
 		var definition: Dictionary = buildings[building_id] as Dictionary
-		var outputs: Dictionary = definition.get("outputs", {}) as Dictionary
-		for resource_variant: Variant in outputs.keys():
-			var resource_id: String = String(resource_variant)
-			result[resource_id] = float(result.get(resource_id, 0.0)) + float(outputs[resource_id]) * float(operating_count)
-	return result
+		var count: int = int(estate_buildings.get(building_id, 0))
+		if count <= 0:
+			building_statuses[building_id] = {
+				"operating": 0,
+				"blocked": 0,
+				"staffed_count": 0,
+				"unstaffed": 0,
+				"input_blocked": 0,
+				"status_text": "Not built.",
+				"input_shortages": []
+			}
+			continue
+
+		var staffed_count: int = count
+		if _is_productive_building_id(building_id):
+			staffed_count = _staffed_count_for_building(building_id)
+		staffed_count = clampi(staffed_count, 0, count)
+
+		var operated: int = 0
+		var input_blocked: int = 0
+		var input_shortages: Array[String] = []
+
+		for index: int in range(staffed_count):
+			var reason: String = _can_operate_instance_with_stockpile(definition, temp_stockpile)
+			if reason == "":
+				var inputs: Dictionary = definition.get("inputs", {}) as Dictionary
+				var outputs: Dictionary = definition.get("outputs", {}) as Dictionary
+				_consume_inputs_from_stockpile(inputs, temp_stockpile)
+				_add_outputs_to_stockpile(outputs, temp_stockpile)
+				_add_dictionary_amounts(total_inputs, inputs)
+				_add_dictionary_amounts(total_outputs, outputs)
+				operated += 1
+			else:
+				input_blocked += 1
+				if not input_shortages.has(reason):
+					input_shortages.append(reason)
+
+		var unstaffed: int = max(0, count - staffed_count)
+		var blocked: int = input_blocked + unstaffed
+		var status_text: String = "Staffed " + str(staffed_count) + " / " + str(count) + "; operating " + str(operated) + " / " + str(staffed_count) + " staffed"
+		if unstaffed > 0:
+			status_text += "; unstaffed " + str(unstaffed)
+		if input_blocked > 0:
+			status_text += "; input blocked " + str(input_blocked)
+		if not input_shortages.is_empty():
+			status_text += "; " + "; ".join(input_shortages)
+
+		building_statuses[building_id] = {
+			"operating": operated,
+			"blocked": blocked,
+			"staffed_count": staffed_count,
+			"unstaffed": unstaffed,
+			"input_blocked": input_blocked,
+			"status_text": status_text,
+			"input_shortages": input_shortages.duplicate()
+		}
+
+		if operated > 0:
+			report_lines.append(String(definition.get("name", building_id)) + " would operate x" + str(operated) + ".")
+		if input_blocked > 0:
+			report_lines.append(String(definition.get("name", building_id)) + " would be input-blocked x" + str(input_blocked) + ".")
+		if _is_productive_building_id(building_id) and unstaffed > 0:
+			report_lines.append(String(definition.get("name", building_id)) + " would be unstaffed x" + str(unstaffed) + ".")
+
+	return {
+		"inputs": total_inputs,
+		"outputs": total_outputs,
+		"building_statuses": building_statuses,
+		"stockpile_after_upkeep_and_production": temp_stockpile,
+		"upkeep_needed": upkeep_needed,
+		"upkeep_paid": upkeep_paid,
+		"upkeep_shortfalls": upkeep_shortfalls,
+		"reports": report_lines
+	}
+
+func _copy_stockpile_dictionary(source: Dictionary) -> Dictionary:
+	var output: Dictionary = {}
+	for key_variant: Variant in source.keys():
+		var key: String = String(key_variant)
+		output[key] = float(source[key_variant])
+	return output
+
+func _can_operate_instance_with_stockpile(definition: Dictionary, temp_stockpile: Dictionary) -> String:
+	var inputs: Dictionary = definition.get("inputs", {}) as Dictionary
+	for resource_variant: Variant in inputs.keys():
+		var resource_id: String = String(resource_variant)
+		var needed: float = float(inputs[resource_variant])
+		if float(temp_stockpile.get(resource_id, 0.0)) < needed:
+			return "not enough " + get_resource_name(resource_id) + " input"
+	return ""
+
+func _consume_inputs_from_stockpile(inputs: Dictionary, temp_stockpile: Dictionary) -> void:
+	for resource_variant: Variant in inputs.keys():
+		var resource_id: String = String(resource_variant)
+		temp_stockpile[resource_id] = float(temp_stockpile.get(resource_id, 0.0)) - float(inputs[resource_variant])
+
+func _add_outputs_to_stockpile(outputs: Dictionary, temp_stockpile: Dictionary) -> void:
+	for resource_variant: Variant in outputs.keys():
+		var resource_id: String = String(resource_variant)
+		temp_stockpile[resource_id] = float(temp_stockpile.get(resource_id, 0.0)) + float(outputs[resource_variant])
+
+func _add_dictionary_amounts(target: Dictionary, amounts: Dictionary) -> void:
+	for resource_variant: Variant in amounts.keys():
+		var resource_id: String = String(resource_variant)
+		target[resource_id] = float(target.get(resource_id, 0.0)) + float(amounts[resource_variant])
 
 func _pay_population_upkeep() -> void:
 	var upkeep: Dictionary = estimate_population_upkeep()
@@ -889,40 +1073,12 @@ func _add_outputs(outputs: Dictionary) -> void:
 
 func _estimate_building_status(building_id: String) -> Dictionary:
 	if not buildings.has(building_id):
-		return {"operating": 0, "blocked": 0, "staffed_count": 0, "unstaffed": 0, "status_text": "Unknown building."}
-	var definition: Dictionary = buildings[building_id] as Dictionary
-	var count: int = int(estate_buildings.get(building_id, 0))
-	if count <= 0:
-		return {"operating": 0, "blocked": 0, "staffed_count": 0, "unstaffed": 0, "status_text": "Not built."}
-
-	var staffed_count: int = count
-	if _is_productive_building_id(building_id):
-		staffed_count = _staffed_count_for_building(building_id)
-	staffed_count = clampi(staffed_count, 0, count)
-
-	var max_by_inputs: int = staffed_count
-	var input_short: Array[String] = []
-	var inputs: Dictionary = definition.get("inputs", {}) as Dictionary
-	for resource_variant: Variant in inputs.keys():
-		var resource_id: String = String(resource_variant)
-		var needed_per_input: float = maxf(0.001, float(inputs[resource_id]))
-		var possible_by_input: int = int(floor(_stock(resource_id) / needed_per_input))
-		max_by_inputs = mini(max_by_inputs, possible_by_input)
-		if possible_by_input < staffed_count:
-			input_short.append(get_resource_name(resource_id) + " supports " + str(possible_by_input) + "/" + str(staffed_count))
-
-	var operating: int = mini(staffed_count, max_by_inputs)
-	var input_blocked: int = max(0, staffed_count - operating)
-	var unstaffed: int = max(0, count - staffed_count)
-	var blocked: int = input_blocked + unstaffed
-	var status_text: String = "Staffed " + str(staffed_count) + " / " + str(count) + "; operating " + str(operating) + " / " + str(staffed_count) + " staffed"
-	if unstaffed > 0:
-		status_text += "; unstaffed " + str(unstaffed)
-	if input_blocked > 0:
-		status_text += "; input blocked " + str(input_blocked)
-	if not input_short.is_empty():
-		status_text += "; " + "; ".join(input_short)
-	return {"operating": operating, "blocked": blocked, "staffed_count": staffed_count, "unstaffed": unstaffed, "status_text": status_text}
+		return {"operating": 0, "blocked": 0, "staffed_count": 0, "unstaffed": 0, "input_blocked": 0, "status_text": "Unknown building.", "input_shortages": []}
+	var resolution: Dictionary = estimate_production_resolution()
+	var statuses: Dictionary = resolution.get("building_statuses", {}) as Dictionary
+	if statuses.has(building_id):
+		return (statuses[building_id] as Dictionary).duplicate(true)
+	return {"operating": 0, "blocked": 0, "staffed_count": 0, "unstaffed": 0, "input_blocked": 0, "status_text": "Not built.", "input_shortages": []}
 
 func _estimated_operating_count_for_building(building_id: String) -> int:
 	if not buildings.has(building_id):
@@ -936,11 +1092,65 @@ func _is_productive_building_id(building_id: String) -> bool:
 	var screen_id: String = String(definition.get("screen", ""))
 	return screen_id == "chinampas" or screen_id == "workshops"
 
+func _auto_staff_all_productive_buildings() -> void:
+	# Force a clean automatic staffing pass. Used for new-game setup so built
+	# production starts staffed when the estate has the people for it.
+	labour_assignments.clear()
+	var running_by_group: Dictionary = {}
+	for building_id: String in _production_auto_staff_order():
+		var count: int = int(estate_buildings.get(building_id, 0))
+		if count <= 0:
+			continue
+		var assignment: Dictionary = _default_assignment_for_building(building_id, count, running_by_group)
+		labour_assignments[building_id] = assignment
+	_ensure_labour_assignments()
+
+func _auto_staff_single_building_to_max(building_id: String) -> void:
+	# Try to staff as many copies of one building as possible without rewriting
+	# all other manual assignments. This is mainly used after constructing one
+	# extra productive building.
+	if not _is_productive_building_id(building_id):
+		return
+	var count: int = int(estate_buildings.get(building_id, 0))
+	if count <= 0:
+		return
+	var running_by_group: Dictionary = _assigned_labour_by_group_excluding(building_id)
+	var assignment: Dictionary = _default_assignment_for_building(building_id, count, running_by_group)
+	labour_assignments[building_id] = assignment
+	_ensure_labour_assignments()
+
+func _production_auto_staff_order() -> Array[String]:
+	# Maize is the protected food base and should be staffed before every other
+	# productive building. After maize, use normal building priority/order so the
+	# fewest possible lower-priority buildings are left idle when labour is short.
+	var maize_ids: Array[String] = []
+	var other_ids: Array[String] = []
+	for building_id: String in building_order:
+		if not _is_productive_building_id(building_id):
+			continue
+		if _is_maize_production_building(building_id):
+			maize_ids.append(building_id)
+		else:
+			other_ids.append(building_id)
+	maize_ids.append_array(other_ids)
+	return maize_ids
+
+func _is_maize_production_building(building_id: String) -> bool:
+	if not buildings.has(building_id):
+		return false
+	if building_id.find("maize") >= 0:
+		return true
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	var outputs: Dictionary = definition.get("outputs", {}) as Dictionary
+	return outputs.has("maize")
+
 func _ensure_labour_assignments() -> void:
 	# Labour assignment is stored as: building_id -> {worker_group_id: staffed_building_count}.
-	# Each count is how many copies of that building are staffed by that group.
-	# Older patches stored building_id -> int or building_id -> {group_id: population};
-	# those values are converted safely here.
+	# For the combined Field Labour UI, raw/chinampa buildings store
+	# {"field_labour": count}. That count means "this many building copies are
+	# staffed from the combined Macehualtin + Tlacotin pool". The population split
+	# is calculated separately so the two populations can combine to staff one
+	# building copy.
 	var running_by_group: Dictionary = {}
 
 	for building_key_variant: Variant in labour_assignments.keys().duplicate():
@@ -956,7 +1166,7 @@ func _ensure_labour_assignments() -> void:
 			labour_assignments.erase(building_id)
 			continue
 		var allowed: Array[String] = _allowed_worker_groups_for_building(building_id)
-		if allowed.is_empty():
+		if allowed.is_empty() and not _building_can_use_field_labour(building_id):
 			labour_assignments.erase(building_id)
 			continue
 
@@ -968,7 +1178,30 @@ func _ensure_labour_assignments() -> void:
 
 		var final_assignments: Dictionary = {}
 		var remaining_slots: int = count
+
+		# Combined Field Labour is handled before the individual worker loop because
+		# one staffed building can be supplied by a mixture of Macehualtin and Tlacotin.
+		if _building_can_use_field_labour(building_id):
+			var field_wanted: int = clampi(int(requested.get("field_labour", 0)), 0, remaining_slots)
+			if field_wanted > 0:
+				var field_possible: int = _max_staffable_count_for_field_labour_with_used(building_id, running_by_group)
+				var field_count: int = mini(field_wanted, field_possible)
+				if field_count > 0:
+					final_assignments["field_labour"] = field_count
+					var split: Dictionary = _field_labour_population_split_for_building(building_id, field_count, running_by_group)
+					for member_variant: Variant in split.keys():
+						var member_id: String = String(member_variant)
+						running_by_group[member_id] = int(running_by_group.get(member_id, 0)) + int(split[member_id])
+					remaining_slots -= field_count
+
+		# Specialist / non-field groups are still handled individually.
 		for group_id: String in allowed:
+			if group_id == "macehualtin" or group_id == "tlacotin":
+				# These are represented by the combined field_labour entry for chinampas.
+				if _building_can_use_field_labour(building_id):
+					continue
+			if remaining_slots <= 0:
+				break
 			var wanted: int = clampi(int(requested.get(group_id, 0)), 0, remaining_slots)
 			var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)
 			var total: int = int(population.get(group_id, 0))
@@ -988,7 +1221,23 @@ func _ensure_labour_assignments() -> void:
 func _default_assignment_for_building(building_id: String, count: int, running_by_group: Dictionary) -> Dictionary:
 	var requested: Dictionary = {}
 	var remaining: int = count
+	if _building_can_use_field_labour(building_id):
+		var possible_field: int = _max_staffable_count_for_field_labour_with_used(building_id, running_by_group)
+		var use_field: int = mini(remaining, possible_field)
+		if use_field > 0:
+			requested["field_labour"] = use_field
+			var split: Dictionary = _field_labour_population_split_for_building(building_id, use_field, running_by_group)
+			for member_variant: Variant in split.keys():
+				var member_id: String = String(member_variant)
+				running_by_group[member_id] = int(running_by_group.get(member_id, 0)) + int(split[member_id])
+			remaining -= use_field
+		if remaining <= 0:
+			return requested
+
 	for group_id: String in _allowed_worker_groups_for_building(building_id):
+		if group_id == "macehualtin" or group_id == "tlacotin":
+			if _building_can_use_field_labour(building_id):
+				continue
 		if remaining <= 0:
 			break
 		var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)
@@ -1001,6 +1250,7 @@ func _default_assignment_for_building(building_id: String, count: int, running_b
 		var use_count: int = mini(remaining, possible)
 		if use_count > 0:
 			requested[group_id] = use_count
+			running_by_group[group_id] = already + use_count * needed_per
 			remaining -= use_count
 	return requested
 
@@ -1026,6 +1276,8 @@ func _allowed_worker_groups_for_building(building_id: String) -> Array[String]:
 func _staff_required_per_copy_for_group(building_id: String, group_id: String) -> int:
 	if not buildings.has(building_id):
 		return 0
+	if group_id == "field_labour":
+		return _field_labour_fallback_staff_required(building_id)
 	var definition: Dictionary = buildings[building_id] as Dictionary
 	var staff: Dictionary = definition.get("staff", {}) as Dictionary
 	if staff.has(group_id):
@@ -1038,21 +1290,38 @@ func _staff_required_per_copy_for_group(building_id: String, group_id: String) -
 func _coerce_staff_assignments_for_building(building_id: String, value: Variant) -> Dictionary:
 	var output: Dictionary = {}
 	var allowed: Array[String] = _allowed_worker_groups_for_building(building_id)
-	if allowed.is_empty():
+	if allowed.is_empty() and not _building_can_use_field_labour(building_id):
 		return output
+	var count: int = int(estate_buildings.get(building_id, 0))
 	if value is int or value is float:
-		output[allowed[0]] = int(value)
+		var amount: int = clampi(int(value), 0, count)
+		if amount <= 0:
+			return output
+		if _building_can_use_field_labour(building_id):
+			output["field_labour"] = amount
+		elif not allowed.is_empty():
+			output[allowed[0]] = amount
 		return output
 	if not (value is Dictionary):
 		return output
 	var assignment: Dictionary = value as Dictionary
+
+	if _building_can_use_field_labour(building_id):
+		var field_amount: int = int(assignment.get("field_labour", 0))
+		# Older patches stored Macehualtin/Tlacotin copy counts separately. Merge
+		# them into the combined Field Labour pool so the two populations can staff
+		# one building together.
+		for member_id: String in _field_labour_group_ids():
+			field_amount += int(assignment.get(member_id, 0))
+		if field_amount > 0:
+			output["field_labour"] = clampi(field_amount, 0, count)
+
 	for group_id: String in allowed:
+		if _field_labour_group_ids().has(group_id) and _building_can_use_field_labour(building_id):
+			continue
 		var raw_amount: int = int(assignment.get(group_id, 0))
 		if raw_amount <= 0:
 			continue
-		# Very old patches stored assigned population by group. If the value is larger
-		# than the number of buildings, treat it as population and convert to staffed copies.
-		var count: int = int(estate_buildings.get(building_id, 0))
 		var needed_per: int = max(1, _staff_required_per_copy_for_group(building_id, group_id))
 		if raw_amount > count:
 			output[group_id] = int(floor(float(raw_amount) / float(needed_per)))
@@ -1072,12 +1341,20 @@ func _assigned_staff_for_building(building_id: String) -> Dictionary:
 func _staff_population_by_building(building_id: String) -> Dictionary:
 	var result: Dictionary = {}
 	var assignments: Dictionary = _staff_assignments_for_building(building_id)
+	if assignments.has("field_labour"):
+		var copies: int = int(assignments.get("field_labour", 0))
+		var split: Dictionary = _field_labour_distribution_for_building(building_id, copies)
+		for member_variant: Variant in split.keys():
+			var member_id: String = String(member_variant)
+			result[member_id] = int(result.get(member_id, 0)) + int(split[member_id])
 	for group_variant: Variant in assignments.keys():
 		var group_id: String = String(group_variant)
+		if group_id == "field_labour":
+			continue
 		var copies: int = int(assignments[group_id])
 		var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)
 		if copies > 0 and needed_per > 0:
-			result[group_id] = copies * needed_per
+			result[group_id] = int(result.get(group_id, 0)) + copies * needed_per
 	return result
 
 func _staffed_count_for_building(building_id: String) -> int:
@@ -1088,6 +1365,8 @@ func _staffed_count_for_building(building_id: String) -> int:
 	return clampi(total, 0, int(estate_buildings.get(building_id, 0)))
 
 func _staffed_count_for_group(building_id: String, group_id: String) -> int:
+	if group_id == "field_labour":
+		return _field_labour_staffed_count_for_building(building_id)
 	return int(_staff_assignments_for_building(building_id).get(group_id, 0))
 
 func _coerce_staffed_count_from_assignment(building_id: String, value: Variant) -> int:
@@ -1100,9 +1379,13 @@ func _coerce_staffed_count_from_assignment(building_id: String, value: Variant) 
 	return total
 
 func _clamp_staffed_count_for_building(building_id: String, requested_count: int) -> int:
+	var count: int = int(estate_buildings.get(building_id, 0))
+	var wanted: int = clampi(requested_count, 0, count)
+	if _building_can_use_field_labour(building_id):
+		return mini(wanted, _max_staffable_count_for_field_labour(building_id))
 	var assigned_elsewhere: Dictionary = _assigned_labour_by_group_excluding(building_id)
 	var requested: Dictionary = {}
-	var remaining: int = requested_count
+	var remaining: int = wanted
 	for group_id: String in _allowed_worker_groups_for_building(building_id):
 		if remaining <= 0:
 			break
@@ -1124,6 +1407,9 @@ func _clamp_staffed_count_for_building_group(building_id: String, group_id: Stri
 func _building_can_use_field_labour(building_id: String) -> bool:
 	if not buildings.has(building_id):
 		return false
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	if String(definition.get("screen", "")) == "chinampas":
+		return true
 	var allowed: Array[String] = _allowed_worker_groups_for_building(building_id)
 	for member_id: String in _field_labour_group_ids():
 		if allowed.has(member_id):
@@ -1132,32 +1418,21 @@ func _building_can_use_field_labour(building_id: String) -> bool:
 
 func _field_labour_staffed_count_for_building(building_id: String) -> int:
 	var assignments: Dictionary = _staff_assignments_for_building(building_id)
-	var total: int = 0
+	var total: int = int(assignments.get("field_labour", 0))
+	# Keep older per-member assignments readable if they still exist.
 	for member_id: String in _field_labour_group_ids():
 		total += int(assignments.get(member_id, 0))
 	return clampi(total, 0, int(estate_buildings.get(building_id, 0)))
 
 func _max_staffable_count_for_field_labour(building_id: String) -> int:
-	if not buildings.has(building_id):
-		return 0
-	if not _building_can_use_field_labour(building_id):
-		return 0
-	var count: int = int(estate_buildings.get(building_id, 0))
-	var assigned_elsewhere: Dictionary = _assigned_labour_by_group_excluding(building_id)
-	var possible_total: int = 0
-	for member_id: String in _field_labour_group_ids():
-		if not _allowed_worker_groups_for_building(building_id).has(member_id):
-			continue
-		var needed_per: int = _staff_required_per_copy_for_group(building_id, member_id)
-		if needed_per <= 0:
-			continue
-		var total_pop: int = int(population.get(member_id, 0))
-		var already_elsewhere: int = int(assigned_elsewhere.get(member_id, 0))
-		var available_pop: int = max(0, total_pop - already_elsewhere)
-		possible_total += int(floor(float(available_pop) / float(needed_per)))
-	return mini(count, possible_total)
+	return _max_staffable_count_for_field_labour_with_used(building_id, _assigned_labour_by_group_excluding(building_id))
 
 func _max_staffable_count_for_building_group(building_id: String, group_id: String, override_for_building: Dictionary = {}, precomputed_elsewhere: Dictionary = {}) -> int:
+	if group_id == "field_labour":
+		var elsewhere: Dictionary = precomputed_elsewhere
+		if elsewhere.is_empty():
+			elsewhere = _assigned_labour_by_group_excluding(building_id)
+		return _max_staffable_count_for_field_labour_with_used(building_id, elsewhere)
 	if not buildings.has(building_id):
 		return 0
 	if not _allowed_worker_groups_for_building(building_id).has(group_id):
@@ -1173,16 +1448,27 @@ func _max_staffable_count_for_building_group(building_id: String, group_id: Stri
 	var already_elsewhere: int = int(assigned_elsewhere.get(group_id, 0))
 	var available_pop: int = max(0, total_pop - already_elsewhere)
 	var max_by_pop: int = int(floor(float(available_pop) / float(needed_per)))
-	# This is the potential maximum for the selected group if it replaces other
-	# worker types on this same building. Other groups on the same building do not
-	# permanently reserve slots against the active slider.
 	return mini(count, max_by_pop)
 
 func _clamp_staffed_count_with_running(building_id: String, requested_count: int, running_by_group: Dictionary) -> int:
 	var count: int = int(estate_buildings.get(building_id, 0))
 	var remaining: int = clampi(requested_count, 0, count)
 	var staffed: int = 0
+	if _building_can_use_field_labour(building_id):
+		var possible_field: int = _max_staffable_count_for_field_labour_with_used(building_id, running_by_group)
+		var use_field: int = mini(remaining, possible_field)
+		if use_field > 0:
+			var split: Dictionary = _field_labour_population_split_for_building(building_id, use_field, running_by_group)
+			for member_variant: Variant in split.keys():
+				var member_id: String = String(member_variant)
+				running_by_group[member_id] = int(running_by_group.get(member_id, 0)) + int(split[member_id])
+			staffed += use_field
+			remaining -= use_field
+	if remaining <= 0:
+		return staffed
 	for group_id: String in _allowed_worker_groups_for_building(building_id):
+		if _field_labour_group_ids().has(group_id) and _building_can_use_field_labour(building_id):
+			continue
 		if remaining <= 0:
 			break
 		var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)

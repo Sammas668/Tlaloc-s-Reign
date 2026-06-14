@@ -9,6 +9,7 @@
 extends Control
 
 signal staffing_group_changed(building_id: String, group_id: String, staffed_count: int)
+signal staffing_preview_changed(building_id: String, group_id: String, staffed_count: int)
 # Backwards-compatible signal names used by older GameScreen.gd patches.
 signal staffing_changed(building_id: String, staffed_count: int)
 signal assignment_changed(building_id: String, group_id: String, amount: int)
@@ -96,7 +97,7 @@ func _rebuild(preserve_scroll: bool = false) -> void:
 
 	_clear_children(_content)
 	_add_title("Labour Assignment")
-	_add_description("Choose a worker pool, then drag the bars to decide how many built chinampas or workshops are staffed. Field Labour combines Macehualtin and Tlacotin for the same raw-production buildings; Tolteca remain separate for artisan workshops. Warriors are handled later in Barracks, not here.")
+	_add_description("Choose a worker pool, then drag the bars to decide how many built chinampas or workshops are staffed. Field Labour combines Macehualtin and Tlacotin for raw-production buildings; the pool can staff a building using either population type as available. Tolteca remain separate for artisan workshops. Warriors are handled later in Barracks, not here.")
 	_add_worker_type_buttons()
 	_add_active_group_summary()
 	_add_building_assignment_section()
@@ -329,9 +330,14 @@ func _add_building_panel(building: Dictionary) -> void:
 	slider.step = 1.0
 	slider.value = float(active_assigned)
 	slider.editable = count > 0 and people_per_copy > 0
-	slider.mouse_filter = Control.MOUSE_FILTER_STOP
+	# Do not let mouse-wheel scrolling change staffing by accident while the
+	# player is scrolling through the Labour page. The slider can still be clicked
+	# and dragged, but wheel input should belong to the ScrollContainer.
+	slider.scrollable = false
+	slider.mouse_filter = Control.MOUSE_FILTER_PASS
 	slider.tooltip_text = "Click and drag left or right to choose how many built copies are staffed by " + String(_group_data(active_group_id).get("name", active_group_id.capitalize())) + ". Release the mouse to apply the staffing change."
 	slider.set_meta("last_committed_value", active_assigned)
+	slider.set_meta("last_preview_value", active_assigned)
 	stack.add_child(slider)
 
 	var building_id: String = String(building.get("id", ""))
@@ -344,10 +350,15 @@ func _add_building_panel(building: Dictionary) -> void:
 			slider.value = float(rounded)
 			_is_setting_slider_value = false
 
-		# Instant local preview only. Do not emit here, because emitting on every
-		# movement causes GameScreen to rebuild the Labour page while the player is
-		# dragging, which makes the bar feel like it cannot be dragged.
+		# Instant local preview on the left. Also emit a lightweight preview signal
+		# so GameScreen can update TRGameState, the right-hand labour ledger and
+		# Storehouse incoming/outgoing estimates while dragging, without rebuilding
+		# this Labour page and stealing the slider/scroll focus.
 		_update_building_slider_preview(building, active_group_id, rounded, count, max_for_active, people_per_copy, count_label, pop_label, effect_label, value_label)
+		var last_preview: int = int(slider.get_meta("last_preview_value", -999999))
+		if rounded != last_preview:
+			slider.set_meta("last_preview_value", rounded)
+			emit_signal("staffing_preview_changed", building_id, active_group_id, rounded)
 	)
 
 	# Commit on release / drag end. This lets the player drag smoothly, then
@@ -358,8 +369,14 @@ func _add_building_panel(building: Dictionary) -> void:
 	)
 	slider.gui_input.connect(func(event: InputEvent) -> void:
 		var mouse_event: InputEventMouseButton = event as InputEventMouseButton
-		if mouse_event != null and mouse_event.button_index == MOUSE_BUTTON_LEFT and not mouse_event.pressed:
-			_commit_staffing_slider_value(slider, building_id, count, max_for_active)
+		if mouse_event != null:
+			if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP or mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				# Keep staffing stable when the player scrolls the Labour menu over a slider.
+				# Do not accept the event; with MOUSE_FILTER_PASS it can still reach the
+				# ScrollContainer so the page scrolls normally.
+				return
+			if mouse_event.button_index == MOUSE_BUTTON_LEFT and not mouse_event.pressed:
+				_commit_staffing_slider_value(slider, building_id, count, max_for_active)
 	)
 
 func _count_text(count: int, total_staffed: int, operating: int, active_assigned: int, people_per_copy: int) -> String:
@@ -433,6 +450,9 @@ func _building_staff_requirement_text(building: Dictionary) -> String:
 
 func _building_can_use_group(building: Dictionary, group_id: String) -> bool:
 	var allowed: Array = building.get("allowed_worker_groups", []) as Array
+	for value: Variant in allowed:
+		if String(value) == group_id:
+			return true
 	for member_id: String in _group_member_ids(group_id):
 		for value: Variant in allowed:
 			if String(value) == member_id:
@@ -441,6 +461,12 @@ func _building_can_use_group(building: Dictionary, group_id: String) -> bool:
 
 func _assigned_count_for_group(building: Dictionary, group_id: String) -> int:
 	var assignments: Dictionary = building.get("staff_assignments", {}) as Dictionary
+	if group_id == "field_labour":
+		var combined_count: int = int(assignments.get("field_labour", 0))
+		# Keep old per-member save data readable if it is still present.
+		for member_id: String in _group_member_ids(group_id):
+			combined_count += int(assignments.get(member_id, 0))
+		return combined_count
 	var total: int = 0
 	for member_id: String in _group_member_ids(group_id):
 		total += int(assignments.get(member_id, 0))

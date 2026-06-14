@@ -606,6 +606,8 @@ func _show_labour_assignment_view() -> void:
 	labour_assignment_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	labour_assignment_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	dynamic_view_host.add_child(labour_assignment_view)
+	if labour_assignment_view.has_signal("staffing_preview_changed"):
+		labour_assignment_view.connect("staffing_preview_changed", Callable(self, "_on_labour_staffing_preview_changed"))
 	if labour_assignment_view.has_signal("staffing_group_changed"):
 		labour_assignment_view.connect("staffing_group_changed", Callable(self, "_on_labour_staffing_group_changed"))
 	elif labour_assignment_view.has_signal("staffing_changed"):
@@ -1306,7 +1308,7 @@ func _on_production_report_closed() -> void:
 	selected_production_report_id = ""
 	_refresh_all()
 
-func _on_labour_staffing_group_changed(building_id: String, group_id: String, staffed_count: int) -> void:
+func _apply_labour_staffing_change(building_id: String, group_id: String, staffed_count: int) -> void:
 	var state: Node = _state()
 	if state != null and state.has_method("set_staffed_building_count_for_group"):
 		state.call("set_staffed_building_count_for_group", building_id, group_id, staffed_count)
@@ -1314,6 +1316,16 @@ func _on_labour_staffing_group_changed(building_id: String, group_id: String, st
 		state.call("assign_labour_to_building", building_id, group_id, staffed_count)
 	elif state != null and state.has_method("set_staffed_building_count"):
 		state.call("set_staffed_building_count", building_id, staffed_count)
+
+func _on_labour_staffing_preview_changed(building_id: String, group_id: String, staffed_count: int) -> void:
+	# Live update while dragging. This updates the state, right-hand labour readout
+	# and Storehouse projections, but deliberately does not rebuild the Labour page.
+	_apply_labour_staffing_change(building_id, group_id, staffed_count)
+	_refresh_right_panel()
+
+func _on_labour_staffing_group_changed(building_id: String, group_id: String, staffed_count: int) -> void:
+	_apply_labour_staffing_change(building_id, group_id, staffed_count)
+	var state: Node = _state()
 
 	# Do not call _refresh_all() here: that recreates the Labour screen and
 	# makes the scroll position jump. Instead, update only the open Labour view
