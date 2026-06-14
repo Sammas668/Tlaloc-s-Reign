@@ -15,6 +15,7 @@ const STOCKPILE_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/Stockpi
 const MARKET_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/MarketView.tscn")
 const MARKET_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/MarketLedgerRow.tscn")
 const BUILDING_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/BuildingView.tscn")
+const LABOUR_ASSIGNMENT_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/LabourAssignmentView.tscn")
 const BUILDING_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/BuildingLedgerRow.tscn")
 
 @export var estate_art: Texture2D
@@ -72,6 +73,7 @@ var selected_building_id_by_location: Dictionary = {}
 var storehouse_view: Control = null
 var market_view: Control = null
 var building_view: Control = null
+var labour_assignment_view: Control = null
 var _local_state: Node = null
 var _state_connected: bool = false
 
@@ -352,6 +354,8 @@ func _refresh_main_content() -> void:
 	var special_view: String = String(profile.get("special_view", ""))
 	if current_location_id == "production" and _current_focus_id() == "overview":
 		_show_production_overview_content()
+	elif current_location_id == "production" and _current_focus_id() == "labour":
+		_show_labour_assignment_view()
 	elif special_view == "storehouse":
 		_show_storehouse_view()
 	elif special_view == "market":
@@ -587,6 +591,31 @@ func _show_market_view() -> void:
 	if market_view.has_method("setup"):
 		market_view.call("setup", _market_goods(), _current_focus_id(), selected_market_good_id)
 
+
+func _show_labour_assignment_view() -> void:
+	_set_content_root_layout(true)
+	if content_root:
+		content_root.visible = true
+	if content_text:
+		content_text.visible = false
+	if dynamic_view_host == null:
+		return
+	labour_assignment_view = LABOUR_ASSIGNMENT_VIEW_SCENE.instantiate() as Control
+	if labour_assignment_view == null:
+		return
+	labour_assignment_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	labour_assignment_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	dynamic_view_host.add_child(labour_assignment_view)
+	if labour_assignment_view.has_signal("staffing_group_changed"):
+		labour_assignment_view.connect("staffing_group_changed", Callable(self, "_on_labour_staffing_group_changed"))
+	elif labour_assignment_view.has_signal("staffing_changed"):
+		labour_assignment_view.connect("staffing_changed", Callable(self, "_on_labour_staffing_changed"))
+	elif labour_assignment_view.has_signal("assignment_changed"):
+		labour_assignment_view.connect("assignment_changed", Callable(self, "_on_labour_assignment_changed"))
+	var state: Node = _state()
+	if state != null and state.has_method("get_labour_assignment_data") and labour_assignment_view.has_method("setup"):
+		labour_assignment_view.call("setup", state.call("get_labour_assignment_data"))
+
 func _show_building_view(profile: Dictionary) -> void:
 	_set_content_root_layout(false)
 	if content_root:
@@ -616,6 +645,7 @@ func _clear_dynamic_views() -> void:
 	storehouse_view = null
 	market_view = null
 	building_view = null
+	labour_assignment_view = null
 	if dynamic_view_host:
 		_clear_children(dynamic_view_host)
 
@@ -638,6 +668,8 @@ func _refresh_right_panel() -> void:
 	elif special_view == "buildings":
 		if current_location_id == "production" and _current_focus_id() == "overview":
 			_build_production_overview_reports()
+		elif current_location_id == "production" and _current_focus_id() == "labour":
+			_build_labour_assignment_summary()
 		else:
 			_build_building_ledger(profile)
 	else:
@@ -1122,6 +1154,30 @@ func _market_report_messages() -> Array[String]:
 	output.append("Rival procurement reports will become more specific once rival market buying is connected.")
 	return output
 
+
+func _build_labour_assignment_summary() -> void:
+	var state: Node = _state()
+	if state == null or not state.has_method("get_labour_assignment_data"):
+		_add_notification("Labour assignment data is not connected yet.")
+		return
+	var labour_data: Dictionary = state.call("get_labour_assignment_data") as Dictionary
+	_add_notification("Use the assignment bars on the left to choose how many built chinampas and workshops are staffed.")
+	var groups: Array = labour_data.get("groups", []) as Array
+	for group_variant: Variant in groups:
+		var group: Dictionary = group_variant as Dictionary
+		var line: String = String(group.get("name", "Labour")) + ": "
+		line += str(int(group.get("assigned", 0))) + " assigned / " + str(int(group.get("total", 0))) + " total; "
+		line += str(int(group.get("unassigned", 0))) + " unassigned"
+		var shortfall: int = int(group.get("shortfall", 0))
+		if shortfall > 0:
+			line += "; short " + str(shortfall)
+		_add_notification(line)
+	var buildings: Array = labour_data.get("buildings", []) as Array
+	if buildings.is_empty():
+		_add_notification("No built productive buildings currently need assigned labour.")
+	else:
+		_add_notification(str(buildings.size()) + " built productive building type(s) can be staffed.")
+
 func _build_building_ledger(profile: Dictionary) -> void:
 	var buildings_for_view: Array[Dictionary] = _buildings_for_current_screen(profile)
 	if buildings_for_view.is_empty():
@@ -1137,6 +1193,10 @@ func _build_building_ledger(profile: Dictionary) -> void:
 			row.call("set_building_data", building, String(building.get("id", "")) == selected_id)
 		if row.has_signal("building_selected"):
 			row.connect("building_selected", Callable(self, "_on_building_selected"))
+		if row.has_signal("build_requested"):
+			row.connect("build_requested", Callable(self, "_on_build_requested"))
+		if row.has_signal("destroy_requested"):
+			row.connect("destroy_requested", Callable(self, "_on_destroy_requested"))
 		notification_list.add_child(row)
 
 func _build_report_list(profile: Dictionary) -> void:
@@ -1245,6 +1305,30 @@ func _on_production_report_selected(report_id: String) -> void:
 func _on_production_report_closed() -> void:
 	selected_production_report_id = ""
 	_refresh_all()
+
+func _on_labour_staffing_group_changed(building_id: String, group_id: String, staffed_count: int) -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("set_staffed_building_count_for_group"):
+		state.call("set_staffed_building_count_for_group", building_id, group_id, staffed_count)
+	elif state != null and state.has_method("assign_labour_to_building"):
+		state.call("assign_labour_to_building", building_id, group_id, staffed_count)
+	elif state != null and state.has_method("set_staffed_building_count"):
+		state.call("set_staffed_building_count", building_id, staffed_count)
+
+	# Do not call _refresh_all() here: that recreates the Labour screen and
+	# makes the scroll position jump. Instead, update only the open Labour view
+	# with fresh data so unassigned labour totals, slider limits, the right-hand
+	# ledger, and future Storehouse incoming/outgoing all follow the slider.
+	if current_location_id == "production" and _current_focus_id() == "labour" and labour_assignment_view != null:
+		if state != null and state.has_method("get_labour_assignment_data") and labour_assignment_view.has_method("refresh_from_data"):
+			labour_assignment_view.call_deferred("refresh_from_data", state.call("get_labour_assignment_data"))
+	_refresh_right_panel()
+
+func _on_labour_staffing_changed(building_id: String, staffed_count: int) -> void:
+	_on_labour_staffing_group_changed(building_id, "", staffed_count)
+
+func _on_labour_assignment_changed(building_id: String, group_id: String, amount: int) -> void:
+	_on_labour_staffing_group_changed(building_id, group_id, amount)
 
 func _on_storehouse_good_selected(good_id: String) -> void:
 	selected_storehouse_good_id = good_id
