@@ -14,6 +14,7 @@ signal destroy_failed(building_id: String, reason: String)
 const RESOURCE_DATA_PATH: String = "res://Data/Prototype0/resources.json"
 const BUILDING_DATA_PATH: String = "res://Data/Prototype0/buildings.json"
 const START_STATE_PATH: String = "res://Data/Prototype0/start_state.json"
+const MARKET_ECONOMY_DATA_PATH: String = "res://Data/Prototype0/market_economy.json"
 
 var resources: Dictionary = {}
 var resource_order: Array[String] = []
@@ -28,6 +29,7 @@ var active_housing_counts: Dictionary = {}
 var population: Dictionary = {}
 var base_housing_capacity: Dictionary = {}
 var labour_assignments: Dictionary = {}
+var market_economy: Dictionary = {}
 
 var current_veintena: int = 1
 var last_report: Array[String] = []
@@ -50,6 +52,7 @@ func _ready() -> void:
 func new_game() -> void:
 	_load_resource_definitions()
 	_load_building_definitions()
+	_load_market_economy_definitions()
 	_load_start_state()
 	initialized = true
 	last_report.clear()
@@ -101,6 +104,13 @@ func _load_building_definitions() -> void:
 		var b_data: Dictionary = buildings[b] as Dictionary
 		return int(a_data.get("priority", 999)) < int(b_data.get("priority", 999))
 	)
+
+func _load_market_economy_definitions() -> void:
+	market_economy.clear()
+	var data: Dictionary = _load_json_dictionary(MARKET_ECONOMY_DATA_PATH)
+	if data.is_empty():
+		return
+	market_economy = data
 
 func _load_start_state() -> void:
 	var data: Dictionary = _load_json_dictionary(START_STATE_PATH)
@@ -215,6 +225,76 @@ func get_storehouse_goods() -> Array[Dictionary]:
 	return output
 
 func get_market_goods() -> Array[Dictionary]:
+	var raw_goods: Array = estimate_market_resolution().get("goods", []) as Array
+	var output: Array[Dictionary] = []
+	for item_variant: Variant in raw_goods:
+		var item: Dictionary = item_variant as Dictionary
+		output.append(item.duplicate(true))
+	return output
+
+func estimate_market_resolution() -> Dictionary:
+	var base_goods: Array[Dictionary] = _base_market_goods()
+	var resolved_goods: Array[Dictionary] = _apply_market_economy_to_goods(base_goods)
+	var total_output: float = 0.0
+	var total_demand: float = 0.0
+	var net_value: float = 0.0
+	var crisis_goods: Array[String] = []
+	var shortage_goods: Array[String] = []
+	var surplus_goods: Array[String] = []
+	for good: Dictionary in resolved_goods:
+		total_output += float(good.get("village_total_production", 0.0))
+		total_demand += float(good.get("village_total_demand", 0.0))
+		net_value += float(good.get("village_net_change", 0.0))
+		var label: String = String(good.get("label", ""))
+		var name: String = String(good.get("name", good.get("id", "Good")))
+		if label == "Crisis":
+			crisis_goods.append(name)
+		elif label == "Shortage":
+			shortage_goods.append(name)
+		elif label == "Abundant":
+			surplus_goods.append(name)
+	return {
+		"goods": resolved_goods,
+		"source_of_truth": String(market_economy.get("source_of_truth", "start_state market stock/demand")),
+		"total_output": total_output,
+		"total_demand": total_demand,
+		"net_change": net_value,
+		"crisis_goods": crisis_goods,
+		"shortage_goods": shortage_goods,
+		"surplus_goods": surplus_goods,
+		"village_population": (market_economy.get("village_population", {}) as Dictionary).duplicate(true),
+		"schema_version": String(market_economy.get("schema_version", ""))
+	}
+
+func get_market_economy_summary() -> Dictionary:
+	return estimate_market_resolution()
+
+func get_village_economy_rows() -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	var goods: Array = estimate_market_resolution().get("goods", []) as Array
+	for good_variant: Variant in goods:
+		var good: Dictionary = good_variant as Dictionary
+		rows.append({
+			"id": String(good.get("id", "")),
+			"name": String(good.get("name", "Good")),
+			"natural_production": float(good.get("village_natural_production", 0.0)),
+			"building_output": float(good.get("village_building_output", 0.0)),
+			"estate_output": float(good.get("market_estate_output_supply", 0.0)),
+			"total_production": float(good.get("village_total_production", 0.0)),
+			"population_consumption": float(good.get("village_population_consumption", 0.0)),
+			"building_input_demand": float(good.get("village_building_input_demand", 0.0)),
+			"construction_demand": float(good.get("market_construction_demand", 0.0)),
+			"estate_input_demand": float(good.get("market_estate_input_demand", 0.0)),
+			"total_demand": float(good.get("village_total_demand", 0.0)),
+			"net_change": float(good.get("village_net_change", 0.0)),
+			"projected_market_stock": float(good.get("projected_market_stock", 0.0)),
+			"label": String(good.get("label", "Unknown")),
+			"trend": String(good.get("trend", "Stable")),
+			"note": String(good.get("village_note", ""))
+		})
+	return rows
+
+func _base_market_goods() -> Array[Dictionary]:
 	var output: Array[Dictionary] = []
 	for resource_id: String in resource_order:
 		var resource_data: Dictionary = resources[resource_id] as Dictionary
@@ -617,7 +697,11 @@ func _ensure_base_housing_capacity() -> void:
 	for group_variant: Variant in population.keys():
 		var group_id: String = String(group_variant)
 		if not base_housing_capacity.has(group_id):
-			base_housing_capacity[group_id] = int(population[group_id])
+			# Missing base capacity should not silently house the population.
+			# Starting housing now comes from start_state estate_buildings +
+			# active_housing_counts, so future/new groups default to 0 unless
+			# the start data explicitly grants inherited base capacity.
+			base_housing_capacity[group_id] = 0
 
 func _ensure_active_housing_counts() -> void:
 	for building_id: String in building_order:
@@ -2101,6 +2185,112 @@ func _rival_market_note(resource_id: String) -> String:
 		"cacao", "fine_textiles":
 			return "Diplomatic Rival pressure: palace-facing status goods."
 	return "Rival behaviour can alter this market once procurement is connected."
+
+
+func _apply_market_economy_to_goods(goods: Array[Dictionary]) -> Array[Dictionary]:
+	if market_economy.is_empty():
+		return goods
+	var natural: Dictionary = market_economy.get("village_natural_production", {}) as Dictionary
+	var building_outputs: Dictionary = market_economy.get("village_building_outputs", {}) as Dictionary
+	var population_use: Dictionary = market_economy.get("village_population_consumption", {}) as Dictionary
+	var building_inputs: Dictionary = market_economy.get("village_building_inputs", {}) as Dictionary
+	var construction_demand: Dictionary = market_economy.get("year1_construction_demand_per_turn", {}) as Dictionary
+	var estate_inputs: Dictionary = market_economy.get("starter_estate_input_demand", {}) as Dictionary
+	var estate_outputs: Dictionary = market_economy.get("starter_estate_output_supply", {}) as Dictionary
+	var event_modifiers: Dictionary = market_economy.get("event_modifiers", {}) as Dictionary
+	for index: int in range(goods.size()):
+		var good: Dictionary = goods[index]
+		var resource_id: String = String(good.get("id", ""))
+		var market_stock: float = float(good.get("market_stock", 0.0))
+		var base_value: float = float(good.get("base_value", 1.0))
+		var natural_output: float = _market_resource_value(natural, resource_id)
+		var building_output: float = _market_resource_value(building_outputs, resource_id)
+		var estate_output: float = _market_resource_value(estate_outputs, resource_id)
+		var population_demand: float = _market_resource_value(population_use, resource_id)
+		var building_demand: float = _market_resource_value(building_inputs, resource_id)
+		var construction_need: float = _market_resource_value(construction_demand, resource_id)
+		var estate_demand: float = _market_resource_value(estate_inputs, resource_id)
+		var event_delta: float = _market_resource_value(event_modifiers, resource_id)
+		# Spreadsheet reconciliation: the background market uses the v0.12 balance
+		# workbook as its source of truth. Natural output + village building output
+		# + the modelled starter-estate supply are compared against population
+		# upkeep + village production inputs + year-one construction pressure +
+		# starter-estate input pressure. This reproduces the Market Balance sheet
+		# net / turn values while still showing the village pieces separately.
+		var total_output: float = maxf(0.0, natural_output + building_output + estate_output + event_delta)
+		var total_demand: float = maxf(0.0, population_demand + building_demand + construction_need + estate_demand)
+		if total_demand <= 0.001:
+			total_demand = maxf(0.0, float(good.get("demand", 0.0)))
+		var net_change: float = total_output - total_demand
+		var projected_stock: float = maxf(0.0, market_stock + net_change)
+		var projected_coverage: float = 0.0
+		if total_demand > 0.001:
+			projected_coverage = projected_stock / total_demand
+		var multiplier: float = _market_scarcity_multiplier(projected_coverage, total_demand)
+		var projected_value: float = base_value * multiplier
+		good["starting_market_stock"] = market_stock
+		good["village_natural_production"] = natural_output
+		good["village_building_output"] = building_output
+		good["market_estate_output_supply"] = estate_output
+		good["village_event_delta"] = event_delta
+		good["village_total_production"] = total_output
+		good["village_population_consumption"] = population_demand
+		good["village_building_input_demand"] = building_demand
+		good["market_construction_demand"] = construction_need
+		good["market_estate_input_demand"] = estate_demand
+		good["village_total_demand"] = total_demand
+		good["village_net_change"] = net_change
+		good["projected_market_stock"] = projected_stock
+		good["projected_coverage"] = projected_coverage
+		good["projected_value"] = projected_value
+		good["demand"] = total_demand
+		good["coverage"] = projected_coverage
+		good["current_value"] = projected_value
+		good["label"] = _market_pressure_label(projected_coverage, total_demand)
+		good["trend"] = _market_net_trend(net_change, total_demand)
+		good["village_note"] = _market_good_note(resource_id)
+		goods[index] = good
+	return goods
+
+func _market_resource_value(source: Dictionary, resource_id: String) -> float:
+	return float(source.get(resource_id, 0.0))
+
+func _market_scarcity_multiplier(coverage: float, demand: float) -> float:
+	if demand <= 0.001:
+		return 1.0
+	if coverage <= 0.001:
+		return 3.0
+	return clampf(3.0 / coverage, 0.50, 3.0)
+
+func _market_pressure_label(coverage: float, demand: float) -> String:
+	if demand <= 0.001:
+		return "No demand"
+	if coverage < 1.0:
+		return "Crisis"
+	if coverage < 2.0:
+		return "Shortage"
+	if coverage < 3.0:
+		return "Tight"
+	if coverage > 6.0:
+		return "Abundant"
+	return "Comfortable"
+
+func _market_net_trend(net_change: float, demand: float) -> String:
+	if demand <= 0.001:
+		return "Stable"
+	if net_change <= -demand * 0.35:
+		return "Falling fast"
+	if net_change < -0.01:
+		return "Falling"
+	if net_change >= demand * 0.35:
+		return "Rising fast"
+	if net_change > 0.01:
+		return "Rising"
+	return "Stable"
+
+func _market_good_note(resource_id: String) -> String:
+	var notes: Dictionary = market_economy.get("resource_notes", {}) as Dictionary
+	return String(notes.get(resource_id, "No village economy note recorded yet."))
 
 func _format_amount(value: float) -> String:
 	if absf(value - roundf(value)) < 0.01:
