@@ -248,6 +248,9 @@ func _add_trade_row(resource_id: String) -> void:
 	slider.step = 1.0
 	slider.value = existing_value
 	slider.editable = sell_cap > 0 or buy_cap > 0
+	# Do not let mouse-wheel scrolling over the trade list change barter amounts.
+	# The wheel should scroll the list; bars should only change when dragged or balanced.
+	slider.scrollable = false
 	slider.tick_count = 3
 	slider.ticks_on_borders = true
 	slider.value_changed.connect(func(value: float) -> void:
