@@ -1,0 +1,9 @@
+[gd_scene load_steps=2 format=3 uid="uid://tradebasketview01"]
+
+[ext_resource type="Script" path="res://Scripts/ui/screens/TradeBasketView.gd" id="1_tradebasket"]
+
+[node name="TradeBasketView" type="PanelContainer"]
+layout_mode = 2
+size_flags_horizontal = 3
+size_flags_vertical = 3
+script = ExtResource("1_tradebasket")
