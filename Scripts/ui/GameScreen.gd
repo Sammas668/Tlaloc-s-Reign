@@ -16,21 +16,44 @@ const MARKET_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/MarketView.
 const MARKET_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/MarketLedgerRow.tscn")
 const BUILDING_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/BuildingView.tscn")
 const LABOUR_ASSIGNMENT_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/LabourAssignmentView.tscn")
+const HOUSING_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/HousingView.tscn")
 const BUILDING_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/BuildingLedgerRow.tscn")
+const HOUSING_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/HousingLedgerRow.tscn")
 
+@export_group("Main Screen Art")
 @export var estate_art: Texture2D
 @export var production_art: Texture2D
-@export var chinampas_art: Texture2D
-@export var fields_art: Texture2D # Backwards-compatible fallback if you already assigned art to the older Fields Art slot.
 @export var storehouse_art: Texture2D
-@export var workshops_art: Texture2D
-@export var shrines_art: Texture2D
-@export var warriors_art: Texture2D
 @export var market_art: Texture2D
 @export var housing_art: Texture2D
+@export var shrines_art: Texture2D
+@export var barracks_art: Texture2D
 @export var palace_art: Texture2D
 @export var rivals_art: Texture2D
+
+@export_group("Production Tab Art")
+@export var production_overview_art: Texture2D
+@export var production_chinampas_art: Texture2D
+@export var production_workshops_art: Texture2D
+@export var production_labour_art: Texture2D
+
+@export_group("Housing Tab Art")
+@export var housing_overview_art: Texture2D
+@export var housing_commoners_art: Texture2D
+@export var housing_tlacotin_art: Texture2D
+@export var housing_warriors_art: Texture2D
+@export var housing_priests_art: Texture2D
+@export var housing_nobles_art: Texture2D
+@export var housing_captives_art: Texture2D
+
+@export_group("UI Emblems")
 @export var prestige_emblem_art: Texture2D
+
+@export_group("Legacy Art Fallbacks")
+@export var chinampas_art: Texture2D
+@export var fields_art: Texture2D # Backwards-compatible fallback if you already assigned art to the older Fields Art slot.
+@export var workshops_art: Texture2D
+@export var warriors_art: Texture2D
 
 @export var visible_veintenas: int = 7
 
@@ -68,12 +91,14 @@ var current_focus_by_location: Dictionary = {}
 var selected_storehouse_good_id: String = ""
 var selected_market_good_id: String = ""
 var selected_production_report_id: String = ""
+var selected_housing_building_id: String = ""
 var selected_building_id_by_location: Dictionary = {}
 
 var storehouse_view: Control = null
 var market_view: Control = null
 var building_view: Control = null
 var labour_assignment_view: Control = null
+var housing_view: Control = null
 var _local_state: Node = null
 var _state_connected: bool = false
 
@@ -153,10 +178,9 @@ var _screen_profiles: Dictionary = {
 	},
 	"housing": {
 		"title": "Housing",
-		"special_view": "buildings",
-		"building_screen": "housing",
+		"special_view": "housing",
 		"report_title": "Housing Ledger",
-		"body": "Housing and support buildings turn population growth into an estate development problem. New people need maize, work and places to live before they strengthen the house.",
+		"body": "Housing controls how many people the estate can support. Overview reads population pressure; each population tab builds small, medium and large housing for that group.",
 		"focuses": [
 			{"id": "overview", "label": "Overview"},
 			{"id": "commoners", "label": "Commoners"},
@@ -164,8 +188,7 @@ var _screen_profiles: Dictionary = {
 			{"id": "warriors", "label": "Warriors"},
 			{"id": "priests", "label": "Priests"},
 			{"id": "nobles", "label": "Nobles"},
-			{"id": "captives", "label": "Captives"},
-			{"id": "build", "label": "Build"}
+			{"id": "captives", "label": "Captives"}
 		]
 	},
 	"shrines": {"title": "Shrines", "report_title": "Omens & Priest Reports", "body": "Offerings to Tlaloc, Huitzilopochtli, Tezcatlipoca and Quetzalcoatl will be managed here.", "focuses": [{"id": "overview", "label": "Overview"}, {"id": "tlaloc", "label": "Tlaloc"}, {"id": "huitzilopochtli", "label": "Huitzilopochtli"}, {"id": "tezcatlipoca", "label": "Tezcatlipoca"}, {"id": "quetzalcoatl", "label": "Quetzalcoatl"}, {"id": "offerings", "label": "Offerings"}], "reports": ["Shrine systems are not connected yet.", "Offerings will later consume goods from the Storehouse."]},
@@ -260,6 +283,7 @@ func show_focus(location_id: String, focus_id: String) -> void:
 		selected_production_report_id = ""
 		selected_building_id_by_location[location_id] = ""
 	if location_id == "housing":
+		selected_housing_building_id = ""
 		selected_building_id_by_location[location_id] = ""
 	_refresh_all()
 
@@ -360,6 +384,8 @@ func _refresh_main_content() -> void:
 		_show_storehouse_view()
 	elif special_view == "market":
 		_show_market_view()
+	elif special_view == "housing":
+		_show_housing_view()
 	elif special_view == "buildings":
 		_show_building_view(profile)
 	else:
@@ -618,6 +644,34 @@ func _show_labour_assignment_view() -> void:
 	if state != null and state.has_method("get_labour_assignment_data") and labour_assignment_view.has_method("setup"):
 		labour_assignment_view.call("setup", state.call("get_labour_assignment_data"))
 
+func _show_housing_view() -> void:
+	_set_content_root_layout(true)
+	if content_text:
+		content_text.visible = false
+	if _current_focus_id() != "overview" and selected_housing_building_id == "":
+		if content_root:
+			content_root.visible = false
+		return
+	if content_root:
+		content_root.visible = true
+	if dynamic_view_host == null:
+		return
+	housing_view = HOUSING_VIEW_SCENE.instantiate() as Control
+	if housing_view == null:
+		return
+	housing_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	housing_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	dynamic_view_host.add_child(housing_view)
+	if housing_view.has_signal("housing_closed"):
+		housing_view.connect("housing_closed", Callable(self, "_on_housing_closed"))
+	if housing_view.has_signal("build_requested"):
+		housing_view.connect("build_requested", Callable(self, "_on_housing_build_requested"))
+	if housing_view.has_signal("destroy_requested"):
+		housing_view.connect("destroy_requested", Callable(self, "_on_housing_destroy_requested"))
+	var state: Node = _state()
+	if state != null and state.has_method("get_housing_summary") and state.has_method("get_housing_rows") and housing_view.has_method("setup"):
+		housing_view.call("setup", state.call("get_housing_summary"), state.call("get_housing_rows", _current_focus_id()), _current_focus_id(), selected_housing_building_id)
+
 func _show_building_view(profile: Dictionary) -> void:
 	_set_content_root_layout(false)
 	if content_root:
@@ -648,6 +702,7 @@ func _clear_dynamic_views() -> void:
 	market_view = null
 	building_view = null
 	labour_assignment_view = null
+	housing_view = null
 	if dynamic_view_host:
 		_clear_children(dynamic_view_host)
 
@@ -667,6 +722,8 @@ func _refresh_right_panel() -> void:
 			_build_market_reports()
 		else:
 			_build_market_ledger()
+	elif special_view == "housing":
+		_build_housing_ledger()
 	elif special_view == "buildings":
 		if current_location_id == "production" and _current_focus_id() == "overview":
 			_build_production_overview_reports()
@@ -743,6 +800,23 @@ func _prestige_summary() -> Dictionary:
 	return summary
 
 func _report_title_for_current_focus(profile: Dictionary) -> String:
+	if current_location_id == "housing":
+		match _current_focus_id():
+			"overview":
+				return "Housing Overview"
+			"commoners":
+				return "Commoner Housing"
+			"tlacotin":
+				return "Tlacotin Housing"
+			"warriors":
+				return "Warrior Housing"
+			"priests":
+				return "Priest Housing"
+			"nobles":
+				return "Noble Housing"
+			"captives":
+				return "Captive Holding"
+		return "Housing Ledger"
 	if current_location_id != "production":
 		return String(profile.get("report_title", "Warnings & Reports"))
 	match _current_focus_id():
@@ -1180,6 +1254,30 @@ func _build_labour_assignment_summary() -> void:
 	else:
 		_add_notification(str(buildings.size()) + " built productive building type(s) can be staffed.")
 
+func _build_housing_ledger() -> void:
+	var state: Node = _state()
+	if state == null or not state.has_method("get_housing_rows"):
+		_add_notification("Housing data is not connected yet.")
+		return
+	var rows: Array = state.call("get_housing_rows", _current_focus_id()) as Array
+	if rows.is_empty():
+		_add_notification("No housing entries match this focus.")
+		return
+	for row_variant: Variant in rows:
+		var row_data: Dictionary = row_variant as Dictionary
+		var row: Control = HOUSING_LEDGER_ROW_SCENE.instantiate() as Control
+		if row == null:
+			continue
+		if row.has_method("set_housing_data"):
+			row.call("set_housing_data", row_data, String(row_data.get("id", "")) == selected_housing_building_id)
+		if row.has_signal("housing_selected"):
+			row.connect("housing_selected", Callable(self, "_on_housing_selected"))
+		if row.has_signal("build_requested"):
+			row.connect("build_requested", Callable(self, "_on_housing_build_requested"))
+		if row.has_signal("destroy_requested"):
+			row.connect("destroy_requested", Callable(self, "_on_housing_destroy_requested"))
+		notification_list.add_child(row)
+
 func _build_building_ledger(profile: Dictionary) -> void:
 	var buildings_for_view: Array[Dictionary] = _buildings_for_current_screen(profile)
 	if buildings_for_view.is_empty():
@@ -1342,6 +1440,31 @@ func _on_labour_staffing_changed(building_id: String, staffed_count: int) -> voi
 func _on_labour_assignment_changed(building_id: String, group_id: String, amount: int) -> void:
 	_on_labour_staffing_group_changed(building_id, group_id, amount)
 
+func _on_housing_selected(housing_id: String) -> void:
+	if _current_focus_id() == "overview":
+		# Overview rows are summary cards. They keep the overview panel open rather
+		# than selecting a buildable housing building.
+		return
+	selected_housing_building_id = housing_id
+	_refresh_all()
+
+func _on_housing_closed() -> void:
+	selected_housing_building_id = ""
+	if current_location_id == "housing":
+		_refresh_all()
+
+func _on_housing_build_requested(housing_id: String) -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("build_building"):
+		state.call("build_building", housing_id)
+	_refresh_all()
+
+func _on_housing_destroy_requested(housing_id: String) -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("destroy_building"):
+		state.call("destroy_building", housing_id)
+	_refresh_all()
+
 func _on_storehouse_good_selected(good_id: String) -> void:
 	selected_storehouse_good_id = good_id
 	if storehouse_view != null and storehouse_view.has_method("select_good"):
@@ -1398,30 +1521,75 @@ func _art_for_location(location_id: String) -> Texture2D:
 		"estate":
 			return estate_art
 		"production":
-			if production_art:
-				return production_art
-			if chinampas_art:
-				return chinampas_art
-			if workshops_art:
-				return workshops_art
-			return fields_art
+			return _art_for_production_focus(_current_focus_id())
 		"storehouse":
 			return storehouse_art
 		"market":
 			return market_art
 		"housing":
-			if housing_art:
-				return housing_art
-			return estate_art
+			return _art_for_housing_focus(_current_focus_id())
 		"shrines":
 			return shrines_art
 		"warriors":
+			if barracks_art:
+				return barracks_art
 			return warriors_art
 		"palace":
 			return palace_art
 		"rivals":
 			return rivals_art
 	return null
+
+func _art_for_production_focus(focus_id: String) -> Texture2D:
+	match focus_id:
+		"overview":
+			if production_overview_art:
+				return production_overview_art
+		"chinampas":
+			if production_chinampas_art:
+				return production_chinampas_art
+			if chinampas_art:
+				return chinampas_art
+		"workshops":
+			if production_workshops_art:
+				return production_workshops_art
+			if workshops_art:
+				return workshops_art
+		"labour":
+			if production_labour_art:
+				return production_labour_art
+	if production_art:
+		return production_art
+	if fields_art:
+		return fields_art
+	return estate_art
+
+func _art_for_housing_focus(focus_id: String) -> Texture2D:
+	match focus_id:
+		"overview":
+			if housing_overview_art:
+				return housing_overview_art
+		"commoners":
+			if housing_commoners_art:
+				return housing_commoners_art
+		"tlacotin":
+			if housing_tlacotin_art:
+				return housing_tlacotin_art
+		"warriors":
+			if housing_warriors_art:
+				return housing_warriors_art
+		"priests":
+			if housing_priests_art:
+				return housing_priests_art
+		"nobles":
+			if housing_nobles_art:
+				return housing_nobles_art
+		"captives":
+			if housing_captives_art:
+				return housing_captives_art
+	if housing_art:
+		return housing_art
+	return estate_art
 
 func _update_button_pressed_state() -> void:
 	var button_map: Dictionary = {
