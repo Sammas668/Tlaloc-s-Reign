@@ -4,7 +4,6 @@
 #
 # Marketplace ledger row with restored colour functionality and full market info.
 # Shows: Stock, Demand, Value, Coverage, State and Trend.
-# Row height increased so values no longer poke out of the button.
 extends Button
 
 signal good_selected(good_id: String)
@@ -40,7 +39,7 @@ var _has_pending_data: bool = false
 func _ready() -> void:
 	text = ""
 	clip_contents = true
-	custom_minimum_size = Vector2(0, 204)
+	custom_minimum_size = Vector2(0, 236)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	toggle_mode = true
@@ -63,7 +62,7 @@ func set_good_data(data: Dictionary, selected: bool) -> void:
 
 	text = ""
 	button_pressed = selected
-	custom_minimum_size = Vector2(0, 204)
+	custom_minimum_size = Vector2(0, 236)
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	tooltip_text = _build_tooltip(data)
@@ -84,11 +83,12 @@ func _apply_pending_data() -> void:
 	var data: Dictionary = _pending_data
 	var good_name: String = String(data.get("name", "Good"))
 	var market_stock: float = float(data.get("market_stock", 0.0))
-	var demand: float = float(data.get("demand", data.get("outgoing", 0.0)))
-	var current_value: float = float(data.get("current_value", 0.0))
-	var coverage: float = float(data.get("coverage", 0.0))
+	var demand: float = float(data.get("village_total_demand", data.get("demand", data.get("outgoing", 0.0))))
+	var current_value: float = float(data.get("projected_value", data.get("current_value", 0.0)))
+	var coverage: float = float(data.get("projected_coverage", data.get("coverage", 0.0)))
 	var market_state: String = String(data.get("label", "Unknown"))
 	var trend: String = String(data.get("trend", "Stable"))
+	var net_change: float = float(data.get("village_net_change", 0.0))
 
 	button_pressed = _pending_selected
 
@@ -112,8 +112,8 @@ func _apply_pending_data() -> void:
 		state_value.text = market_state
 		state_value.add_theme_color_override("font_color", _state_colour(market_state))
 	if trend_value:
-		trend_value.text = trend
-		trend_value.add_theme_color_override("font_color", _trend_colour(trend, market_state))
+		trend_value.text = _signed_fmt(net_change)
+		trend_value.add_theme_color_override("font_color", _net_colour(net_change))
 
 	_apply_base_style(_state_colour(market_state), _pending_selected)
 
@@ -121,7 +121,7 @@ func _apply_static_text() -> void:
 	if stock_title:
 		stock_title.text = "Stock"
 	if demand_title:
-		demand_title.text = "Demand"
+		demand_title.text = "Need"
 	if value_title:
 		value_title.text = "Value"
 	if coverage_title:
@@ -129,7 +129,7 @@ func _apply_static_text() -> void:
 	if state_title:
 		state_title.text = "State"
 	if trend_title:
-		trend_title.text = "Trend"
+		trend_title.text = "Net"
 
 	var title_labels: Array[Label] = [stock_title, demand_title, value_title, coverage_title, state_title, trend_title]
 	for label: Label in title_labels:
@@ -142,35 +142,39 @@ func _on_pressed() -> void:
 func _build_tooltip(data: Dictionary) -> String:
 	var good_name: String = String(data.get("name", "Good"))
 	var market_stock: float = float(data.get("market_stock", 0.0))
-	var demand: float = float(data.get("demand", data.get("outgoing", 0.0)))
-	var coverage: float = float(data.get("coverage", 0.0))
+	var projected_stock: float = float(data.get("projected_market_stock", market_stock))
+	var demand: float = float(data.get("village_total_demand", data.get("demand", data.get("outgoing", 0.0))))
+	var coverage: float = float(data.get("projected_coverage", data.get("coverage", 0.0)))
 	var base_value: float = float(data.get("base_value", 0.0))
-	var current_value: float = float(data.get("current_value", 0.0))
+	var current_value: float = float(data.get("projected_value", data.get("current_value", 0.0)))
 	var market_state: String = String(data.get("label", "Unknown"))
 	var trend: String = String(data.get("trend", "Stable"))
+	var net_change: float = float(data.get("village_net_change", 0.0))
 
 	return good_name \
 		+ "\nMarket stock: " + _fmt(market_stock) \
-		+ "\nDemand / turn: " + _fmt(demand) \
+		+ "\nProjected stock: " + _fmt(projected_stock) \
+		+ "\nVillage need / turn: " + _fmt(demand) \
+		+ "\nVillage net / turn: " + _signed_fmt(net_change) \
 		+ "\nCoverage: " + _fmt(coverage) + " turns" \
 		+ "\nBase value: " + _fmt(base_value) \
-		+ "\nCurrent value: " + _fmt(current_value) \
+		+ "\nProjected value: " + _fmt(current_value) \
 		+ "\nState: " + market_state \
 		+ "\nTrend: " + trend
 
 func _apply_text_sizes() -> void:
 	if name_label:
-		name_label.add_theme_font_size_override("font_size", 22)
+		name_label.add_theme_font_size_override("font_size", 23)
 
 	var title_labels: Array[Label] = [stock_title, demand_title, value_title, coverage_title, state_title, trend_title]
 	for label: Label in title_labels:
 		if label:
-			label.add_theme_font_size_override("font_size", 15)
+			label.add_theme_font_size_override("font_size", 16)
 
 	var value_labels: Array[Label] = [stock_value, demand_value, value_value, coverage_value, state_value, trend_value]
 	for label: Label in value_labels:
 		if label:
-			label.add_theme_font_size_override("font_size", 17)
+			label.add_theme_font_size_override("font_size", 18)
 
 func _apply_base_style(border_colour: Color, selected: bool) -> void:
 	var normal_style: StyleBoxFlat = StyleBoxFlat.new()
@@ -178,7 +182,7 @@ func _apply_base_style(border_colour: Color, selected: bool) -> void:
 	normal_style.border_color = Color(border_colour.r, border_colour.g, border_colour.b, 0.38)
 	normal_style.set_border_width_all(1)
 	normal_style.set_corner_radius_all(10)
-	normal_style.set_content_margin_all(6)
+	normal_style.set_content_margin_all(10)
 
 	var hover_style: StyleBoxFlat = normal_style.duplicate() as StyleBoxFlat
 	hover_style.bg_color = Color(0.03, 0.08, 0.08, 0.86)
@@ -235,6 +239,18 @@ func _value_colour(data: Dictionary) -> Color:
 	if current_value <= base_value * 0.8:
 		return COLOR_MUTED
 	return COLOR_TEXT
+
+func _net_colour(value: float) -> Color:
+	if value > 0.001:
+		return COLOR_POSITIVE
+	if value < -0.001:
+		return COLOR_NEGATIVE
+	return COLOR_TEAL
+
+func _signed_fmt(value: float) -> String:
+	if value > 0.001:
+		return "+" + _fmt(value)
+	return _fmt(value)
 
 func _fmt(value: float) -> String:
 	if is_equal_approx(value, roundf(value)):
