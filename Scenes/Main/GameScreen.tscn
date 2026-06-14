@@ -1,6 +1,6 @@
 [gd_scene format=3 uid="uid://bxlscu40nsrgd"]
 
-[ext_resource type="Script" uid="uid://cvoiiw875iubp" path="res://Scripts/ui/GameScreen.gd" id="1_gamescreen"]
+[ext_resource type="Script" path="res://Scripts/ui/GameScreenMarketOverviewPatch.gd" id="1_gamescreen"]
 [ext_resource type="Texture2D" uid="uid://dltxubjvphxtu" path="res://Assets/main_menu/Main menu.png" id="2_kljcf"]
 [ext_resource type="Texture2D" uid="uid://dktggms541iil" path="res://Assets/main_menu/Storehouse.png" id="3_0e7bs"]
 [ext_resource type="Texture2D" uid="uid://dltkfrkr65imq" path="res://Assets/main_menu/Chinampa.png" id="3_vp021"]

@@ -66,14 +66,17 @@ func _refresh() -> void:
 		heading_label.text = _focus_title()
 
 	# A clicked good must always take priority over screen-level reports.
-	# Previously Overview opened its general report first, so selecting a good from
-	# the right ledger never showed the stock detail.
 	if selected_good_id != "":
 		var selected_good: Dictionary = _selected_good()
 		if selected_good.is_empty():
 			_show_closed_detail()
 			return
 		_update_good_detail(selected_good)
+		return
+
+	# Overview is now a true dashboard rather than a duplicate of the Goods tab.
+	if focus_id == "overview":
+		_update_overview_detail()
 		return
 
 	# These tabs are intentionally report screens and can open without a good.
@@ -86,8 +89,11 @@ func _refresh() -> void:
 	if focus_id == "trade":
 		_update_trade_placeholder_detail()
 		return
+	if focus_id == "rivals":
+		_update_rivals_overview_detail()
+		return
 
-	# Overview / Goods / Rivals stay closed until a good is selected.
+	# Goods and category ledgers stay closed until a good is selected.
 	_show_closed_detail()
 
 func _focus_title() -> String:
@@ -123,6 +129,27 @@ func _open_detail(title: String, body_text: String) -> void:
 	if detail_stats:
 		detail_stats.bbcode_enabled = true
 		detail_stats.text = body_text
+
+func _update_overview_detail() -> void:
+	_open_detail("Marketplace Overview", _build_market_overview_text())
+	_clear_list(trade_list)
+	_add_list_heading(trade_list, "How to read this tab")
+	_add_list_line(trade_list, "Overview is the quick pressure read: what is scarce, what is abundant, what is rising, and what is dangerous to buy.")
+	_add_list_line(trade_list, "Use Goods for the full clickable resource ledger and individual supply/demand breakdowns.")
+	_add_list_line(trade_list, "Use Village Economy to inspect the background production and demand model behind the prices.")
+	_clear_list(rival_list)
+	_add_list_heading(rival_list, "Current market advice")
+	var sale_opportunities: Array[String] = _high_value_goods()
+	var weak_value_goods: Array[String] = _low_value_goods()
+	var danger_goods: Array[String] = _dangerous_buy_goods()
+	if not sale_opportunities.is_empty():
+		_add_list_line(rival_list, "Good sale opportunities: " + _join_limited(sale_opportunities, 5) + ".")
+	if not weak_value_goods.is_empty():
+		_add_list_line(rival_list, "Poor sale value: " + _join_limited(weak_value_goods, 5) + ".")
+	if not danger_goods.is_empty():
+		_add_list_line(rival_list, "Dangerous to buy: " + _join_limited(danger_goods, 5) + ".")
+	if sale_opportunities.is_empty() and weak_value_goods.is_empty() and danger_goods.is_empty():
+		_add_list_line(rival_list, "No extreme trade signal yet. Check the Goods tab before committing resources.")
 
 func _update_reports_detail() -> void:
 	_open_detail("Marketplace Reports", _build_market_reports_text())
@@ -160,6 +187,51 @@ func _update_trade_placeholder_detail() -> void:
 	_clear_list(rival_list)
 	_add_list_heading(rival_list, "Why this waits")
 	_add_list_line(rival_list, "The market now has village flows. Trade should be added on top of these real supply and demand numbers.")
+
+func _update_rivals_overview_detail() -> void:
+	_open_detail("Rival Procurement", _build_rivals_overview_text())
+	_clear_list(trade_list)
+	_add_list_heading(trade_list, "Rival market read")
+	_add_list_line(trade_list, "War Rival pressure should show up around obsidian, weapons, cloth, tools and warrior support goods.")
+	_add_list_line(trade_list, "Cunning Rival pressure should show up through tools, cloth, cacao and practical bottlenecks.")
+	_add_list_line(trade_list, "Diplomatic Rival pressure should show up through cacao, fine textiles, cloth, tools and court-facing goods.")
+	_clear_list(rival_list)
+	_add_list_heading(rival_list, "Visible signals")
+	for good: Dictionary in market_goods:
+		var rival_note: String = String(good.get("rival_note", ""))
+		if rival_note != "" and rival_note != "No rival signal recorded yet.":
+			_add_list_line(rival_list, String(good.get("name", "Good")) + ": " + rival_note)
+
+func _build_market_overview_text() -> String:
+	var crisis_goods: Array[String] = _goods_with_label("Crisis")
+	var shortage_goods: Array[String] = _goods_with_label("Shortage")
+	var tight_goods: Array[String] = _goods_with_label("Tight")
+	var abundant_goods: Array[String] = _goods_with_label("Abundant")
+	var falling_goods: Array[String] = _goods_with_trend("Falling")
+	falling_goods.append_array(_goods_with_trend("Falling fast"))
+	var rising_goods: Array[String] = _goods_with_trend("Rising")
+	rising_goods.append_array(_goods_with_trend("Rising fast"))
+	var text: String = "[b]Market pressure dashboard[/b]\n"
+	text += "Overview is now the quick decision screen. It summarises pressure instead of repeating the full Goods ledger.\n\n"
+	text += "• Goods tracked: " + str(market_goods.size()) + "\n"
+	if not crisis_goods.is_empty():
+		text += "• Crisis: [color=" + BB_NEGATIVE + "][b]" + _join_limited(crisis_goods, 6) + "[/b][/color]\n"
+	if not shortage_goods.is_empty():
+		text += "• Shortage: [color=" + BB_TIGHT + "][b]" + _join_limited(shortage_goods, 6) + "[/b][/color]\n"
+	if not tight_goods.is_empty():
+		text += "• Tight: [color=" + BB_WARNING + "][b]" + _join_limited(tight_goods, 6) + "[/b][/color]\n"
+	if not abundant_goods.is_empty():
+		text += "• Abundant: [color=" + BB_POSITIVE + "][b]" + _join_limited(abundant_goods, 6) + "[/b][/color]\n"
+	if not falling_goods.is_empty():
+		text += "• Falling stock/value pressure: " + _join_limited(falling_goods, 6) + "\n"
+	if not rising_goods.is_empty():
+		text += "• Rising supply/value relief: " + _join_limited(rising_goods, 6) + "\n"
+	if crisis_goods.is_empty() and shortage_goods.is_empty() and tight_goods.is_empty() and abundant_goods.is_empty():
+		text += "• No strong market pressure currently visible.\n"
+	text += "\n[b]Use next[/b]\n"
+	text += "• Open Goods to inspect individual stock, coverage and price.\n"
+	text += "• Open Village Economy to see why the market is moving."
+	return text.strip_edges()
 
 func _build_market_reports_text() -> String:
 	var crisis_goods: Array[String] = []
@@ -207,6 +279,14 @@ func _build_village_overview_text() -> String:
 
 func _build_trade_placeholder_text() -> String:
 	return "[b]Trade Basket Placeholder[/b]\nThe next patch should make this tab interactive. The basket should sell estate free goods into temporary trade value, then spend that value on bought goods from the market. No permanent Wealth resource should be added."
+
+func _build_rivals_overview_text() -> String:
+	var text: String = "[b]Rival procurement pressure[/b]\n"
+	text += "This tab separates rival market intention from the general Goods ledger. It is still partly forward-looking until rival buying is fully connected.\n\n"
+	text += "• War Rival: weapons, obsidian, cloth, tools and captive-support goods.\n"
+	text += "• Cunning Rival: tools, cloth, cacao and practical bottlenecks.\n"
+	text += "• Diplomatic Rival: cacao, fine textiles, cloth and palace-facing goods.\n"
+	return text.strip_edges()
 
 func _update_good_detail(good: Dictionary) -> void:
 	_open_detail(String(good.get("name", "Good")), _build_good_stats(good))
@@ -278,6 +358,46 @@ func _filtered_goods() -> Array[Dictionary]:
 				include_good = category == focus_id
 		if include_good:
 			output.append(good)
+	return output
+
+func _goods_with_label(label_name: String) -> Array[String]:
+	var output: Array[String] = []
+	for good: Dictionary in market_goods:
+		if String(good.get("label", "")) == label_name:
+			output.append(String(good.get("name", "Good")))
+	return output
+
+func _goods_with_trend(trend_name: String) -> Array[String]:
+	var output: Array[String] = []
+	for good: Dictionary in market_goods:
+		if String(good.get("trend", "")) == trend_name:
+			output.append(String(good.get("name", "Good")) + " " + _fmt(float(good.get("village_net_change", 0.0))))
+	return output
+
+func _high_value_goods() -> Array[String]:
+	var output: Array[String] = []
+	for good: Dictionary in market_goods:
+		var base_value: float = float(good.get("base_value", 0.0))
+		var current_value: float = float(good.get("current_value", 0.0))
+		if base_value > 0.0 and current_value >= base_value * 1.35:
+			output.append(String(good.get("name", "Good")) + " " + _fmt(current_value))
+	return output
+
+func _low_value_goods() -> Array[String]:
+	var output: Array[String] = []
+	for good: Dictionary in market_goods:
+		var base_value: float = float(good.get("base_value", 0.0))
+		var current_value: float = float(good.get("current_value", 0.0))
+		if base_value > 0.0 and current_value <= base_value * 0.80:
+			output.append(String(good.get("name", "Good")) + " " + _fmt(current_value))
+	return output
+
+func _dangerous_buy_goods() -> Array[String]:
+	var output: Array[String] = []
+	for good: Dictionary in market_goods:
+		var label: String = String(good.get("label", ""))
+		if label == "Crisis" or label == "Shortage":
+			output.append(String(good.get("name", "Good")))
 	return output
 
 func _clear_list(list: VBoxContainer) -> void:
