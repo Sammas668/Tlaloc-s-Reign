@@ -1,0 +1,14 @@
+diff --git a/Scripts/Autoload/TRGameState.gd b/Scripts/Autoload/TRGameState.gd
+--- a/Scripts/Autoload/TRGameState.gd
++++ b/Scripts/Autoload/TRGameState.gd
+@@
+ func _ensure_base_housing_capacity() -> void:
+ 	for group_variant: Variant in population.keys():
+ 		var group_id: String = String(group_variant)
+ 		if not base_housing_capacity.has(group_id):
+-			base_housing_capacity[group_id] = int(population[group_id])
++			# Missing base capacity should not silently house the population.
++			# Starting housing now comes from start_state estate_buildings +
++			# active_housing_counts, so future/new groups default to 0 unless
++			# the start data explicitly grants inherited base capacity.
++			base_housing_capacity[group_id] = 0
