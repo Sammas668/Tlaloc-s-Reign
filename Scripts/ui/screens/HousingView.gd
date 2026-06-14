@@ -14,6 +14,7 @@ var _root: PanelContainer = null
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fill_parent(self)
 
 func setup(summary: Dictionary, rows: Array, focus_id: String, selected_id: String) -> void:
 	_rows.clear()
@@ -28,6 +29,7 @@ func select_housing(housing_id: String) -> void:
 	_rebuild()
 
 func _rebuild() -> void:
+	_fill_parent(self)
 	_clear_children(self)
 	if _selected_id == "":
 		visible = false
@@ -42,6 +44,7 @@ func _build_detail_panel(housing_id: String) -> void:
 		return
 	_root = _make_panel()
 	add_child(_root)
+	_fill_parent(_root)
 	var margin: MarginContainer = _make_margin(18, 18, 16, 16)
 	_root.add_child(margin)
 	var stack: VBoxContainer = VBoxContainer.new()
@@ -166,6 +169,7 @@ func _make_panel() -> PanelContainer:
 	var panel: PanelContainer = PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_fill_parent(panel)
 	panel.add_theme_stylebox_override("panel", _make_style(Color(0.0, 0.0, 0.0, 0.64), Color(0.50, 0.82, 0.74, 0.36), 14))
 	return panel
 
@@ -239,6 +243,17 @@ func _make_style(bg: Color, border: Color, radius: int) -> StyleBoxFlat:
 	style.shadow_color = Color(0.0, 0.0, 0.0, 0.35)
 	style.shadow_size = 8
 	return style
+
+func _fill_parent(control: Control) -> void:
+	if control == null:
+		return
+	control.set_anchors_preset(Control.PRESET_FULL_RECT)
+	control.offset_left = 0.0
+	control.offset_top = 0.0
+	control.offset_right = 0.0
+	control.offset_bottom = 0.0
+	control.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	control.size_flags_vertical = Control.SIZE_EXPAND_FILL
 
 func _clear_children(parent: Node) -> void:
 	for child: Node in parent.get_children():

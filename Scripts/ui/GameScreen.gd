@@ -719,6 +719,7 @@ func _show_housing_overview_content() -> void:
 		content_root.visible = true
 	if dynamic_view_host == null:
 		return
+	dynamic_view_host.visible = true
 	var panel: PanelContainer = PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -771,6 +772,7 @@ func _show_housing_mothball_view() -> void:
 		content_text.visible = false
 	if dynamic_view_host == null:
 		return
+	dynamic_view_host.visible = true
 	housing_mothball_view = HOUSING_MOTHBALL_VIEW_SCENE.instantiate() as Control
 	if housing_mothball_view == null:
 		return
