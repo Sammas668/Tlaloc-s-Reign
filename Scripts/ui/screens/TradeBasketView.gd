@@ -5,6 +5,7 @@
 # Barter-only trade basket. There is no stored Wealth, coin or market credit.
 # Negative slider values sell estate free stock into the market.
 # Positive slider values buy market stock into the estate.
+# Balance buttons can set a row to the amount needed to balance the rest of the basket.
 extends PanelContainer
 
 signal trade_changed()
@@ -110,7 +111,7 @@ func _build_ui() -> void:
 	button_row.add_child(error_label)
 
 	var helper: Label = Label.new()
-	helper.text = "Drag left to sell estate free stock. Drag right to buy market stock. Prices use marginal barter value: each unit bought raises the next unit price, and each unit sold lowers the next unit value. Sold value must cover bought value; surplus is lost."
+	helper.text = "Drag left to sell estate free stock. Drag right to buy market stock. Prices use projected market value and marginal barter pricing: each unit bought raises the next unit price, and each unit sold lowers the next unit value. Use a row's Balance button to set that good to the amount needed to balance the rest of the basket."
 	helper.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	helper.add_theme_font_size_override("font_size", 19)
 	helper.add_theme_color_override("font_color", COLOR_MUTED)
@@ -211,6 +212,17 @@ func _add_trade_row(resource_id: String) -> void:
 	name_label.add_theme_color_override("font_color", COLOR_TEXT)
 	header.add_child(name_label)
 
+	var balance_button: Button = Button.new()
+	balance_button.text = "Balance"
+	balance_button.custom_minimum_size = Vector2(120, 38)
+	balance_button.add_theme_font_size_override("font_size", 18)
+	balance_button.tooltip_text = "Set this row to the buy/sell amount needed to balance the rest of the basket."
+	balance_button.disabled = sell_cap <= 0 and buy_cap <= 0
+	balance_button.pressed.connect(func() -> void:
+		_on_balance_pressed(resource_id)
+	)
+	header.add_child(balance_button)
+
 	var amount_label: Label = Label.new()
 	amount_label.custom_minimum_size = Vector2(190, 0)
 	amount_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
@@ -259,6 +271,7 @@ func _add_trade_row(resource_id: String) -> void:
 
 	row_info_by_id[resource_id] = {
 		"slider": slider,
+		"balance_button": balance_button,
 		"amount_label": amount_label,
 		"meta_label": meta_label,
 		"name": display_name,
@@ -267,7 +280,9 @@ func _add_trade_row(resource_id: String) -> void:
 		"estate_stored": estate_stored,
 		"estate_reserved": estate_reserved,
 		"market_stock": market_stock,
-		"market_state": market_state
+		"market_state": market_state,
+		"sell_cap": sell_cap,
+		"buy_cap": buy_cap
 	}
 	_update_row_labels(resource_id)
 
@@ -279,6 +294,55 @@ func _on_slider_changed(resource_id: String, value: float) -> void:
 	_update_row_labels(resource_id)
 	_refresh_summary()
 	emit_signal("trade_changed")
+
+func _on_balance_pressed(resource_id: String) -> void:
+	if not row_info_by_id.has(resource_id):
+		return
+	var info: Dictionary = row_info_by_id[resource_id] as Dictionary
+	var slider: HSlider = info.get("slider", null) as HSlider
+	if slider == null:
+		return
+
+	# Balance against the rest of the basket, ignoring this row's current value.
+	# If the rest of the basket is surplus, this row should buy enough goods to spend it.
+	# If the rest of the basket is deficit, this row should sell enough goods to cover it.
+	var totals: Dictionary = _basket_totals_excluding(resource_id)
+	var sold_without: float = float(totals.get("sold_value", 0.0))
+	var bought_without: float = float(totals.get("bought_value", 0.0))
+	var balance_without: float = sold_without - bought_without
+	var new_amount: float = 0.0
+
+	if balance_without > 0.001:
+		var buy_cap: int = int(info.get("buy_cap", 0))
+		new_amount = float(_largest_buy_amount_within_value(resource_id, balance_without, buy_cap))
+		if new_amount <= 0.0:
+			_set_error_text("No " + String(info.get("name", resource_id)) + " can be bought to spend the current surplus.")
+	elif balance_without < -0.001:
+		var sell_cap: int = int(info.get("sell_cap", 0))
+		new_amount = -float(_smallest_sell_amount_covering_value(resource_id, absf(balance_without), sell_cap))
+		if new_amount >= 0.0:
+			_set_error_text("Not enough free " + String(info.get("name", resource_id)) + " to balance this basket.")
+	else:
+		new_amount = 0.0
+		_set_error_text("The basket is already balanced without " + String(info.get("name", resource_id)) + ".")
+
+	if absf(new_amount) <= 0.001:
+		trade_plan.erase(resource_id)
+	else:
+		trade_plan[resource_id] = new_amount
+
+	# Clamp again against the live slider limits and push the UI to the selected amount.
+	new_amount = clampf(new_amount, float(slider.min_value), float(slider.max_value))
+	if not is_equal_approx(slider.value, new_amount):
+		slider.value = new_amount
+	else:
+		_update_row_labels(resource_id)
+		_refresh_summary()
+		emit_signal("trade_changed")
+
+func _set_error_text(text: String) -> void:
+	if error_label:
+		error_label.text = text
 
 func _update_row_labels(resource_id: String) -> void:
 	if not row_info_by_id.has(resource_id):
@@ -294,6 +358,7 @@ func _update_row_labels(resource_id: String) -> void:
 	var market_state: String = String(info.get("market_state", "Unknown"))
 	var pricing: Dictionary = _trade_pricing(resource_id, amount)
 	var current_unit_value: float = _current_unit_value_for(resource_id)
+	var after_slider_value: float = float(pricing.get("next_unit_value", current_unit_value))
 
 	if amount_label:
 		if amount < -0.001:
@@ -307,11 +372,11 @@ func _update_row_labels(resource_id: String) -> void:
 			amount_label.add_theme_color_override("font_color", COLOR_TEAL)
 
 	if meta_label:
-		var value_text: String = "Current unit " + _fmt(current_unit_value)
+		var value_text: String = "Projected value now " + _fmt(current_unit_value)
 		if absf(amount) > 0.001:
+			value_text += " → after slider " + _fmt(after_slider_value)
 			value_text += " | Basket total " + _fmt(float(pricing.get("total_value", 0.0)))
 			value_text += " | Avg " + _fmt(float(pricing.get("average_value", 0.0)))
-			value_text += " | Next unit " + _fmt(float(pricing.get("next_unit_value", current_unit_value)))
 		value_text += " | Estate stored " + _fmt(estate_stored)
 		value_text += " | Free " + _fmt(estate_free)
 		if estate_reserved > 0.001:
@@ -335,11 +400,11 @@ func _refresh_summary() -> void:
 		summary_label.text = "[b]Barter Balance[/b]: [color=" + line_colour + "][b]" + _signed_fmt(balance) + "[/b][/color]\n"
 		summary_label.text += "Sold value: [b]" + _fmt(sold_value) + "[/b]   Bought value: [b]" + _fmt(bought_value) + "[/b]\n"
 		if balance < -0.001:
-			summary_label.text += "[color=#FF6152]Offer more goods or buy less to make the barter acceptable.[/color]"
+			summary_label.text += "[color=#FF6152]Offer more goods or buy less to make the barter acceptable. Use Balance on a sellable good to cover the gap.[/color]"
 		elif bought_value <= 0.001 and sold_value <= 0.001:
 			summary_label.text += "Move a slider to build a barter offer."
 		elif balance > 0.001:
-			summary_label.text += "[color=#FFC25A]Surplus value will be lost when accepted; it is not stored as Wealth.[/color]"
+			summary_label.text += "[color=#FFC25A]Surplus value will be lost when accepted; use Balance on a buyable good to spend it.[/color]"
 		else:
 			summary_label.text += "[color=#7AF09D]Balanced barter ready.[/color]"
 
@@ -350,14 +415,19 @@ func _refresh_summary() -> void:
 	if error_label:
 		if balance < -0.001:
 			error_label.text = "Trade asks for " + _fmt(absf(balance)) + " more value than offered."
-		else:
+		elif error_label.text.begins_with("Trade asks for"):
 			error_label.text = ""
 
 func _basket_totals() -> Dictionary:
+	return _basket_totals_excluding("")
+
+func _basket_totals_excluding(excluded_resource_id: String) -> Dictionary:
 	var sold_value: float = 0.0
 	var bought_value: float = 0.0
 	for key_variant: Variant in trade_plan.keys():
 		var resource_id: String = String(key_variant)
+		if excluded_resource_id != "" and resource_id == excluded_resource_id:
+			continue
 		var amount: float = float(trade_plan[key_variant])
 		var pricing: Dictionary = _trade_pricing(resource_id, amount)
 		var value: float = float(pricing.get("total_value", 0.0))
@@ -366,6 +436,23 @@ func _basket_totals() -> Dictionary:
 		elif amount > 0.001:
 			bought_value += value
 	return {"sold_value": sold_value, "bought_value": bought_value}
+
+func _largest_buy_amount_within_value(resource_id: String, target_value: float, max_amount: int) -> int:
+	var best_amount: int = 0
+	for amount: int in range(1, max_amount + 1):
+		var value: float = float(_trade_pricing(resource_id, float(amount)).get("total_value", 0.0))
+		if value <= target_value + 0.001:
+			best_amount = amount
+		else:
+			break
+	return best_amount
+
+func _smallest_sell_amount_covering_value(resource_id: String, target_value: float, max_amount: int) -> int:
+	for amount: int in range(1, max_amount + 1):
+		var value: float = float(_trade_pricing(resource_id, -float(amount)).get("total_value", 0.0))
+		if value >= target_value - 0.001:
+			return amount
+	return 0
 
 func _on_clear_pressed() -> void:
 	trade_plan.clear()
@@ -574,7 +661,7 @@ func _trade_pricing(resource_id: String, amount: float) -> Dictionary:
 func _market_stock_for_pricing(market_good: Dictionary) -> float:
 	# The Market rows price goods from projected post-village stock when available.
 	# Using the same value here keeps the Trade Basket aligned with the visible
-	# market price, while the final accepted trade still moves the actual stockpile.
+	# projected market price, while the final accepted trade still moves the actual stockpile.
 	return maxf(0.0, float(market_good.get("projected_market_stock", market_good.get("market_stock", 0.0))))
 
 func _trade_price_for_stock(resource_id: String, stock_value: float) -> float:
