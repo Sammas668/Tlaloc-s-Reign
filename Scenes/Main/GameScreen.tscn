@@ -9,6 +9,7 @@
 [ext_resource type="Texture2D" uid="uid://dvnwuejitd5yy" path="res://Assets/main_menu/Workshop.png" id="6_mhd1y"]
 [ext_resource type="Texture2D" uid="uid://d02kuu03qt5pj" path="res://Assets/main_menu/Housing.png" id="6_pmpna"]
 [ext_resource type="Texture2D" uid="uid://x1kvxsv5bggp" path="res://Assets/main_menu/Barracks.png" id="7_5172k"]
+[ext_resource type="Texture2D" uid="uid://cf2gjhrxn7uam" path="res://Assets/main_menu/Palace.png" id="8_nrrqa"]
 
 [node name="GameScreen" type="Control" unique_id=18535046]
 layout_mode = 3
@@ -24,6 +25,7 @@ storehouse_art = ExtResource("3_0e7bs")
 market_art = ExtResource("4_reg34")
 housing_art = ExtResource("6_pmpna")
 barracks_art = ExtResource("7_5172k")
+palace_art = ExtResource("8_nrrqa")
 production_overview_art = ExtResource("6_5ojdd")
 production_chinampas_art = ExtResource("3_vp021")
 production_workshops_art = ExtResource("6_mhd1y")
