@@ -94,6 +94,7 @@ var current_location_id: String = "estate"
 var current_focus_by_location: Dictionary = {}
 var selected_storehouse_good_id: String = ""
 var selected_market_good_id: String = ""
+var selected_estate_report_id: String = ""
 var selected_production_report_id: String = ""
 var selected_housing_building_id: String = ""
 var selected_housing_report_id: String = ""
@@ -385,7 +386,9 @@ func _refresh_main_content() -> void:
 	if location_art:
 		location_art.texture = _art_for_location(current_location_id)
 	var special_view: String = String(profile.get("special_view", ""))
-	if current_location_id == "production" and _current_focus_id() == "overview":
+	if current_location_id == "estate":
+		_show_estate_report_content(profile)
+	elif current_location_id == "production" and _current_focus_id() == "overview":
 		_show_production_overview_content()
 	elif current_location_id == "production" and _current_focus_id() == "labour":
 		_show_labour_assignment_view()
@@ -446,6 +449,70 @@ func _show_text_content(profile: Dictionary) -> void:
 		content_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		content_text.custom_minimum_size = Vector2(0, 300)
 		content_text.text = _build_standard_text(profile)
+
+func _show_estate_report_content(profile: Dictionary) -> void:
+	if selected_estate_report_id == "":
+		_show_text_content(profile)
+		return
+
+	_set_content_root_layout(true)
+	if content_text:
+		content_text.visible = false
+	if content_root:
+		content_root.visible = true
+	if dynamic_view_host == null:
+		return
+	dynamic_view_host.visible = true
+
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.64), Color(0.50, 0.82, 0.74, 0.36), 14))
+	dynamic_view_host.add_child(panel)
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_bottom", 14)
+	panel.add_child(margin)
+
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	stack.add_theme_constant_override("separation", 10)
+	margin.add_child(stack)
+
+	var header: HBoxContainer = HBoxContainer.new()
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_theme_constant_override("separation", 12)
+	stack.add_child(header)
+
+	var title_label: Label = Label.new()
+	title_label.text = _estate_report_title(selected_estate_report_id)
+	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_label.add_theme_font_size_override("font_size", 27)
+	title_label.clip_text = true
+	header.add_child(title_label)
+
+	var close_button: Button = Button.new()
+	close_button.text = "X"
+	close_button.custom_minimum_size = Vector2(46, 42)
+	close_button.add_theme_font_size_override("font_size", 22)
+	close_button.pressed.connect(_on_estate_report_closed)
+	header.add_child(close_button)
+
+	var body: RichTextLabel = RichTextLabel.new()
+	body.bbcode_enabled = true
+	body.fit_content = false
+	body.scroll_active = true
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_theme_font_size_override("normal_font_size", 22)
+	body.add_theme_font_size_override("bold_font_size", 24)
+	body.add_theme_constant_override("line_separation", 6)
+	body.text = _build_estate_report_detail_text(selected_estate_report_id)
+	stack.add_child(body)
 
 func _show_production_overview_content() -> void:
 	_set_content_root_layout(true)
@@ -834,7 +901,9 @@ func _refresh_right_panel() -> void:
 	_refresh_house_claim()
 
 	var special_view: String = String(profile.get("special_view", ""))
-	if special_view == "storehouse":
+	if current_location_id == "estate":
+		_build_estate_reports()
+	elif special_view == "storehouse":
 		_build_storehouse_ledger()
 	elif special_view == "market":
 		if _current_focus_id() == "reports":
@@ -924,6 +993,8 @@ func _prestige_summary() -> Dictionary:
 	return summary
 
 func _report_title_for_current_focus(profile: Dictionary) -> String:
+	if current_location_id == "estate":
+		return "Estate Reports"
 	if current_location_id == "housing":
 		match _current_focus_id():
 			"overview":
@@ -957,6 +1028,274 @@ func _report_title_for_current_focus(profile: Dictionary) -> String:
 		"labour":
 			return "Productive Labour"
 	return "Production Reports"
+
+func _build_estate_reports() -> void:
+	for report: Dictionary in _estate_report_definitions():
+		_add_estate_report_button(report)
+	if selected_estate_report_id != "":
+		var close_button: Button = Button.new()
+		close_button.text = "Close Report"
+		close_button.custom_minimum_size = Vector2(0, 54)
+		close_button.add_theme_font_size_override("font_size", 19)
+		close_button.pressed.connect(_on_estate_report_closed)
+		notification_list.add_child(close_button)
+
+func _estate_report_definitions() -> Array[Dictionary]:
+	return [
+		{"id": "previous_turn", "title": "Previous Turn Summary", "subtitle": _estate_report_subtitle("previous_turn")},
+		{"id": "next_turn", "title": "Estimated Next Turn", "subtitle": _estate_report_subtitle("next_turn")},
+		{"id": "goods_warnings", "title": "Goods Warnings", "subtitle": _estate_report_subtitle("goods_warnings")},
+		{"id": "population_housing", "title": "Population & Housing", "subtitle": _estate_report_subtitle("population_housing")},
+		{"id": "production_labour", "title": "Production & Labour", "subtitle": _estate_report_subtitle("production_labour")},
+		{"id": "action_priorities", "title": "Action Priorities", "subtitle": _estate_report_subtitle("action_priorities")}
+	]
+
+func _estate_report_title(report_id: String) -> String:
+	match report_id:
+		"previous_turn":
+			return "Previous Turn Summary"
+		"next_turn":
+			return "Estimated Next Turn"
+		"goods_warnings":
+			return "Goods Warnings"
+		"population_housing":
+			return "Population & Housing"
+		"production_labour":
+			return "Production & Labour"
+		"action_priorities":
+			return "Action Priorities"
+	return "Estate Report"
+
+func _estate_report_subtitle(report_id: String) -> String:
+	match report_id:
+		"previous_turn":
+			var previous_lines: Array[String] = _last_turn_report_lines()
+			if previous_lines.is_empty():
+				return "No previous turn resolved"
+			return _shorten_report_line(previous_lines[0], 58)
+		"next_turn":
+			var warnings: Array[String] = _estate_goods_warning_lines(1)
+			if not warnings.is_empty():
+				return _shorten_report_line(warnings[0], 58)
+			var outputs: String = _resource_dictionary_inline(_production_output_totals(), 3)
+			if outputs == "":
+				return "No expected production output"
+			return "Expected output: " + outputs
+		"goods_warnings":
+			var goods_warnings: Array[String] = _estate_goods_warning_lines(99)
+			if goods_warnings.is_empty():
+				return "No immediate goods warning"
+			return str(goods_warnings.size()) + " good(s) need attention"
+		"population_housing":
+			var summary: Dictionary = _housing_summary()
+			return "Active " + str(int(summary.get("total_active_population", 0))) + " / total " + str(int(summary.get("total_population", 0))) + "; inactive " + str(int(summary.get("total_inactive_population", 0)))
+		"production_labour":
+			var production_summary: Dictionary = _production_building_summary()
+			return "Operating " + str(int(production_summary.get("operating", 0))) + "; blocked " + str(int(production_summary.get("blocked", 0)))
+		"action_priorities":
+			var priorities: Array[String] = _estate_action_priority_lines(1)
+			if priorities.is_empty():
+				return "No urgent action"
+			return _shorten_report_line(priorities[0], 58)
+	return "Open report"
+
+func _add_estate_report_button(report: Dictionary) -> void:
+	if notification_list == null:
+		return
+	var report_id: String = String(report.get("id", ""))
+	var selected: bool = report_id == selected_estate_report_id
+	var button: Button = Button.new()
+	button.text = String(report.get("title", "Report")) + "\n" + String(report.get("subtitle", "Open report"))
+	button.custom_minimum_size = Vector2(0, 94)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.toggle_mode = true
+	button.button_pressed = selected
+	button.clip_text = true
+	button.add_theme_font_size_override("font_size", 19)
+	var border: Color = Color(0.34, 0.71, 0.63, 0.45)
+	if selected:
+		border = Color(0.76, 0.63, 0.32, 0.86)
+	button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.04, 0.07, 0.065, 0.93), border, 10))
+	button.add_theme_stylebox_override("hover", _make_panel_style(Color(0.06, 0.095, 0.085, 0.96), Color(0.50, 0.82, 0.74, 0.75), 10))
+	button.add_theme_stylebox_override("pressed", _make_panel_style(Color(0.10, 0.12, 0.095, 0.98), Color(0.76, 0.63, 0.32, 0.86), 10))
+	button.pressed.connect(func() -> void:
+		_on_estate_report_selected(report_id)
+	)
+	notification_list.add_child(button)
+
+func _build_estate_report_detail_text(report_id: String) -> String:
+	match report_id:
+		"previous_turn":
+			return _build_estate_previous_turn_report_text()
+		"next_turn":
+			return _build_estate_next_turn_report_text()
+		"goods_warnings":
+			return _build_estate_goods_warnings_report_text()
+		"population_housing":
+			return _build_estate_population_housing_report_text()
+		"production_labour":
+			return _build_estate_production_labour_report_text()
+		"action_priorities":
+			return _build_estate_action_priorities_report_text()
+	return "Select an Estate report from the right-hand panel."
+
+func _build_estate_previous_turn_report_text() -> String:
+	var text: String = "[b]Previous Turn Summary[/b]\n"
+	text += "This is the last resolved Veintena report from the estate simulation.\n\n"
+	var lines: Array[String] = _last_turn_report_lines()
+	if lines.is_empty():
+		text += "• No previous turn has resolved yet. Press Advance Veintena to generate a turn report.\n"
+	else:
+		for line: String in lines:
+			text += "• " + line + "\n"
+	return text.strip_edges()
+
+func _build_estate_next_turn_report_text() -> String:
+	var text: String = "[b]Estimated Next Turn[/b]\n"
+	text += "This report estimates what will happen if you press Advance Veintena now. It combines population upkeep, housing building maintenance, production inputs and expected production outputs.\n\n"
+	text += "[b]Expected production output[/b]\n"
+	text += _resource_dictionary_lines(_production_output_totals(), "No production output expected.", 10)
+	text += "\n[b]Expected production input demand[/b]\n"
+	text += _resource_dictionary_lines(_production_input_totals(), "No production inputs expected.", 10)
+	text += "\n[b]Population upkeep[/b]\n"
+	text += _resource_dictionary_lines(_population_upkeep_totals(), "No active population upkeep currently required.", 10)
+	text += "\n[b]Housing building maintenance[/b]\n"
+	var housing: Dictionary = _housing_summary()
+	text += _resource_dictionary_lines(housing.get("maintenance", {}) as Dictionary, "No housing maintenance currently required.", 10)
+	text += "\n[b]Main warnings[/b]\n"
+	var warnings: Array[String] = _estate_goods_warning_lines(10)
+	if warnings.is_empty():
+		text += "• No immediate projected goods shortage.\n"
+	else:
+		for warning: String in warnings:
+			text += "• " + warning + "\n"
+	return text.strip_edges()
+
+func _build_estate_goods_warnings_report_text() -> String:
+	var text: String = "[b]Goods Warnings[/b]\n"
+	text += "This reads Storehouse projections. It looks for goods that are reserved, declining, or projected to fall below zero after expected upkeep, maintenance, inputs and outputs.\n\n"
+	var warnings: Array[String] = _estate_goods_warning_lines(12)
+	if warnings.is_empty():
+		text += "• No immediate goods warning. Keep checking this after construction, staffing and mothball changes.\n"
+	else:
+		for warning: String in warnings:
+			text += "• " + warning + "\n"
+	text += "\n[b]All visible storehouse projections[/b]\n"
+	for good: Dictionary in _storehouse_goods():
+		var stored: float = float(good.get("stored", 0.0))
+		var incoming: float = float(good.get("incoming", 0.0))
+		var outgoing: float = float(good.get("outgoing", 0.0))
+		var projected: float = stored + incoming - outgoing
+		text += "• " + String(good.get("name", "Good")) + ": now " + _format_float(stored) + "; in " + _format_float(incoming) + "; out " + _format_float(outgoing) + "; projected " + _format_float(projected) + "\n"
+	return text.strip_edges()
+
+func _build_estate_population_housing_report_text() -> String:
+	var summary: Dictionary = _housing_summary()
+	var text: String = "[b]Population & Housing[/b]\n"
+	text += "Housing decides how much of the estate population is active. Active people consume upkeep and can work; inactive people are unsupported and do not contribute.\n\n"
+	text += "• Total population: " + str(int(summary.get("total_population", 0))) + "\n"
+	text += "• Active population: " + str(int(summary.get("total_active_population", 0))) + "\n"
+	text += "• Inactive population: " + str(int(summary.get("total_inactive_population", 0))) + "\n"
+	text += "• Active capacity: " + str(int(summary.get("total_active_capacity", 0))) + "\n"
+	text += "• Built capacity: " + str(int(summary.get("total_capacity", 0))) + "\n\n"
+	for tier: Dictionary in summary.get("tiers", []) as Array:
+		text += "• " + String(tier.get("name", "Housing")) + ": active " + str(int(tier.get("active_population", 0))) + " / total " + str(int(tier.get("population", 0))) + "; active capacity " + str(int(tier.get("active_capacity", 0))) + "; free " + str(int(tier.get("free_capacity", 0))) + "; " + String(tier.get("status", "Unknown")) + "\n"
+	return text.strip_edges()
+
+func _build_estate_production_labour_report_text() -> String:
+	var text: String = "[b]Production & Labour[/b]\n"
+	var summary: Dictionary = _production_building_summary()
+	text += "• Built production buildings: " + str(int(summary.get("built", 0))) + "\n"
+	text += "• Expected operating instances: " + str(int(summary.get("operating", 0))) + "\n"
+	text += "• Blocked instances: " + str(int(summary.get("blocked", 0))) + "\n\n"
+	text += "[b]Outputs[/b]\n"
+	text += _resource_dictionary_lines(_production_output_totals(), "No production output expected.", 10)
+	text += "\n[b]Inputs[/b]\n"
+	text += _resource_dictionary_lines(_production_input_totals(), "No production input demand.", 10)
+	text += "\n[b]Labour read[/b]\n"
+	var labour_lines: Array[String] = _production_labour_dashboard_lines(12)
+	if labour_lines.is_empty():
+		text += "• Labour data is not connected yet.\n"
+	else:
+		for line: String in labour_lines:
+			text += "• " + line + "\n"
+	var blocked_lines: Array = summary.get("blocked_lines", []) as Array
+	if not blocked_lines.is_empty():
+		text += "\n[b]Blocked production[/b]\n"
+		for blocked_variant: Variant in blocked_lines:
+			text += "• " + String(blocked_variant) + "\n"
+	return text.strip_edges()
+
+func _build_estate_action_priorities_report_text() -> String:
+	var text: String = "[b]Action Priorities[/b]\n"
+	text += "This turns the current estate state into a short action list. It should help you decide whether to adjust housing, staffing, production or market use before advancing time.\n\n"
+	var priorities: Array[String] = _estate_action_priority_lines(12)
+	if priorities.is_empty():
+		text += "• No urgent action. You can advance the Veintena or plan longer-term expansion.\n"
+	else:
+		for priority: String in priorities:
+			text += "• " + priority + "\n"
+	return text.strip_edges()
+
+func _estate_goods_warning_lines(max_items: int = 8) -> Array[String]:
+	var output: Array[String] = []
+	for good: Dictionary in _storehouse_goods():
+		if output.size() >= max_items:
+			break
+		var name: String = String(good.get("name", "Good"))
+		var stored: float = float(good.get("stored", 0.0))
+		var incoming: float = float(good.get("incoming", 0.0))
+		var outgoing: float = float(good.get("outgoing", 0.0))
+		var free_value: float = float(good.get("free", maxf(0.0, stored - outgoing)))
+		var projected: float = stored + incoming - outgoing
+		if projected < -0.001:
+			output.append(name + ": projected shortage of " + _format_float(absf(projected)) + " after next turn.")
+		elif free_value <= 0.001 and outgoing > 0.001:
+			output.append(name + ": fully reserved by upkeep, maintenance or inputs.")
+		elif incoming - outgoing < -0.001:
+			output.append(name + ": declining by " + _format_float(absf(incoming - outgoing)) + " this turn.")
+	return output
+
+func _estate_action_priority_lines(max_items: int = 8) -> Array[String]:
+	var output: Array[String] = []
+	for warning: String in _estate_goods_warning_lines(4):
+		output.append("Resolve goods pressure — " + warning)
+	var housing: Dictionary = _housing_summary()
+	var inactive: int = int(housing.get("total_inactive_population", 0))
+	if inactive > 0:
+		output.append("Open Housing or Mothball — " + str(inactive) + " people are inactive.")
+	var production_summary: Dictionary = _production_building_summary()
+	var blocked: int = int(production_summary.get("blocked", 0))
+	if blocked > 0:
+		output.append("Open Production — " + str(blocked) + " production instance(s) are blocked or unstaffed.")
+	var buildable_count: int = _production_buildable_count()
+	if buildable_count > 0:
+		output.append("Consider Production expansion — " + str(buildable_count) + " production building type(s) are buildable now.")
+	if output.is_empty():
+		var outputs: String = _resource_dictionary_inline(_production_output_totals(), 3)
+		if outputs != "":
+			output.append("Production looks stable. Expected output: " + outputs + ".")
+		else:
+			output.append("No urgent warning, but production output is low. Consider building or staffing production.")
+	while output.size() > max_items:
+		output.pop_back()
+	return output
+
+func _last_turn_report_lines() -> Array[String]:
+	var output: Array[String] = []
+	var state: Node = _state()
+	if state != null and state.has_method("get_last_report"):
+		var raw: Array = state.call("get_last_report") as Array
+		for line_variant: Variant in raw:
+			var line: String = String(line_variant)
+			if line.strip_edges() != "":
+				output.append(line)
+	return output
+
+func _shorten_report_line(line: String, max_chars: int = 60) -> String:
+	if line.length() <= max_chars:
+		return line
+	return line.substr(0, max(0, max_chars - 3)) + "..."
 
 func _build_production_overview_reports() -> void:
 	for report: Dictionary in _production_report_definitions():
@@ -1684,6 +2023,14 @@ func _filtered_market_goods(focus_id: String) -> Array[Dictionary]:
 		if include_good:
 			output.append(good)
 	return output
+
+func _on_estate_report_selected(report_id: String) -> void:
+	selected_estate_report_id = report_id
+	_refresh_all()
+
+func _on_estate_report_closed() -> void:
+	selected_estate_report_id = ""
+	_refresh_all()
 
 func _on_production_report_selected(report_id: String) -> void:
 	selected_production_report_id = report_id
