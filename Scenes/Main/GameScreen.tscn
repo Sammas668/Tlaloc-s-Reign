@@ -5,6 +5,8 @@
 [ext_resource type="Texture2D" uid="uid://dktggms541iil" path="res://Assets/main_menu/Storehouse.png" id="3_0e7bs"]
 [ext_resource type="Texture2D" uid="uid://dltkfrkr65imq" path="res://Assets/main_menu/Chinampa.png" id="3_vp021"]
 [ext_resource type="Texture2D" uid="uid://bv0dsqj0166d" path="res://Assets/main_menu/Marketpalce.png" id="4_reg34"]
+[ext_resource type="Texture2D" uid="uid://b4w0hps2beb8q" path="res://Assets/main_menu/Workshop and Chinampa.png" id="6_5ojdd"]
+[ext_resource type="Texture2D" uid="uid://dvnwuejitd5yy" path="res://Assets/main_menu/Workshop.png" id="6_mhd1y"]
 
 [node name="GameScreen" type="Control" unique_id=18535046]
 layout_mode = 3
@@ -18,7 +20,9 @@ estate_art = ExtResource("2_kljcf")
 production_art = ExtResource("3_vp021")
 storehouse_art = ExtResource("3_0e7bs")
 market_art = ExtResource("4_reg34")
+production_overview_art = ExtResource("6_5ojdd")
 production_chinampas_art = ExtResource("3_vp021")
+production_workshops_art = ExtResource("6_mhd1y")
 chinampas_art = ExtResource("3_vp021")
 
 [node name="BackgroundColour" type="ColorRect" parent="." unique_id=969252852]

@@ -8,6 +8,7 @@ signal build_requested(building_id: String)
 signal destroy_requested(building_id: String)
 
 @onready var overlay_panel: PanelContainer = get_node_or_null(^"OverlayPanel") as PanelContainer
+@onready var overlay_stack: VBoxContainer = get_node_or_null(^"OverlayPanel/Margin/Stack") as VBoxContainer
 @onready var title_label: Label = get_node_or_null(^"OverlayPanel/Margin/Stack/Header/TitleLabel") as Label
 @onready var close_button: Button = get_node_or_null(^"OverlayPanel/Margin/Stack/Header/CloseButton") as Button
 @onready var detail_text: RichTextLabel = get_node_or_null(^"OverlayPanel/Margin/Stack/DetailText") as RichTextLabel
@@ -229,10 +230,21 @@ func _ensure_action_buttons() -> void:
 
 func _apply_styles() -> void:
 	if overlay_panel:
+		overlay_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		overlay_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		overlay_panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.62), Color(0.50, 0.82, 0.74, 0.35), 14))
+	if overlay_stack:
+		overlay_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		overlay_stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		overlay_stack.add_theme_constant_override("separation", 10)
 	if title_label:
 		title_label.add_theme_font_size_override("font_size", 28)
 	if detail_text:
+		detail_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		detail_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		detail_text.custom_minimum_size = Vector2(0, 360)
+		detail_text.fit_content = false
+		detail_text.scroll_active = true
 		detail_text.add_theme_font_size_override("normal_font_size", 21)
 		detail_text.add_theme_font_size_override("bold_font_size", 23)
 		detail_text.add_theme_constant_override("line_separation", 5)

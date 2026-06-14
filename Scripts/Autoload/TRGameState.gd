@@ -24,6 +24,7 @@ var estate_stockpiles: Dictionary = {}
 var market_stockpiles: Dictionary = {}
 var market_demand: Dictionary = {}
 var estate_buildings: Dictionary = {}
+var active_housing_counts: Dictionary = {}
 var population: Dictionary = {}
 var base_housing_capacity: Dictionary = {}
 var labour_assignments: Dictionary = {}
@@ -108,12 +109,14 @@ func _load_start_state() -> void:
 	market_stockpiles = _float_dictionary(data.get("market_stockpiles", {}) as Dictionary)
 	market_demand = _float_dictionary(data.get("market_demand", {}) as Dictionary)
 	estate_buildings = _int_dictionary(data.get("estate_buildings", {}) as Dictionary)
+	active_housing_counts = _int_dictionary(data.get("active_housing_counts", {}) as Dictionary)
 	population = _int_dictionary(data.get("population", {}) as Dictionary)
 	base_housing_capacity = _int_dictionary(data.get("base_housing_capacity", {}) as Dictionary)
 	labour_assignments = _nested_int_dictionary(data.get("labour_assignments", {}) as Dictionary)
 	_ensure_all_resource_keys()
 	_ensure_all_building_keys()
 	_ensure_base_housing_capacity()
+	_ensure_active_housing_counts()
 	# New-game start states should not begin with productive buildings idle just
 	# because a previous patch or save file left empty labour assignment entries.
 	# Default setup staffs production automatically in priority order, with maize
@@ -256,38 +259,52 @@ func get_buildings_for_screen(screen_id: String, focus_id: String = "overview") 
 func get_housing_summary() -> Dictionary:
 	var tiers: Array[Dictionary] = []
 	var total_population: int = 0
+	var total_active_population: int = 0
+	var total_inactive_population: int = 0
 	var total_capacity: int = 0
+	var total_active_capacity: int = 0
 	var total_over: int = 0
 	var total_free: int = 0
-	var capacity_by_group: Dictionary = housing_capacity_by_group()
+	var built_capacity_by_group: Dictionary = housing_capacity_by_group({}, false)
+	var active_capacity_by_group: Dictionary = housing_capacity_by_group({}, true)
 	var maintenance: Dictionary = estimate_housing_maintenance()
 	for category_id: String in _housing_category_order():
-		var tier: Dictionary = _housing_category_summary(category_id, capacity_by_group)
+		var tier: Dictionary = _housing_category_summary(category_id, built_capacity_by_group, active_capacity_by_group)
 		tiers.append(tier)
 		total_population += int(tier.get("population", 0))
+		total_active_population += int(tier.get("active_population", 0))
+		total_inactive_population += int(tier.get("inactive_population", 0))
 		total_capacity += int(tier.get("capacity", 0))
+		total_active_capacity += int(tier.get("active_capacity", 0))
 		total_over += int(tier.get("over_capacity", 0))
 		total_free += int(tier.get("free_capacity", 0))
 	return {
 		"tiers": tiers,
-		"capacity_by_group": capacity_by_group,
+		"capacity_by_group": active_capacity_by_group,
+		"built_capacity_by_group": built_capacity_by_group,
 		"maintenance": maintenance,
 		"total_population": total_population,
+		"total_active_population": total_active_population,
+		"total_inactive_population": total_inactive_population,
 		"total_capacity": total_capacity,
+		"total_active_capacity": total_active_capacity,
 		"total_over_capacity": total_over,
 		"total_free_capacity": total_free,
-		"status_text": _housing_status_text(total_population, total_capacity)
+		"status_text": _housing_status_text(total_active_population, total_active_capacity)
 	}
 
 func get_housing_rows(focus_id: String = "overview") -> Array[Dictionary]:
 	var output: Array[Dictionary] = []
-	var capacity_by_group: Dictionary = housing_capacity_by_group()
+	var built_capacity_by_group: Dictionary = housing_capacity_by_group({}, false)
+	var active_capacity_by_group: Dictionary = housing_capacity_by_group({}, true)
 	if focus_id == "" or focus_id == "overview":
 		for category_id: String in _housing_category_order():
-			var tier: Dictionary = _housing_category_summary(category_id, capacity_by_group)
+			var tier: Dictionary = _housing_category_summary(category_id, built_capacity_by_group, active_capacity_by_group)
 			tier["is_summary"] = true
 			output.append(tier)
 		return output
+	if focus_id == "mothball":
+		return get_housing_mothball_rows()
 
 	for building_id: String in building_order:
 		if not buildings.has(building_id):
@@ -300,7 +317,8 @@ func get_housing_rows(focus_id: String = "overview") -> Array[Dictionary]:
 		output.append(_housing_building_view_data(building_id))
 	return output
 
-func housing_capacity_by_group(overrides: Dictionary = {}) -> Dictionary:
+func housing_capacity_by_group(overrides: Dictionary = {}, active_only: bool = true) -> Dictionary:
+	_ensure_active_housing_counts()
 	var result: Dictionary = {}
 	for group_variant: Variant in base_housing_capacity.keys():
 		var group_id: String = String(group_variant)
@@ -312,9 +330,13 @@ func housing_capacity_by_group(overrides: Dictionary = {}) -> Dictionary:
 	for building_id: String in building_order:
 		if not _is_housing_building_id(building_id):
 			continue
-		var count: int = int(estate_buildings.get(building_id, 0))
+		var built_count: int = int(estate_buildings.get(building_id, 0))
+		var count: int = built_count
+		if active_only:
+			count = int(active_housing_counts.get(building_id, built_count))
 		if overrides.has(building_id):
 			count = int(overrides[building_id])
+		count = clampi(count, 0, built_count)
 		if count <= 0:
 			continue
 		var definition: Dictionary = buildings[building_id] as Dictionary
@@ -324,7 +346,30 @@ func housing_capacity_by_group(overrides: Dictionary = {}) -> Dictionary:
 			result[group_id] = int(result.get(group_id, 0)) + int(capacity[group_variant]) * count
 	return result
 
+func active_population_by_group() -> Dictionary:
+	var result: Dictionary = {}
+	var active_capacity: Dictionary = housing_capacity_by_group({}, true)
+	for group_variant: Variant in population.keys():
+		var group_id: String = String(group_variant)
+		var total: int = int(population.get(group_id, 0))
+		var active_cap: int = int(active_capacity.get(group_id, total))
+		result[group_id] = mini(total, max(0, active_cap))
+	return result
+
+func inactive_population_by_group() -> Dictionary:
+	var result: Dictionary = {}
+	var active: Dictionary = active_population_by_group()
+	for group_variant: Variant in population.keys():
+		var group_id: String = String(group_variant)
+		result[group_id] = max(0, int(population.get(group_id, 0)) - int(active.get(group_id, 0)))
+	return result
+
+func _active_population_for_group(group_id: String) -> int:
+	return int(active_population_by_group().get(group_id, 0))
+
 func estimate_housing_maintenance() -> Dictionary:
+	# Mothballing does not avoid building maintenance. Maintenance is paid for all
+	# built housing, active or inactive.
 	var result: Dictionary = {}
 	for building_id: String in building_order:
 		if not _is_housing_building_id(building_id):
@@ -340,12 +385,15 @@ func estimate_housing_maintenance() -> Dictionary:
 	return result
 
 func _housing_building_view_data(building_id: String) -> Dictionary:
+	_ensure_active_housing_counts()
 	var definition: Dictionary = buildings[building_id] as Dictionary
 	var count: int = int(estate_buildings.get(building_id, 0))
+	var active_count: int = int(active_housing_counts.get(building_id, count))
+	var mothballed_count: int = max(0, count - active_count)
 	var capacity: Dictionary = definition.get("housing_capacity", {}) as Dictionary
 	var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
 	var category_id: String = String(definition.get("category", ""))
-	var category_summary: Dictionary = _housing_category_summary(category_id, housing_capacity_by_group())
+	var category_summary: Dictionary = _housing_category_summary(category_id, housing_capacity_by_group({}, false), housing_capacity_by_group({}, true))
 	return {
 		"id": building_id,
 		"name": String(definition.get("name", building_id.capitalize())),
@@ -354,10 +402,17 @@ func _housing_building_view_data(building_id: String) -> Dictionary:
 		"tier": String(definition.get("tier", "")),
 		"description": String(definition.get("description", "")),
 		"count": count,
+		"active_count": active_count,
+		"mothballed_count": mothballed_count,
+		"operating": active_count,
+		"blocked": mothballed_count,
 		"build_cost": definition.get("build_cost", {}) as Dictionary,
 		"housing_capacity": capacity,
 		"housing_maintenance": maintenance,
+		"inputs": maintenance,
+		"outputs": capacity,
 		"capacity_total": _multiply_dictionary(capacity, count),
+		"active_capacity_total": _multiply_dictionary(capacity, active_count),
 		"maintenance_total": _multiply_dictionary(maintenance, count),
 		"capacity_after_build": _multiply_dictionary(capacity, count + 1),
 		"maintenance_after_build": _multiply_dictionary(maintenance, count + 1),
@@ -372,24 +427,36 @@ func _housing_building_view_data(building_id: String) -> Dictionary:
 		"status_text": _housing_building_status_text(building_id)
 	}
 
-func _housing_category_summary(category_id: String, capacity_by_group: Dictionary) -> Dictionary:
+func _housing_category_summary(category_id: String, built_capacity_by_group: Dictionary, active_capacity_by_group: Dictionary) -> Dictionary:
 	var group_ids: Array[String] = _housing_group_ids_for_category(category_id)
 	var population_total: int = 0
-	var capacity_total: int = 0
+	var active_population_total: int = 0
+	var inactive_population_total: int = 0
+	var built_capacity_total: int = 0
+	var active_capacity_total: int = 0
 	var member_rows: Array[Dictionary] = []
 	for group_id: String in group_ids:
 		var pop_count: int = int(population.get(group_id, 0))
-		var capacity_count: int = int(capacity_by_group.get(group_id, 0))
+		var active_pop: int = _active_population_for_group(group_id)
+		var inactive_pop: int = max(0, pop_count - active_pop)
+		var built_capacity_count: int = int(built_capacity_by_group.get(group_id, 0))
+		var active_capacity_count: int = int(active_capacity_by_group.get(group_id, 0))
 		population_total += pop_count
-		capacity_total += capacity_count
+		active_population_total += active_pop
+		inactive_population_total += inactive_pop
+		built_capacity_total += built_capacity_count
+		active_capacity_total += active_capacity_count
 		member_rows.append({
 			"id": group_id,
 			"name": _labour_group_name(group_id),
 			"population": pop_count,
-			"capacity": capacity_count,
-			"free_capacity": max(0, capacity_count - pop_count),
-			"over_capacity": max(0, pop_count - capacity_count),
-			"status": _housing_status_text(pop_count, capacity_count)
+			"active_population": active_pop,
+			"inactive_population": inactive_pop,
+			"capacity": built_capacity_count,
+			"active_capacity": active_capacity_count,
+			"free_capacity": max(0, active_capacity_count - active_pop),
+			"over_capacity": max(0, active_pop - active_capacity_count),
+			"status": _housing_status_text(active_pop, active_capacity_count)
 		})
 	var building_options: Array[Dictionary] = []
 	for building_id: String in building_order:
@@ -403,6 +470,7 @@ func _housing_category_summary(category_id: String, capacity_by_group: Dictionar
 			"name": String(definition.get("name", building_id.capitalize())),
 			"tier": String(definition.get("tier", "")),
 			"count": int(estate_buildings.get(building_id, 0)),
+			"active_count": int(active_housing_counts.get(building_id, int(estate_buildings.get(building_id, 0)))),
 			"build_cost": definition.get("build_cost", {}) as Dictionary,
 			"housing_capacity": definition.get("housing_capacity", {}) as Dictionary,
 			"housing_maintenance": definition.get("housing_maintenance", {}) as Dictionary,
@@ -412,22 +480,27 @@ func _housing_category_summary(category_id: String, capacity_by_group: Dictionar
 		"id": category_id,
 		"name": _housing_category_name(category_id),
 		"population": population_total,
-		"capacity": capacity_total,
-		"free_capacity": max(0, capacity_total - population_total),
-		"over_capacity": max(0, population_total - capacity_total),
-		"status": _housing_status_text(population_total, capacity_total),
+		"active_population": active_population_total,
+		"inactive_population": inactive_population_total,
+		"capacity": built_capacity_total,
+		"active_capacity": active_capacity_total,
+		"free_capacity": max(0, active_capacity_total - active_population_total),
+		"over_capacity": max(0, active_population_total - active_capacity_total),
+		"status": _housing_status_text(active_population_total, active_capacity_total),
 		"members": member_rows,
 		"building_options": building_options,
 		"maintenance": _housing_maintenance_for_category(category_id)
 	}
 
 func _housing_category_order() -> Array[String]:
-	return ["commoners", "tlacotin", "warriors", "priests", "nobles", "captives"]
+	return ["field_labour", "artisans", "tlacotin", "warriors", "priests", "nobles", "captives"]
 
 func _housing_category_name(category_id: String) -> String:
 	match category_id:
-		"commoners":
-			return "Commoners / Artisans"
+		"field_labour":
+			return "Field Labour"
+		"artisans":
+			return "Artisans"
 		"tlacotin":
 			return "Tlacotin"
 		"warriors":
@@ -442,8 +515,10 @@ func _housing_category_name(category_id: String) -> String:
 
 func _housing_group_ids_for_category(category_id: String) -> Array[String]:
 	match category_id:
-		"commoners":
-			return ["macehualtin", "tolteca"]
+		"field_labour":
+			return ["macehualtin"]
+		"artisans":
+			return ["tolteca"]
 		"tlacotin":
 			return ["tlacotin"]
 		"warriors":
@@ -477,9 +552,9 @@ func _housing_status_text(population_count: int, capacity_count: int) -> String:
 	if capacity_count <= 0:
 		if population_count <= 0:
 			return "No population"
-		return "No capacity"
+		return "No active capacity"
 	if population_count > capacity_count:
-		return "Overcrowded"
+		return "Inactive overflow"
 	if population_count == capacity_count:
 		return "Full"
 	var use_ratio: float = float(population_count) / float(capacity_count)
@@ -494,37 +569,39 @@ func _housing_building_status_text(building_id: String) -> String:
 		return "Unknown building."
 	var definition: Dictionary = buildings[building_id] as Dictionary
 	var count: int = int(estate_buildings.get(building_id, 0))
+	var active_count: int = int(active_housing_counts.get(building_id, count))
 	var capacity: Dictionary = definition.get("housing_capacity", {}) as Dictionary
 	var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
-	var text: String = "Built: " + str(count) + "; adds " + _dictionary_to_named_string(capacity, "capacity") + " each."
+	var text: String = "Built " + str(count) + "; active " + str(active_count) + "; mothballed " + str(max(0, count - active_count)) + ". Adds " + _dictionary_to_named_string(capacity, "capacity") + " each."
 	if not maintenance.is_empty():
 		text += " Building upkeep each: " + _dictionary_to_named_string(maintenance, "") + "."
 	return text
 
 func _housing_efficiency_text(capacity: Dictionary, maintenance: Dictionary) -> String:
-	# Kept for backwards compatibility with earlier UI rows. The Housing UI now
-	# shows the raw upkeep goods per building instead of summing different goods
-	# into a misleading generic efficiency number.
 	if maintenance.is_empty():
 		return "No building upkeep"
 	return "Larger housing tiers have lower upkeep per capacity."
 
 func _would_destroy_overcrowd(building_id: String) -> Dictionary:
+	# Destroying removes the building entirely. It is blocked if that would make
+	# currently active people inactive. Mothballing is the safe way to deactivate.
 	var result: Dictionary = {"blocked": false, "lines": []}
 	if not _is_housing_building_id(building_id):
 		return result
 	var current_count: int = int(estate_buildings.get(building_id, 0))
 	if current_count <= 0:
 		return result
-	var overrides: Dictionary = {building_id: current_count - 1}
-	var after_capacity: Dictionary = housing_capacity_by_group(overrides)
+	var active_count: int = int(active_housing_counts.get(building_id, current_count))
+	var active_after: int = mini(active_count, max(0, current_count - 1))
+	var overrides: Dictionary = {building_id: active_after}
+	var after_capacity: Dictionary = housing_capacity_by_group(overrides, true)
 	var lines: Array[String] = []
 	for group_variant: Variant in population.keys():
 		var group_id: String = String(group_variant)
-		var pop_count: int = int(population[group_id])
+		var active_pop: int = _active_population_for_group(group_id)
 		var capacity_count: int = int(after_capacity.get(group_id, 0))
-		if pop_count > capacity_count:
-			lines.append(_labour_group_name(group_id) + " by " + str(pop_count - capacity_count))
+		if active_pop > capacity_count:
+			lines.append(_labour_group_name(group_id) + " by " + str(active_pop - capacity_count))
 	if not lines.is_empty():
 		result["blocked"] = true
 		result["lines"] = lines
@@ -542,13 +619,53 @@ func _ensure_base_housing_capacity() -> void:
 		if not base_housing_capacity.has(group_id):
 			base_housing_capacity[group_id] = int(population[group_id])
 
+func _ensure_active_housing_counts() -> void:
+	for building_id: String in building_order:
+		if not _is_housing_building_id(building_id):
+			if active_housing_counts.has(building_id):
+				active_housing_counts.erase(building_id)
+			continue
+		var built_count: int = int(estate_buildings.get(building_id, 0))
+		if built_count <= 0:
+			active_housing_counts[building_id] = 0
+			continue
+		if not active_housing_counts.has(building_id):
+			active_housing_counts[building_id] = built_count
+		else:
+			active_housing_counts[building_id] = clampi(int(active_housing_counts[building_id]), 0, built_count)
+
+func set_active_housing_count(building_id: String, active_count: int) -> bool:
+	if not _is_housing_building_id(building_id):
+		return false
+	_ensure_active_housing_counts()
+	var built_count: int = int(estate_buildings.get(building_id, 0))
+	active_housing_counts[building_id] = clampi(active_count, 0, built_count)
+	_ensure_labour_assignments()
+	emit_signal("state_changed")
+	return true
+
+func get_housing_mothball_rows() -> Array[Dictionary]:
+	_ensure_active_housing_counts()
+	var rows: Array[Dictionary] = []
+	for building_id: String in building_order:
+		if not _is_housing_building_id(building_id):
+			continue
+		var count: int = int(estate_buildings.get(building_id, 0))
+		if count <= 0:
+			continue
+		rows.append(_housing_building_view_data(building_id))
+	return rows
+
+func get_housing_mothball_data() -> Dictionary:
+	return {"summary": get_housing_summary(), "rows": get_housing_mothball_rows()}
+
 func get_productive_labour_rows() -> Array[Dictionary]:
 	_ensure_labour_assignments()
 	var required: Dictionary = _productive_labour_required()
 	var assigned_by_group: Dictionary = _assigned_labour_by_group()
 	var rows: Array[Dictionary] = []
 	for group_id: String in _productive_labour_group_ids():
-		var total: int = int(population.get(group_id, 0))
+		var total: int = _active_population_for_group(group_id)
 		var assigned_value: int = int(assigned_by_group.get(group_id, 0))
 		var required_value: int = int(required.get(group_id, assigned_value))
 		var free: int = max(0, total - assigned_value)
@@ -658,7 +775,7 @@ func get_labour_assignment_data() -> Dictionary:
 	return {"groups": groups, "buildings": building_rows}
 
 func _single_labour_assignment_group_data(group_id: String, assigned_by_group: Dictionary, required_by_group: Dictionary) -> Dictionary:
-	var total: int = int(population.get(group_id, 0))
+	var total: int = _active_population_for_group(group_id)
 	var assigned: int = int(assigned_by_group.get(group_id, 0))
 	var required: int = int(required_by_group.get(group_id, assigned))
 	return {
@@ -688,7 +805,7 @@ func _combined_labour_assignment_group_data(group_id: String, display_name: Stri
 	var shortfall: int = 0
 	var members: Array[Dictionary] = []
 	for member_id: String in member_ids:
-		var member_total: int = int(population.get(member_id, 0))
+		var member_total: int = _active_population_for_group(member_id)
 		var member_assigned: int = int(assigned_by_group.get(member_id, 0))
 		var member_required: int = int(required_by_group.get(member_id, member_assigned))
 		var member_shortfall: int = max(0, member_assigned - member_total)
@@ -855,7 +972,7 @@ func _max_staffable_count_for_field_labour_with_used(building_id: String, used_b
 		return 0
 	var available_total: int = 0
 	for member_id: String in _field_labour_group_ids():
-		var total_pop: int = int(population.get(member_id, 0))
+		var total_pop: int = _active_population_for_group(member_id)
 		var already: int = int(used_by_group.get(member_id, 0))
 		available_total += max(0, total_pop - already)
 	return mini(count, int(floor(float(available_total) / float(needed_per))))
@@ -869,7 +986,7 @@ func _field_labour_population_split_for_building(building_id: String, staffed_co
 	for member_id: String in _field_labour_group_ids():
 		if remaining_people <= 0:
 			break
-		var total_pop: int = int(population.get(member_id, 0))
+		var total_pop: int = _active_population_for_group(member_id)
 		var already: int = int(used_by_group.get(member_id, 0))
 		var available_pop: int = max(0, total_pop - already)
 		var use_pop: int = mini(remaining_people, available_pop)
@@ -1081,6 +1198,10 @@ func build_building(building_id: String) -> bool:
 	var previous_count: int = int(estate_buildings.get(building_id, 0))
 	var previous_staffed: int = _staffed_count_for_building(building_id)
 	estate_buildings[building_id] = previous_count + 1
+	if _is_housing_building_id(building_id):
+		_ensure_active_housing_counts()
+		active_housing_counts[building_id] = int(active_housing_counts.get(building_id, previous_count)) + 1
+		active_housing_counts[building_id] = clampi(int(active_housing_counts[building_id]), 0, int(estate_buildings.get(building_id, 0)))
 	# If this building type was previously fully staffed, try to staff the new
 	# copy automatically. If the player had deliberately left copies unstaffed,
 	# keep that manual choice instead of silently overriding it.
@@ -1129,7 +1250,11 @@ func destroy_building(building_id: String) -> bool:
 		emit_signal("destroy_failed", building_id, reason)
 		emit_signal("state_changed")
 		return false
-	estate_buildings[building_id] = max(0, int(estate_buildings.get(building_id, 0)) - 1)
+	var before_destroy_count: int = int(estate_buildings.get(building_id, 0))
+	estate_buildings[building_id] = max(0, before_destroy_count - 1)
+	if _is_housing_building_id(building_id):
+		_ensure_active_housing_counts()
+		active_housing_counts[building_id] = mini(int(active_housing_counts.get(building_id, 0)), int(estate_buildings.get(building_id, 0)))
 	_ensure_labour_assignments()
 	last_report.append("Destroyed one " + get_building_name(building_id) + ". No refund given.")
 	emit_signal("destroy_completed", building_id)
@@ -1156,7 +1281,7 @@ func estimate_population_upkeep() -> Dictionary:
 	var result: Dictionary = {}
 	for group_variant: Variant in population.keys():
 		var group_id: String = String(group_variant)
-		var count: int = int(population.get(group_id, 0))
+		var count: int = _active_population_for_group(group_id)
 		var rates: Dictionary = population_upkeep_rates.get(group_id, {}) as Dictionary
 		for resource_variant: Variant in rates.keys():
 			var resource_id: String = String(resource_variant)
@@ -1545,7 +1670,7 @@ func _ensure_labour_assignments() -> void:
 				break
 			var wanted: int = clampi(int(requested.get(group_id, 0)), 0, remaining_slots)
 			var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)
-			var total: int = int(population.get(group_id, 0))
+			var total: int = _active_population_for_group(group_id)
 			var already: int = int(running_by_group.get(group_id, 0))
 			var available_pop: int = max(0, total - already)
 			var max_by_pop: int = 0
@@ -1582,7 +1707,7 @@ func _default_assignment_for_building(building_id: String, count: int, running_b
 		if remaining <= 0:
 			break
 		var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)
-		var total: int = int(population.get(group_id, 0))
+		var total: int = _active_population_for_group(group_id)
 		var already: int = int(running_by_group.get(group_id, 0))
 		var available_pop: int = max(0, total - already)
 		var possible: int = 0
@@ -1785,7 +1910,7 @@ func _max_staffable_count_for_building_group(building_id: String, group_id: Stri
 	var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)
 	if needed_per <= 0:
 		return 0
-	var total_pop: int = int(population.get(group_id, 0))
+	var total_pop: int = _active_population_for_group(group_id)
 	var already_elsewhere: int = int(assigned_elsewhere.get(group_id, 0))
 	var available_pop: int = max(0, total_pop - already_elsewhere)
 	var max_by_pop: int = int(floor(float(available_pop) / float(needed_per)))
@@ -1813,7 +1938,7 @@ func _clamp_staffed_count_with_running(building_id: String, requested_count: int
 		if remaining <= 0:
 			break
 		var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)
-		var total: int = int(population.get(group_id, 0))
+		var total: int = _active_population_for_group(group_id)
 		var already: int = int(running_by_group.get(group_id, 0))
 		var available: int = max(0, total - already)
 		var possible: int = 0

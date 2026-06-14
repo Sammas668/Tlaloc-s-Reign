@@ -49,9 +49,6 @@
     "fine_textile_house": 0,
     "woodcutting_yard": 0,
     "obsidian_quarry_access": 0,
-    "small_calpulli_houses": 0,
-    "medium_calpulli_ward": 0,
-    "large_calpulli_compound": 0,
     "small_tlacotin_quarters": 0,
     "medium_tlacotin_yard": 0,
     "large_tlacotin_compound": 0,
@@ -66,7 +63,13 @@
     "large_noble_compound": 0,
     "small_captive_holding_pen": 0,
     "medium_guarded_holding_yard": 0,
-    "large_captive_compound": 0
+    "large_captive_compound": 0,
+    "small_field_labour_houses": 0,
+    "medium_field_labour_ward": 0,
+    "large_field_labour_compound": 0,
+    "small_artisan_houses": 0,
+    "medium_artisan_ward": 0,
+    "large_artisan_compound": 0
   },
   "population": {
     "macehualtin": 180,
@@ -85,5 +88,28 @@
     "tlamacazqueh": 5,
     "pipiltin": 5,
     "malli": 0
+  },
+  "active_housing_counts": {
+    "small_field_labour_houses": 0,
+    "medium_field_labour_ward": 0,
+    "large_field_labour_compound": 0,
+    "small_artisan_houses": 0,
+    "medium_artisan_ward": 0,
+    "large_artisan_compound": 0,
+    "small_tlacotin_quarters": 0,
+    "medium_tlacotin_yard": 0,
+    "large_tlacotin_compound": 0,
+    "small_warrior_house": 0,
+    "medium_warrior_lodge": 0,
+    "large_warrior_compound": 0,
+    "small_priest_house": 0,
+    "medium_priest_residence": 0,
+    "large_ritual_residence": 0,
+    "small_noble_residence": 0,
+    "medium_noble_court": 0,
+    "large_noble_compound": 0,
+    "small_captive_holding_pen": 0,
+    "medium_guarded_holding_yard": 0,
+    "large_captive_compound": 0
   }
 }

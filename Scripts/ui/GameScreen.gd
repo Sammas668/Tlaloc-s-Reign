@@ -17,6 +17,7 @@ const MARKET_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/MarketLedg
 const BUILDING_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/BuildingView.tscn")
 const LABOUR_ASSIGNMENT_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/LabourAssignmentView.tscn")
 const HOUSING_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/HousingView.tscn")
+const HOUSING_MOTHBALL_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/HousingMothballView.tscn")
 const BUILDING_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/BuildingLedgerRow.tscn")
 const HOUSING_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/HousingLedgerRow.tscn")
 
@@ -39,7 +40,10 @@ const HOUSING_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/HousingLe
 
 @export_group("Housing Tab Art")
 @export var housing_overview_art: Texture2D
-@export var housing_commoners_art: Texture2D
+@export var housing_field_labour_art: Texture2D
+@export var housing_artisans_art: Texture2D
+@export var housing_commoners_art: Texture2D # Legacy fallback for older Commoners art.
+@export var housing_mothball_art: Texture2D
 @export var housing_tlacotin_art: Texture2D
 @export var housing_warriors_art: Texture2D
 @export var housing_priests_art: Texture2D
@@ -92,6 +96,7 @@ var selected_storehouse_good_id: String = ""
 var selected_market_good_id: String = ""
 var selected_production_report_id: String = ""
 var selected_housing_building_id: String = ""
+var selected_housing_report_id: String = ""
 var selected_building_id_by_location: Dictionary = {}
 
 var storehouse_view: Control = null
@@ -99,6 +104,7 @@ var market_view: Control = null
 var building_view: Control = null
 var labour_assignment_view: Control = null
 var housing_view: Control = null
+var housing_mothball_view: Control = null
 var _local_state: Node = null
 var _state_connected: bool = false
 
@@ -180,15 +186,17 @@ var _screen_profiles: Dictionary = {
 		"title": "Housing",
 		"special_view": "housing",
 		"report_title": "Housing Ledger",
-		"body": "Housing controls how many people the estate can support. Overview reads population pressure; each population tab builds small, medium and large housing for that group.",
+		"body": "Housing controls active population capacity, population consumption, housing maintenance and mothballed buildings.",
 		"focuses": [
 			{"id": "overview", "label": "Overview"},
-			{"id": "commoners", "label": "Commoners"},
+			{"id": "field_labour", "label": "Field Labour"},
+			{"id": "artisans", "label": "Artisans"},
 			{"id": "tlacotin", "label": "Tlacotin"},
 			{"id": "warriors", "label": "Warriors"},
 			{"id": "priests", "label": "Priests"},
 			{"id": "nobles", "label": "Nobles"},
-			{"id": "captives", "label": "Captives"}
+			{"id": "captives", "label": "Captives"},
+			{"id": "mothball", "label": "Mothball"}
 		]
 	},
 	"shrines": {"title": "Shrines", "report_title": "Omens & Priest Reports", "body": "Offerings to Tlaloc, Huitzilopochtli, Tezcatlipoca and Quetzalcoatl will be managed here.", "focuses": [{"id": "overview", "label": "Overview"}, {"id": "tlaloc", "label": "Tlaloc"}, {"id": "huitzilopochtli", "label": "Huitzilopochtli"}, {"id": "tezcatlipoca", "label": "Tezcatlipoca"}, {"id": "quetzalcoatl", "label": "Quetzalcoatl"}, {"id": "offerings", "label": "Offerings"}], "reports": ["Shrine systems are not connected yet.", "Offerings will later consume goods from the Storehouse."]},
@@ -284,6 +292,7 @@ func show_focus(location_id: String, focus_id: String) -> void:
 		selected_building_id_by_location[location_id] = ""
 	if location_id == "housing":
 		selected_housing_building_id = ""
+		selected_housing_report_id = ""
 		selected_building_id_by_location[location_id] = ""
 	_refresh_all()
 
@@ -395,9 +404,10 @@ func _set_content_root_layout(expanded: bool) -> void:
 	if content_root == null:
 		return
 
-	# ContentRoot sits over the image area. Most screens use a lower overlay;
-	# Production Overview reports use the full left image area, like a larger
-	# version of the Storehouse/Market detail panel.
+	# ContentRoot sits over the image area. Text-only screens still use a
+	# compact lower card, but item detail pop-outs now use the full left image
+	# area so Storehouse, Market, Production, Housing and later systems have
+	# enough readable space for their detailed reports.
 	content_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	content_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	content_root.custom_minimum_size = Vector2.ZERO
@@ -417,7 +427,7 @@ func _set_content_root_layout(expanded: bool) -> void:
 		content_root.anchor_right = 1.0
 		content_root.anchor_bottom = 1.0
 		content_root.offset_left = 18.0
-		content_root.offset_top = -280.0
+		content_root.offset_top = -340.0
 		content_root.offset_right = -18.0
 		content_root.offset_bottom = -18.0
 
@@ -425,12 +435,16 @@ func _show_text_content(profile: Dictionary) -> void:
 	_set_content_root_layout(false)
 	if content_root:
 		content_root.visible = true
+	if dynamic_view_host:
+		dynamic_view_host.visible = false
 	if content_text:
 		content_text.visible = true
 		content_text.bbcode_enabled = true
 		content_text.scroll_active = true
 		content_text.fit_content = false
-		content_text.custom_minimum_size = Vector2(0, 230)
+		content_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		content_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		content_text.custom_minimum_size = Vector2(0, 300)
 		content_text.text = _build_standard_text(profile)
 
 func _show_production_overview_content() -> void:
@@ -447,6 +461,7 @@ func _show_production_overview_content() -> void:
 		content_root.visible = true
 	if dynamic_view_host == null:
 		return
+	dynamic_view_host.visible = true
 
 	var panel: PanelContainer = PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -576,13 +591,18 @@ func _build_standard_text(profile: Dictionary) -> String:
 	return text.strip_edges()
 
 func _show_storehouse_view() -> void:
-	_set_content_root_layout(false)
-	if content_root:
-		content_root.visible = true
+	_set_content_root_layout(true)
 	if content_text:
 		content_text.visible = false
+	if selected_storehouse_good_id == "":
+		if content_root:
+			content_root.visible = false
+		return
+	if content_root:
+		content_root.visible = true
 	if dynamic_view_host == null:
 		return
+	dynamic_view_host.visible = true
 	storehouse_view = STOREHOUSE_VIEW_SCENE.instantiate() as Control
 	if storehouse_view == null:
 		return
@@ -597,13 +617,18 @@ func _show_storehouse_view() -> void:
 		storehouse_view.call("setup", _storehouse_goods(), _current_focus_id(), selected_storehouse_good_id)
 
 func _show_market_view() -> void:
-	_set_content_root_layout(false)
-	if content_root:
-		content_root.visible = true
+	_set_content_root_layout(true)
 	if content_text:
 		content_text.visible = false
+	if _current_focus_id() != "reports" and selected_market_good_id == "":
+		if content_root:
+			content_root.visible = false
+		return
+	if content_root:
+		content_root.visible = true
 	if dynamic_view_host == null:
 		return
+	dynamic_view_host.visible = true
 	market_view = MARKET_VIEW_SCENE.instantiate() as Control
 	if market_view == null:
 		return
@@ -626,6 +651,7 @@ func _show_labour_assignment_view() -> void:
 		content_text.visible = false
 	if dynamic_view_host == null:
 		return
+	dynamic_view_host.visible = true
 	labour_assignment_view = LABOUR_ASSIGNMENT_VIEW_SCENE.instantiate() as Control
 	if labour_assignment_view == null:
 		return
@@ -645,10 +671,18 @@ func _show_labour_assignment_view() -> void:
 		labour_assignment_view.call("setup", state.call("get_labour_assignment_data"))
 
 func _show_housing_view() -> void:
+	var focus_id: String = _current_focus_id()
+	if focus_id == "overview":
+		_show_housing_overview_content()
+		return
+	if focus_id == "mothball":
+		_show_housing_mothball_view()
+		return
+
 	_set_content_root_layout(true)
 	if content_text:
 		content_text.visible = false
-	if _current_focus_id() != "overview" and selected_housing_building_id == "":
+	if selected_housing_building_id == "":
 		if content_root:
 			content_root.visible = false
 		return
@@ -656,6 +690,7 @@ func _show_housing_view() -> void:
 		content_root.visible = true
 	if dynamic_view_host == null:
 		return
+	dynamic_view_host.visible = true
 	housing_view = HOUSING_VIEW_SCENE.instantiate() as Control
 	if housing_view == null:
 		return
@@ -670,16 +705,98 @@ func _show_housing_view() -> void:
 		housing_view.connect("destroy_requested", Callable(self, "_on_housing_destroy_requested"))
 	var state: Node = _state()
 	if state != null and state.has_method("get_housing_summary") and state.has_method("get_housing_rows") and housing_view.has_method("setup"):
-		housing_view.call("setup", state.call("get_housing_summary"), state.call("get_housing_rows", _current_focus_id()), _current_focus_id(), selected_housing_building_id)
+		housing_view.call("setup", state.call("get_housing_summary"), state.call("get_housing_rows", focus_id), focus_id, selected_housing_building_id)
 
-func _show_building_view(profile: Dictionary) -> void:
-	_set_content_root_layout(false)
+func _show_housing_overview_content() -> void:
+	_set_content_root_layout(true)
+	if content_text:
+		content_text.visible = false
+	if selected_housing_report_id == "":
+		if content_root:
+			content_root.visible = false
+		return
+	if content_root:
+		content_root.visible = true
+	if dynamic_view_host == null:
+		return
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.64), Color(0.50, 0.82, 0.74, 0.36), 14))
+	dynamic_view_host.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 18)
+	margin.add_theme_constant_override("margin_right", 18)
+	margin.add_theme_constant_override("margin_top", 16)
+	margin.add_theme_constant_override("margin_bottom", 16)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	stack.add_theme_constant_override("separation", 12)
+	margin.add_child(stack)
+	var header: HBoxContainer = HBoxContainer.new()
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_theme_constant_override("separation", 12)
+	stack.add_child(header)
+	var title_label: Label = Label.new()
+	title_label.text = _housing_report_title(selected_housing_report_id)
+	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_label.add_theme_font_size_override("font_size", 29)
+	title_label.clip_text = true
+	header.add_child(title_label)
+	var close_button: Button = Button.new()
+	close_button.text = "X"
+	close_button.custom_minimum_size = Vector2(48, 44)
+	close_button.add_theme_font_size_override("font_size", 22)
+	close_button.pressed.connect(_on_housing_report_closed)
+	header.add_child(close_button)
+	var body: RichTextLabel = RichTextLabel.new()
+	body.bbcode_enabled = true
+	body.fit_content = false
+	body.scroll_active = true
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_theme_font_size_override("normal_font_size", 22)
+	body.add_theme_font_size_override("bold_font_size", 24)
+	body.add_theme_constant_override("line_separation", 6)
+	body.text = _build_housing_report_detail_text(selected_housing_report_id)
+	stack.add_child(body)
+
+func _show_housing_mothball_view() -> void:
+	_set_content_root_layout(true)
 	if content_root:
 		content_root.visible = true
 	if content_text:
 		content_text.visible = false
 	if dynamic_view_host == null:
 		return
+	housing_mothball_view = HOUSING_MOTHBALL_VIEW_SCENE.instantiate() as Control
+	if housing_mothball_view == null:
+		return
+	housing_mothball_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	housing_mothball_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	dynamic_view_host.add_child(housing_mothball_view)
+	if housing_mothball_view.has_signal("active_housing_changed"):
+		housing_mothball_view.connect("active_housing_changed", Callable(self, "_on_housing_active_count_changed"))
+	var state: Node = _state()
+	if state != null and state.has_method("get_housing_mothball_data") and housing_mothball_view.has_method("setup"):
+		housing_mothball_view.call("setup", state.call("get_housing_mothball_data"))
+
+func _show_building_view(profile: Dictionary) -> void:
+	_set_content_root_layout(true)
+	if content_text:
+		content_text.visible = false
+	var selected_id: String = String(selected_building_id_by_location.get(current_location_id, ""))
+	if selected_id == "":
+		if content_root:
+			content_root.visible = false
+		return
+	if content_root:
+		content_root.visible = true
+	if dynamic_view_host == null:
+		return
+	dynamic_view_host.visible = true
 	building_view = BUILDING_VIEW_SCENE.instantiate() as Control
 	if building_view == null:
 		return
@@ -693,7 +810,6 @@ func _show_building_view(profile: Dictionary) -> void:
 	if building_view.has_signal("building_closed"):
 		building_view.connect("building_closed", Callable(self, "_on_building_closed"))
 	var building_data: Array[Dictionary] = _buildings_for_current_screen(profile)
-	var selected_id: String = String(selected_building_id_by_location.get(current_location_id, ""))
 	if building_view.has_method("setup"):
 		building_view.call("setup", building_data, selected_id)
 
@@ -703,6 +819,7 @@ func _clear_dynamic_views() -> void:
 	building_view = null
 	labour_assignment_view = null
 	housing_view = null
+	housing_mothball_view = null
 	if dynamic_view_host:
 		_clear_children(dynamic_view_host)
 
@@ -723,7 +840,12 @@ func _refresh_right_panel() -> void:
 		else:
 			_build_market_ledger()
 	elif special_view == "housing":
-		_build_housing_ledger()
+		if _current_focus_id() == "overview":
+			_build_housing_overview_reports()
+		elif _current_focus_id() == "mothball":
+			_build_housing_mothball_summary()
+		else:
+			_build_housing_ledger()
 	elif special_view == "buildings":
 		if current_location_id == "production" and _current_focus_id() == "overview":
 			_build_production_overview_reports()
@@ -803,9 +925,11 @@ func _report_title_for_current_focus(profile: Dictionary) -> String:
 	if current_location_id == "housing":
 		match _current_focus_id():
 			"overview":
-				return "Housing Overview"
-			"commoners":
-				return "Commoner Housing"
+				return "Housing Reports"
+			"field_labour":
+				return "Field Labour Housing"
+			"artisans":
+				return "Artisan Housing"
 			"tlacotin":
 				return "Tlacotin Housing"
 			"warriors":
@@ -816,6 +940,8 @@ func _report_title_for_current_focus(profile: Dictionary) -> String:
 				return "Noble Housing"
 			"captives":
 				return "Captive Holding"
+			"mothball":
+				return "Mothball Housing"
 		return "Housing Ledger"
 	if current_location_id != "production":
 		return String(profile.get("report_title", "Warnings & Reports"))
@@ -1254,6 +1380,165 @@ func _build_labour_assignment_summary() -> void:
 	else:
 		_add_notification(str(buildings.size()) + " built productive building type(s) can be staffed.")
 
+func _build_housing_overview_reports() -> void:
+	for report: Dictionary in _housing_report_definitions():
+		_add_housing_report_button(report)
+	if selected_housing_report_id != "":
+		var close_button: Button = Button.new()
+		close_button.text = "Close Report"
+		close_button.custom_minimum_size = Vector2(0, 54)
+		close_button.add_theme_font_size_override("font_size", 19)
+		close_button.pressed.connect(_on_housing_report_closed)
+		notification_list.add_child(close_button)
+
+func _housing_report_definitions() -> Array[Dictionary]:
+	return [
+		{"id": "population_capacity", "title": "Population & Capacity", "subtitle": _housing_report_subtitle("population_capacity")},
+		{"id": "consumption", "title": "Consumption", "subtitle": _housing_report_subtitle("consumption")},
+		{"id": "building_maintenance", "title": "Building Maintenance", "subtitle": _housing_report_subtitle("building_maintenance")},
+		{"id": "spare_capacity", "title": "Spare Capacity", "subtitle": _housing_report_subtitle("spare_capacity")},
+		{"id": "inactive", "title": "Inactive / Mothballed", "subtitle": _housing_report_subtitle("inactive")}
+	]
+
+func _housing_report_title(report_id: String) -> String:
+	match report_id:
+		"population_capacity":
+			return "Population & Capacity"
+		"consumption":
+			return "Population Consumption"
+		"building_maintenance":
+			return "Building Maintenance"
+		"spare_capacity":
+			return "Overcrowding / Spare Capacity"
+		"inactive":
+			return "Inactive / Mothballed Housing"
+	return "Housing Report"
+
+func _housing_report_subtitle(report_id: String) -> String:
+	var summary: Dictionary = _housing_summary()
+	match report_id:
+		"population_capacity":
+			return "Active " + str(int(summary.get("total_active_population", 0))) + " / total " + str(int(summary.get("total_population", 0)))
+		"consumption":
+			return _resource_dictionary_inline(_population_upkeep_totals(), 3)
+		"building_maintenance":
+			return _resource_dictionary_inline(summary.get("maintenance", {}) as Dictionary, 3)
+		"spare_capacity":
+			return "Free active space " + str(int(summary.get("total_free_capacity", 0)))
+		"inactive":
+			return str(int(summary.get("total_inactive_population", 0))) + " inactive people"
+	return "Open report"
+
+func _add_housing_report_button(report: Dictionary) -> void:
+	if notification_list == null:
+		return
+	var report_id: String = String(report.get("id", ""))
+	var selected: bool = report_id == selected_housing_report_id
+	var button: Button = Button.new()
+	button.text = String(report.get("title", "Report")) + "\n" + String(report.get("subtitle", "Open report"))
+	button.custom_minimum_size = Vector2(0, 94)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.toggle_mode = true
+	button.button_pressed = selected
+	button.clip_text = true
+	button.add_theme_font_size_override("font_size", 19)
+	var border: Color = Color(0.34, 0.71, 0.63, 0.45)
+	if selected:
+		border = Color(0.76, 0.63, 0.32, 0.86)
+	button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.04, 0.07, 0.065, 0.93), border, 10))
+	button.add_theme_stylebox_override("hover", _make_panel_style(Color(0.06, 0.095, 0.085, 0.96), Color(0.50, 0.82, 0.74, 0.75), 10))
+	button.add_theme_stylebox_override("pressed", _make_panel_style(Color(0.10, 0.12, 0.095, 0.98), Color(0.76, 0.63, 0.32, 0.86), 10))
+	button.pressed.connect(func() -> void:
+		_on_housing_report_selected(report_id)
+	)
+	notification_list.add_child(button)
+
+func _build_housing_report_detail_text(report_id: String) -> String:
+	match report_id:
+		"population_capacity":
+			return _build_housing_population_report_text()
+		"consumption":
+			return _build_housing_consumption_report_text()
+		"building_maintenance":
+			return _build_housing_maintenance_report_text()
+		"spare_capacity":
+			return _build_housing_spare_capacity_report_text()
+		"inactive":
+			return _build_housing_inactive_report_text()
+	return "Select a Housing report from the right-hand panel."
+
+func _build_housing_population_report_text() -> String:
+	var summary: Dictionary = _housing_summary()
+	var text: String = "[b]Population & Capacity[/b]\n"
+	text += "Housing controls how many people are active on the estate. Active population consumes upkeep and can work. Inactive population is not currently supported.\n\n"
+	text += "• Total population: " + str(int(summary.get("total_population", 0))) + "\n"
+	text += "• Active population: " + str(int(summary.get("total_active_population", 0))) + "\n"
+	text += "• Inactive population: " + str(int(summary.get("total_inactive_population", 0))) + "\n"
+	text += "• Active capacity: " + str(int(summary.get("total_active_capacity", 0))) + "\n"
+	text += "• Built capacity: " + str(int(summary.get("total_capacity", 0))) + "\n\n"
+	for tier: Dictionary in summary.get("tiers", []) as Array:
+		text += "• " + String(tier.get("name", "Housing")) + ": active " + str(int(tier.get("active_population", 0))) + " / total " + str(int(tier.get("population", 0))) + "; active capacity " + str(int(tier.get("active_capacity", 0))) + "; " + String(tier.get("status", "Unknown")) + "\n"
+	return text.strip_edges()
+
+func _build_housing_consumption_report_text() -> String:
+	var text: String = "[b]Consumption[/b]\n"
+	text += "Population upkeep is now based on active population, not total population. Mothballed housing can make excess people inactive so they do not consume normal population upkeep.\n\n"
+	text += _resource_dictionary_lines(_population_upkeep_totals(), "No active population upkeep currently required.", 12)
+	return text.strip_edges()
+
+func _build_housing_maintenance_report_text() -> String:
+	var summary: Dictionary = _housing_summary()
+	var text: String = "[b]Building Maintenance[/b]\n"
+	text += "Housing maintenance is paid for all built housing, even when that housing is mothballed. It uses construction/support materials only.\n\n"
+	text += _resource_dictionary_lines(summary.get("maintenance", {}) as Dictionary, "No housing building maintenance currently required.", 12)
+	text += "\n[b]By population tier[/b]\n"
+	for tier: Dictionary in summary.get("tiers", []) as Array:
+		text += "• " + String(tier.get("name", "Housing")) + ": " + _resource_dictionary_inline(tier.get("maintenance", {}) as Dictionary, 4) + "\n"
+	return text.strip_edges()
+
+func _build_housing_spare_capacity_report_text() -> String:
+	var summary: Dictionary = _housing_summary()
+	var text: String = "[b]Overcrowding / Spare Capacity[/b]\n"
+	text += "This reads active housing capacity. Mothballed housing does not provide active space until reactivated.\n\n"
+	for tier: Dictionary in summary.get("tiers", []) as Array:
+		var line: String = "• " + String(tier.get("name", "Housing")) + ": free " + str(int(tier.get("free_capacity", 0)))
+		var over: int = int(tier.get("over_capacity", 0))
+		if over > 0:
+			line += "; over by " + str(over)
+		line += "; " + String(tier.get("status", "Unknown"))
+		text += line + "\n"
+	return text.strip_edges()
+
+func _build_housing_inactive_report_text() -> String:
+	var summary: Dictionary = _housing_summary()
+	var text: String = "[b]Inactive / Mothballed Housing[/b]\n"
+	text += "Use the Mothball tab to choose how many built houses are active. Inactive population cannot work, fight, produce or consume normal population upkeep. Buildings still pay maintenance.\n\n"
+	for tier: Dictionary in summary.get("tiers", []) as Array:
+		text += "• " + String(tier.get("name", "Housing")) + ": inactive people " + str(int(tier.get("inactive_population", 0))) + "; built capacity " + str(int(tier.get("capacity", 0))) + "; active capacity " + str(int(tier.get("active_capacity", 0))) + "\n"
+	return text.strip_edges()
+
+func _housing_summary() -> Dictionary:
+	var state: Node = _state()
+	if state != null and state.has_method("get_housing_summary"):
+		return state.call("get_housing_summary") as Dictionary
+	return {}
+
+func _population_upkeep_totals() -> Dictionary:
+	var state: Node = _state()
+	if state != null and state.has_method("estimate_population_upkeep"):
+		return state.call("estimate_population_upkeep") as Dictionary
+	return {}
+
+func _build_housing_mothball_summary() -> void:
+	var state: Node = _state()
+	if state == null or not state.has_method("get_housing_summary"):
+		_add_notification("Housing mothball data is not connected yet.")
+		return
+	var summary: Dictionary = state.call("get_housing_summary") as Dictionary
+	_add_notification("Use the bars on the left to activate or mothball built housing.")
+	_add_notification("Active population: " + str(int(summary.get("total_active_population", 0))) + " / total " + str(int(summary.get("total_population", 0))) + "; inactive " + str(int(summary.get("total_inactive_population", 0))) + ".")
+	_add_notification("Mothballed housing still pays building maintenance, but inactive people do not pay population upkeep or work.")
+
 func _build_housing_ledger() -> void:
 	var state: Node = _state()
 	if state == null or not state.has_method("get_housing_rows"):
@@ -1440,10 +1725,25 @@ func _on_labour_staffing_changed(building_id: String, staffed_count: int) -> voi
 func _on_labour_assignment_changed(building_id: String, group_id: String, amount: int) -> void:
 	_on_labour_staffing_group_changed(building_id, group_id, amount)
 
+func _on_housing_report_selected(report_id: String) -> void:
+	selected_housing_report_id = report_id
+	_refresh_all()
+
+func _on_housing_report_closed() -> void:
+	selected_housing_report_id = ""
+	_refresh_all()
+
+func _on_housing_active_count_changed(housing_id: String, active_count: int) -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("set_active_housing_count"):
+		state.call("set_active_housing_count", housing_id, active_count)
+	if current_location_id == "housing" and _current_focus_id() == "mothball" and housing_mothball_view != null:
+		if state != null and state.has_method("get_housing_mothball_data") and housing_mothball_view.has_method("refresh_from_data"):
+			housing_mothball_view.call_deferred("refresh_from_data", state.call("get_housing_mothball_data"))
+	_refresh_right_panel()
+
 func _on_housing_selected(housing_id: String) -> void:
-	if _current_focus_id() == "overview":
-		# Overview rows are summary cards. They keep the overview panel open rather
-		# than selecting a buildable housing building.
+	if _current_focus_id() == "overview" or _current_focus_id() == "mothball":
 		return
 	selected_housing_building_id = housing_id
 	_refresh_all()
@@ -1467,32 +1767,34 @@ func _on_housing_destroy_requested(housing_id: String) -> void:
 
 func _on_storehouse_good_selected(good_id: String) -> void:
 	selected_storehouse_good_id = good_id
-	if storehouse_view != null and storehouse_view.has_method("select_good"):
-		storehouse_view.call("select_good", good_id)
+	# Detail pop-outs are no longer kept alive while closed. Rebuild the main
+	# content area when a ledger row is selected so the full-size overlay opens.
+	_refresh_main_content()
 	_refresh_right_panel()
 
 func _on_storehouse_good_closed() -> void:
 	selected_storehouse_good_id = ""
+	_refresh_main_content()
 	_refresh_right_panel()
 
 func _on_market_good_selected(good_id: String) -> void:
 	selected_market_good_id = good_id
-	if market_view != null and market_view.has_method("select_good"):
-		market_view.call("select_good", good_id)
+	_refresh_main_content()
 	_refresh_right_panel()
 
 func _on_market_good_closed() -> void:
 	selected_market_good_id = ""
+	_refresh_main_content()
 	_refresh_right_panel()
 
 func _on_building_selected(building_id: String) -> void:
 	selected_building_id_by_location[current_location_id] = building_id
-	if building_view != null and building_view.has_method("select_building"):
-		building_view.call("select_building", building_id)
+	_refresh_main_content()
 	_refresh_right_panel()
 
 func _on_building_closed() -> void:
 	selected_building_id_by_location[current_location_id] = ""
+	_refresh_main_content()
 	_refresh_right_panel()
 
 func _on_build_requested(building_id: String) -> void:
@@ -1569,9 +1871,14 @@ func _art_for_housing_focus(focus_id: String) -> Texture2D:
 		"overview":
 			if housing_overview_art:
 				return housing_overview_art
-		"commoners":
+		"field_labour":
+			if housing_field_labour_art:
+				return housing_field_labour_art
 			if housing_commoners_art:
 				return housing_commoners_art
+		"artisans":
+			if housing_artisans_art:
+				return housing_artisans_art
 		"tlacotin":
 			if housing_tlacotin_art:
 				return housing_tlacotin_art
@@ -1587,6 +1894,9 @@ func _art_for_housing_focus(focus_id: String) -> Texture2D:
 		"captives":
 			if housing_captives_art:
 				return housing_captives_art
+		"mothball":
+			if housing_mothball_art:
+				return housing_mothball_art
 	if housing_art:
 		return housing_art
 	return estate_art
@@ -1690,11 +2000,27 @@ func _add_center_label(parent: VBoxContainer, text: String, font_size: int) -> v
 func _add_notification(text: String) -> void:
 	if notification_list == null:
 		return
+
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.custom_minimum_size = Vector2(0, 72)
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.035, 0.06, 0.055, 0.92), Color(0.34, 0.71, 0.63, 0.35), 10))
+	notification_list.add_child(panel)
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(margin)
+
 	var label: Label = Label.new()
 	label.text = "• " + text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	label.add_theme_font_size_override("font_size", 19)
-	notification_list.add_child(label)
+	label.add_theme_color_override("font_color", Color(0.90, 0.86, 0.76, 1.0))
+	margin.add_child(label)
 
 func _clear_children(parent: Node) -> void:
 	if parent == null:

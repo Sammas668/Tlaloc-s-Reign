@@ -17,10 +17,7 @@ func set_housing_data(data: Dictionary, selected: bool = false) -> void:
 	_housing_id = String(data.get("id", ""))
 	_is_summary = bool(data.get("is_summary", false))
 	_clear_children(self)
-	var row_height: int = 198
-	if _is_summary:
-		row_height = 168
-	custom_minimum_size = Vector2(0, row_height)
+	custom_minimum_size = Vector2(0, 176 if _is_summary else 214)
 	var border: Color = Color(0.34, 0.71, 0.63, 0.45)
 	if selected:
 		border = Color(0.76, 0.63, 0.32, 0.86)
@@ -44,7 +41,9 @@ func set_housing_data(data: Dictionary, selected: bool = false) -> void:
 	main_button.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	main_button.clip_text = true
 	main_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	main_button.add_theme_font_size_override("font_size", 17)
+	main_button.add_theme_font_size_override("font_size", 18)
+	main_button.add_theme_stylebox_override("normal", _make_style(Color(0.045, 0.075, 0.068, 0.94), border, 10))
+	main_button.add_theme_stylebox_override("hover", _make_style(Color(0.065, 0.10, 0.09, 0.98), Color(0.50, 0.82, 0.74, 0.75), 10))
 	main_button.pressed.connect(func() -> void:
 		emit_signal("housing_selected", _housing_id)
 	)
@@ -52,28 +51,18 @@ func set_housing_data(data: Dictionary, selected: bool = false) -> void:
 
 	if not _is_summary:
 		var actions: VBoxContainer = VBoxContainer.new()
-		actions.custom_minimum_size = Vector2(54, 0)
+		actions.custom_minimum_size = Vector2(58, 0)
 		actions.add_theme_constant_override("separation", 8)
 		row.add_child(actions)
 
-		var build_button: Button = Button.new()
-		build_button.text = "+"
-		build_button.disabled = not bool(data.get("can_build", false))
-		build_button.custom_minimum_size = Vector2(52, 52)
-		build_button.add_theme_font_size_override("font_size", 25)
-		build_button.add_theme_stylebox_override("normal", _make_style(Color(0.06, 0.24, 0.14, 0.96), Color(0.2, 0.8, 0.42, 0.75), 10))
+		var build_button: Button = _make_icon_button("+", true, bool(data.get("can_build", false)))
 		build_button.tooltip_text = String(data.get("build_status", "Build one"))
 		build_button.pressed.connect(func() -> void:
 			emit_signal("build_requested", _housing_id)
 		)
 		actions.add_child(build_button)
 
-		var destroy_button: Button = Button.new()
-		destroy_button.text = "−"
-		destroy_button.disabled = not bool(data.get("can_destroy", false))
-		destroy_button.custom_minimum_size = Vector2(52, 52)
-		destroy_button.add_theme_font_size_override("font_size", 25)
-		destroy_button.add_theme_stylebox_override("normal", _make_style(Color(0.28, 0.08, 0.06, 0.96), Color(0.9, 0.28, 0.22, 0.75), 10))
+		var destroy_button: Button = _make_icon_button("−", false, bool(data.get("can_destroy", false)))
 		destroy_button.tooltip_text = String(data.get("destroy_status", "Destroy one"))
 		destroy_button.pressed.connect(func() -> void:
 			emit_signal("destroy_requested", _housing_id)
@@ -82,30 +71,38 @@ func set_housing_data(data: Dictionary, selected: bool = false) -> void:
 
 func _summary_text(data: Dictionary) -> String:
 	var text: String = String(data.get("name", "Housing")) + "\n"
-	text += "Pop " + str(int(data.get("population", 0))) + " / Cap " + str(int(data.get("capacity", 0)))
-	text += " | Free " + str(int(data.get("free_capacity", 0)))
-	var over: int = int(data.get("over_capacity", 0))
-	if over > 0:
-		text += " | Over " + str(over)
-	text += "\nStatus: " + String(data.get("status", "Unknown"))
+	text += "Total pop: " + str(int(data.get("population", 0))) + " | Active: " + str(int(data.get("active_population", 0)))
+	var inactive: int = int(data.get("inactive_population", 0))
+	if inactive > 0:
+		text += " | Inactive: " + str(inactive)
+	text += "\nActive capacity: " + str(int(data.get("active_capacity", 0))) + " | Built capacity: " + str(int(data.get("capacity", 0)))
+	text += "\nFree active space: " + str(int(data.get("free_capacity", 0))) + " | Status: " + String(data.get("status", "Unknown"))
 	text += "\nBuilding upkeep: " + _dictionary_text(data.get("maintenance", {}) as Dictionary)
-	var options: Array = data.get("building_options", []) as Array
-	if not options.is_empty():
-		text += "\nOptions: "
-		var option_names: Array[String] = []
-		for option_variant: Variant in options:
-			var option: Dictionary = option_variant as Dictionary
-			option_names.append(String(option.get("name", "Housing")))
-		text += ", ".join(option_names)
 	return text
 
 func _building_text(data: Dictionary) -> String:
+	var count: int = int(data.get("count", 0))
+	var active_count: int = int(data.get("active_count", count))
 	var text: String = String(data.get("name", "Housing")) + "\n"
-	text += "Built: " + str(int(data.get("count", 0))) + " | " + String(data.get("tier", "")).capitalize() + "\n"
-	text += "Adds: " + _dictionary_text(data.get("housing_capacity", {}) as Dictionary) + "\n"
+	text += "Built " + str(count) + " | Active " + str(active_count) + " | Mothballed " + str(max(0, count - active_count)) + "\n"
+	text += "Provides/building: " + _dictionary_text(data.get("housing_capacity", {}) as Dictionary) + "\n"
 	text += "Upkeep/building: " + _dictionary_text(data.get("housing_maintenance", {}) as Dictionary) + "\n"
-	text += "Cost: " + _dictionary_text(data.get("build_cost", {}) as Dictionary) + "\n"
+	text += "Build cost: " + _dictionary_text(data.get("build_cost", {}) as Dictionary)
 	return text
+
+func _make_icon_button(text_value: String, positive: bool, enabled: bool) -> Button:
+	var button: Button = Button.new()
+	button.text = text_value
+	button.disabled = not enabled
+	button.custom_minimum_size = Vector2(54, 54)
+	button.add_theme_font_size_override("font_size", 27)
+	var bg: Color = Color(0.06, 0.24, 0.14, 0.96) if positive else Color(0.28, 0.08, 0.06, 0.96)
+	var border: Color = Color(0.2, 0.8, 0.42, 0.75) if positive else Color(0.9, 0.28, 0.22, 0.75)
+	button.add_theme_stylebox_override("normal", _make_style(bg, border, 10))
+	button.add_theme_stylebox_override("hover", _make_style(bg.lightened(0.08), border.lightened(0.1), 10))
+	button.add_theme_stylebox_override("pressed", _make_style(bg.darkened(0.08), border, 10))
+	button.add_theme_stylebox_override("disabled", _make_style(Color(0.12, 0.13, 0.13, 0.90), Color(0.35, 0.36, 0.34, 0.65), 10))
+	return button
 
 func _dictionary_text(values: Dictionary) -> String:
 	var parts: Array[String] = []
