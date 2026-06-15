@@ -52,6 +52,7 @@ var _shrine_upgrades: Dictionary = {}
 var _ritual_capacity_used_this_veintena: float = 0.0
 var _selected_shrine_panel_id: String = ""
 var _optional_shrine_art_cache: Dictionary = {}
+var _selected_barracks_panel_id: String = ""
 
 func _ready() -> void:
 	_remove_shrine_offerings_focus()
@@ -161,9 +162,13 @@ func _optional_shrine_art(paths: Array[String]) -> Texture2D:
 func show_location(location_id: String) -> void:
 	if location_id == "shrines" and current_location_id != "shrines":
 		_selected_shrine_panel_id = ""
+	if location_id == "warriors" and current_location_id != "warriors":
+		_selected_barracks_panel_id = ""
 	super.show_location(location_id)
 
 func show_focus(location_id: String, focus_id: String) -> void:
+	if location_id == "warriors":
+		_selected_barracks_panel_id = ""
 	if location_id == "shrines":
 		# The old Offerings tab has been removed; rituals now live inside each
 		# god's Ritual Tiers panel. Redirect any stale/manual reference safely.
@@ -173,6 +178,14 @@ func show_focus(location_id: String, focus_id: String) -> void:
 	super.show_focus(location_id, focus_id)
 
 func _refresh_main_content() -> void:
+	if current_location_id == "warriors":
+		_clear_dynamic_views()
+		if location_title:
+			location_title.text = "Barracks"
+		if location_art:
+			location_art.texture = _art_for_location(current_location_id)
+		_show_barracks_content()
+		return
 	if current_location_id == "shrines":
 		_clear_dynamic_views()
 		if location_title:
@@ -190,6 +203,10 @@ func _refresh_right_panel() -> void:
 		notification_title.text = _report_title_for_current_focus(profile)
 
 	_refresh_house_claim()
+
+	if current_location_id == "warriors":
+		_build_barracks_reports()
+		return
 
 	if current_location_id == "shrines":
 		_build_shrine_reports()
@@ -230,6 +247,19 @@ func _refresh_right_panel() -> void:
 		_build_report_list(profile)
 
 func _report_title_for_current_focus(profile: Dictionary) -> String:
+	if current_location_id == "warriors":
+		match _current_focus_id():
+			"overview":
+				return "Barracks Overview"
+			"warriors":
+				return "Warrior Recruitment"
+			"weapons":
+				return "Weapons & Readiness"
+			"flower_wars":
+				return "Flower Wars"
+			"returns":
+				return "War Returns"
+		return "Barracks Reports"
 	if current_location_id == "shrines":
 		match _current_focus_id():
 			"overview":
@@ -428,6 +458,305 @@ func _patch_join_limited(values: Array[String], max_items: int) -> String:
 	if values.size() > max_items:
 		text += ", +" + str(values.size() - max_items) + " more"
 	return text
+
+
+# -----------------------------------------------------------------------------
+# Barracks / Flower Wars v1 UI
+# -----------------------------------------------------------------------------
+
+func _show_barracks_content() -> void:
+	_set_content_root_layout(true)
+	if content_text:
+		content_text.visible = false
+	if _selected_barracks_panel_id == "":
+		if content_root:
+			content_root.visible = false
+		return
+	if content_root:
+		content_root.visible = true
+	if dynamic_view_host == null:
+		return
+	dynamic_view_host.visible = true
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.64), Color(0.76, 0.32, 0.24, 0.42), 14))
+	dynamic_view_host.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_bottom", 14)
+	panel.add_child(margin)
+	var root: VBoxContainer = VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 10)
+	margin.add_child(root)
+	var header: HBoxContainer = HBoxContainer.new()
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_theme_constant_override("separation", 12)
+	root.add_child(header)
+	var title_label: Label = _religion_label(_barracks_panel_title(_selected_barracks_panel_id), 29, COLOR_TEXT)
+	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_label.clip_text = true
+	header.add_child(title_label)
+	var close_button: Button = Button.new()
+	close_button.text = "X"
+	close_button.custom_minimum_size = Vector2(48, 44)
+	close_button.add_theme_font_size_override("font_size", 22)
+	close_button.pressed.connect(_on_barracks_panel_closed)
+	header.add_child(close_button)
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var list: VBoxContainer = VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 10)
+	scroll.add_child(list)
+	_build_selected_barracks_panel(list, _selected_barracks_panel_id)
+
+func _build_barracks_reports() -> void:
+	var focus_id: String = _current_focus_id()
+	match focus_id:
+		"overview":
+			_add_barracks_report_card("overview|summary", "Barracks Summary", _barracks_summary_subtitle())
+			_add_barracks_report_card("overview|capacity", "Warrior Capacity", _barracks_capacity_subtitle())
+			_add_barracks_report_card("overview|prestige", "War Prestige", _barracks_prestige_subtitle())
+		"warriors":
+			_add_barracks_report_card("warriors|recruit", "Recruit Warriors", _barracks_recruit_subtitle())
+			_add_barracks_report_card("warriors|status", "Warrior Status", _barracks_summary_subtitle())
+		"weapons":
+			_add_barracks_report_card("weapons|readiness", "Weapons & Readiness", _barracks_weapon_subtitle())
+			_add_barracks_report_card("weapons|costs", "War Costs", "Recruitment and Flower Wars consume weapons from the Storehouse.")
+		"flower_wars":
+			_add_barracks_report_card("flower|minor", "Minor Flower War", "Early target: 5 warriors. Best for first captives and low-risk testing.")
+			_add_barracks_report_card("flower|standard", "Standard Flower War", "Mid target: 10 warriors. Should require a real war commitment.")
+			_add_barracks_report_card("flower|major", "Major Flower War", "Mature target: 20 warriors. Late-game scale can grow beyond this later.")
+		"returns":
+			_add_barracks_report_card("returns|last", "Last Flower War Report", _barracks_last_report_subtitle())
+			_add_barracks_report_card("returns|history", "War History", _barracks_history_subtitle())
+		_:
+			_add_barracks_report_card("overview|summary", "Barracks Summary", _barracks_summary_subtitle())
+
+func _add_barracks_report_card(panel_id: String, title: String, subtitle: String) -> void:
+	var button: Button = Button.new()
+	button.toggle_mode = true
+	button.button_pressed = panel_id == _selected_barracks_panel_id
+	button.custom_minimum_size = Vector2(0, 82)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.clip_contents = true
+	button.text = ""
+	button.tooltip_text = title + " — " + subtitle
+	button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.045, 0.045, 0.04, 0.86), Color(0.84, 0.35, 0.24, 0.65), 10))
+	button.add_theme_stylebox_override("hover", _make_panel_style(Color(0.075, 0.065, 0.055, 0.94), Color(0.94, 0.45, 0.34, 0.85), 10))
+	var margin: MarginContainer = MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.offset_left = 10.0
+	margin.offset_top = 7.0
+	margin.offset_right = -10.0
+	margin.offset_bottom = -7.0
+	button.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", 2)
+	margin.add_child(stack)
+	var title_label: Label = _religion_label(title, 17, COLOR_TEXT)
+	title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(title_label)
+	var subtitle_label: Label = _religion_wrapped_label(subtitle, 13, COLOR_MUTED)
+	subtitle_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_child(subtitle_label)
+	button.pressed.connect(func() -> void:
+		_on_barracks_panel_pressed(panel_id)
+	)
+	notification_list.add_child(button)
+
+func _on_barracks_panel_pressed(panel_id: String) -> void:
+	_selected_barracks_panel_id = panel_id
+	_refresh_main_content()
+	_refresh_right_panel()
+
+func _on_barracks_panel_closed() -> void:
+	_selected_barracks_panel_id = ""
+	_refresh_main_content()
+	_refresh_right_panel()
+
+func _barracks_panel_title(panel_id: String) -> String:
+	match panel_id:
+		"overview|summary": return "Barracks Summary"
+		"overview|capacity": return "Warrior Capacity"
+		"overview|prestige": return "War Prestige"
+		"warriors|recruit": return "Recruit Warriors"
+		"warriors|status": return "Warrior Status"
+		"weapons|readiness": return "Weapons & Readiness"
+		"weapons|costs": return "War Costs"
+		"flower|minor": return "Minor Flower War"
+		"flower|standard": return "Standard Flower War"
+		"flower|major": return "Major Flower War"
+		"returns|last": return "Last Flower War Report"
+		"returns|history": return "War History"
+	return "Barracks"
+
+func _build_selected_barracks_panel(parent: VBoxContainer, panel_id: String) -> void:
+	if panel_id.begins_with("flower|"):
+		_build_flower_war_panel(parent, panel_id.split("|")[1])
+		return
+	match panel_id:
+		"overview|summary", "warriors|status": _build_barracks_summary_panel(parent)
+		"overview|capacity": _build_barracks_capacity_panel(parent)
+		"overview|prestige": _build_barracks_prestige_panel(parent)
+		"warriors|recruit": _build_recruit_warriors_panel(parent)
+		"weapons|readiness", "weapons|costs": _build_weapons_readiness_panel(parent)
+		"returns|last": _build_last_flower_war_panel(parent)
+		"returns|history": _build_war_history_panel(parent)
+		_: parent.add_child(_religion_wrapped_label("Select a Barracks report from the right-hand bar.", 20, COLOR_MUTED))
+
+func _barracks_summary() -> Dictionary:
+	var state: Node = _state()
+	if state != null and state.has_method("get_barracks_summary"):
+		var value: Variant = state.call("get_barracks_summary")
+		if value is Dictionary:
+			return value as Dictionary
+	return {}
+
+func _build_barracks_summary_panel(parent: VBoxContainer) -> void:
+	var summary: Dictionary = _barracks_summary()
+	parent.add_child(_religion_wrapped_label("Barracks reads warrior population, warrior housing capacity, weapons, recruitment limits and Flower War readiness from TRGameState.", 19, COLOR_MUTED))
+	parent.add_child(_religion_wrapped_label("Warriors: " + str(int(summary.get("warriors", 0))) + " / capacity " + str(int(summary.get("warrior_capacity", 0))) + ". Free capacity: " + str(int(summary.get("free_warrior_capacity", 0))) + ".", 20, COLOR_TEXT))
+	parent.add_child(_religion_wrapped_label("Weapons: " + _format_float(float(summary.get("weapons", 0.0))) + ". Recruits used: " + str(int(summary.get("recruits_used", 0))) + " / " + str(int(summary.get("recruits_per_veintena", 0))) + ".", 19, COLOR_MUTED))
+	parent.add_child(_religion_wrapped_label("War XP: " + _format_float(float(summary.get("warrior_xp", 0.0))) + ". Prestige: " + _format_float(float(summary.get("prestige", 0.0))) + ".", 19, COLOR_TEAL))
+
+func _build_barracks_capacity_panel(parent: VBoxContainer) -> void:
+	var summary: Dictionary = _barracks_summary()
+	parent.add_child(_religion_wrapped_label("Warrior capacity comes from Housing > Warriors. Building more warrior housing increases maximum supported warriors.", 19, COLOR_MUTED))
+	parent.add_child(_religion_wrapped_label("Supported warriors: " + str(int(summary.get("warriors", 0))) + ". Capacity: " + str(int(summary.get("warrior_capacity", 0))) + ". Free capacity: " + str(int(summary.get("free_warrior_capacity", 0))) + ".", 20, COLOR_TEXT))
+
+func _build_barracks_prestige_panel(parent: VBoxContainer) -> void:
+	parent.add_child(_religion_wrapped_label("Prestige is an early placeholder score for martial public recognition. Flower Wars add prestige for victories, captives, enemy casualties and loot. Jaguars receive a prestige multiplier.", 19, COLOR_MUTED))
+	parent.add_child(_religion_wrapped_label("Current war prestige: " + _format_float(float(_barracks_summary().get("prestige", 0.0))) + ".", 22, COLOR_TEAL))
+
+func _build_recruit_warriors_panel(parent: VBoxContainer) -> void:
+	var state: Node = _state()
+	var summary: Dictionary = _barracks_summary()
+	parent.add_child(_religion_wrapped_label("Recruitment adds Yaotequihuaqueh warriors if there is warrior housing capacity and enough free goods after reserves.", 19, COLOR_MUTED))
+	parent.add_child(_religion_wrapped_label("Current warriors: " + str(int(summary.get("warriors", 0))) + ". Free warrior capacity: " + str(int(summary.get("free_warrior_capacity", 0))) + ".", 19, COLOR_TEXT))
+	for amount: int in [1, 2, 5]:
+		var status: Dictionary = {"ok": false, "reason": "Barracks backend missing."}
+		if state != null and state.has_method("can_recruit_warriors"):
+			status = state.call("can_recruit_warriors", amount) as Dictionary
+		var button: Button = Button.new()
+		button.text = "Recruit " + str(amount) + " warrior" + ("s" if amount != 1 else "")
+		button.custom_minimum_size = Vector2(0, 46)
+		button.add_theme_font_size_override("font_size", 19)
+		button.disabled = not bool(status.get("ok", false))
+		button.tooltip_text = String(status.get("reason", ""))
+		button.pressed.connect(func() -> void:
+			if state != null and state.has_method("recruit_warriors"):
+				state.call("recruit_warriors", amount)
+			_refresh_all()
+		)
+		parent.add_child(button)
+
+func _build_weapons_readiness_panel(parent: VBoxContainer) -> void:
+	var summary: Dictionary = _barracks_summary()
+	parent.add_child(_religion_wrapped_label("Weapons are produced in Production > Workshops through Weapon Yards. Warriors consume weapons in upkeep, recruitment and Flower Wars.", 19, COLOR_MUTED))
+	parent.add_child(_religion_wrapped_label("Weapons in Storehouse: " + _format_float(float(summary.get("weapons", 0.0))) + ".", 22, COLOR_TEXT))
+
+func _build_flower_war_panel(parent: VBoxContainer, scale_id: String) -> void:
+	var state: Node = _state()
+	parent.add_child(_religion_wrapped_label("Flower Wars auto-resolve from committed warriors, doctrine, provisioning, Huitzilopochtli favour and a small random roll.", 18, COLOR_MUTED))
+	for doctrine_id: String in ["unspecialised", "eagle", "jaguar", "otomi", "coyote"]:
+		_add_flower_war_launch_button(parent, state, scale_id, doctrine_id, "standard")
+
+func _add_flower_war_launch_button(parent: VBoxContainer, state: Node, scale_id: String, doctrine_id: String, provisioning_id: String) -> void:
+	var committed: int = 5
+	if scale_id == "standard": committed = 10
+	elif scale_id == "major": committed = 20
+	var preview: Dictionary = {"ok": false, "reason": "Flower War backend missing."}
+	if state != null and state.has_method("get_flower_war_preview"):
+		preview = state.call("get_flower_war_preview", scale_id, doctrine_id, provisioning_id, committed) as Dictionary
+	var button: Button = Button.new()
+	button.text = String(doctrine_id).capitalize() + " — commit " + str(committed) + " warriors"
+	button.custom_minimum_size = Vector2(0, 52)
+	button.add_theme_font_size_override("font_size", 18)
+	button.disabled = not bool(preview.get("ok", false))
+	button.tooltip_text = "Risk: " + String(preview.get("risk", "Unknown")) + ". " + String(preview.get("reason", ""))
+	button.pressed.connect(func() -> void:
+		if state != null and state.has_method("launch_flower_war"):
+			state.call("launch_flower_war", scale_id, doctrine_id, provisioning_id, committed)
+		_selected_barracks_panel_id = "returns|last"
+		_refresh_all()
+	)
+	parent.add_child(button)
+	parent.add_child(_religion_wrapped_label("Preview: " + String(preview.get("risk", "Unknown")) + ". Cost: " + _barracks_cost_text(preview.get("cost", {}) as Dictionary) + ".", 15, COLOR_MUTED))
+
+func _build_last_flower_war_panel(parent: VBoxContainer) -> void:
+	var state: Node = _state()
+	var lines: Array[String] = []
+	if state != null and state.has_method("get_last_flower_war_report"):
+		for line_variant: Variant in state.call("get_last_flower_war_report"):
+			lines.append(String(line_variant))
+	if lines.is_empty():
+		parent.add_child(_religion_wrapped_label("No Flower War has been launched yet.", 20, COLOR_MUTED))
+		return
+	for line: String in lines:
+		parent.add_child(_religion_wrapped_label("• " + line, 19, COLOR_TEXT))
+
+func _build_war_history_panel(parent: VBoxContainer) -> void:
+	var state: Node = _state()
+	var history_variant: Variant = null
+	if state != null:
+		history_variant = state.get("flower_war_history")
+	if not (history_variant is Array) or (history_variant as Array).is_empty():
+		parent.add_child(_religion_wrapped_label("No war history recorded yet.", 20, COLOR_MUTED))
+		return
+	for item_variant: Variant in history_variant as Array:
+		var item: Dictionary = item_variant as Dictionary
+		parent.add_child(_religion_wrapped_label("• " + String(item.get("scale_name", "Flower War")) + ": " + String(item.get("result", "Result")) + ", captives " + str(int(item.get("captives", 0))) + ", prestige " + _format_float(float(item.get("prestige", 0.0))) + ".", 18, COLOR_TEXT))
+
+func _barracks_summary_subtitle() -> String:
+	var s: Dictionary = _barracks_summary()
+	return "Warriors " + str(int(s.get("warriors", 0))) + "/" + str(int(s.get("warrior_capacity", 0))) + "; weapons " + _format_float(float(s.get("weapons", 0.0))) + "."
+
+func _barracks_capacity_subtitle() -> String:
+	return "Free capacity " + str(int(_barracks_summary().get("free_warrior_capacity", 0))) + "; build more in Housing > Warriors."
+
+func _barracks_prestige_subtitle() -> String:
+	return "Prestige from Flower Wars: " + _format_float(float(_barracks_summary().get("prestige", 0.0))) + "."
+
+func _barracks_recruit_subtitle() -> String:
+	var state: Node = _state()
+	if state != null and state.has_method("can_recruit_warriors"):
+		var status: Dictionary = state.call("can_recruit_warriors", 1) as Dictionary
+		return String(status.get("reason", "Recruit warriors."))
+	return "Recruitment backend missing."
+
+func _barracks_weapon_subtitle() -> String:
+	return "Weapons stored: " + _format_float(float(_barracks_summary().get("weapons", 0.0))) + "."
+
+func _barracks_last_report_subtitle() -> String:
+	var state: Node = _state()
+	if state != null and state.has_method("get_last_flower_war_report"):
+		var lines: Array = state.call("get_last_flower_war_report") as Array
+		if not lines.is_empty(): return String(lines[0])
+	return "No Flower War launched yet."
+
+func _barracks_history_subtitle() -> String:
+	var state: Node = _state()
+	if state != null:
+		var history: Variant = state.get("flower_war_history")
+		if history is Array: return str((history as Array).size()) + " war result(s) recorded."
+	return "No war history recorded yet."
+
+func _barracks_cost_text(cost: Dictionary) -> String:
+	if cost.is_empty(): return "none"
+	var parts: Array[String] = []
+	for key_variant: Variant in cost.keys():
+		parts.append(_resource_display_name(String(key_variant)) + " " + _format_float(float(cost[key_variant])))
+	return ", ".join(parts)
 
 # -----------------------------------------------------------------------------
 # Religion / Shrine Upgrades + Tiered Rituals v2

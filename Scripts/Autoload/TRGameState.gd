@@ -445,8 +445,7 @@ func inactive_population_by_group() -> Dictionary:
 	return result
 
 func _active_population_for_group(group_id: String) -> int:
-	# Safety fix: read directly from population to avoid recursive housing/labour summary loops.
-	return int(population.get(group_id, 0))
+	return int(active_population_by_group().get(group_id, 0))
 
 func estimate_housing_maintenance() -> Dictionary:
 	# Mothballing does not avoid building maintenance. Maintenance is paid for all
