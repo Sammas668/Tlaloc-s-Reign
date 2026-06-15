@@ -1,725 +1,725 @@
 {
   "buildings": [
-    {
-      "id": "maize_chinampa",
-      "name": "Maize Chinampa",
-      "screen": "chinampas",
-      "category": "food",
-      "description": "Raised canal-fed maize plots. The estate food base and the first real production engine.",
-      "build_cost": {
-        "wood": 25,
-        "tools": 4
-      },
-      "staff": {
-        "macehualtin": 75,
-        "tlacotin": 75
-      },
-      "inputs": {
-        "tools": 0.5
-      },
-      "outputs": {
-        "maize": 60
-      },
-      "priority": 10
-    },
-    {
-      "id": "cacao_garden",
-      "name": "Cacao Garden",
-      "screen": "chinampas",
-      "category": "raw",
-      "description": "Protected garden plots for cacao. Valuable for ritual, nobles, tribute and market pressure.",
-      "build_cost": {
-        "wood": 30,
-        "tools": 5
-      },
-      "staff": {
-        "macehualtin": 40,
-        "tlacotin": 40
-      },
-      "inputs": {
-        "tools": 0.25
-      },
-      "outputs": {
-        "cacao": 2
-      },
-      "priority": 20
-    },
-    {
-      "id": "cotton_chinampa",
-      "name": "Cotton Chinampa",
-      "screen": "chinampas",
-      "category": "raw",
-      "description": "Cotton plots that feed the cloth and fine textile chains.",
-      "build_cost": {
-        "wood": 30,
-        "tools": 5
-      },
-      "staff": {
-        "macehualtin": 60,
-        "tlacotin": 60
-      },
-      "inputs": {
-        "tools": 0.25
-      },
-      "outputs": {
-        "cotton": 30
-      },
-      "priority": 30
-    },
-    {
-      "id": "woodcutting_yard",
-      "name": "Woodcutting Yard",
-      "screen": "workshops",
-      "category": "raw",
-      "description": "A managed woodland work yard that brings timber into the estate economy. It belongs under Production > Workshops because it is a work site rather than a chinampa, but it is staffed by ordinary Field Labour rather than Tolteca artisans.",
-      "build_cost": {
-        "wood": 20,
-        "tools": 4
-      },
-      "staff": {
-        "macehualtin": 50,
-        "tlacotin": 50
-      },
-      "inputs": {
-        "tools": 0.25
-      },
-      "outputs": {
-        "wood": 35
-      },
-      "priority": 35
-    },
-    {
-      "id": "obsidian_quarry_access",
-      "name": "Obsidian Quarry Access",
-      "screen": "workshops",
-      "category": "raw",
-      "description": "Quarry access and rough obsidian extraction for the estate. It appears under Production > Workshops because it is a specialised work site, but it uses ordinary Field Labour rather than craftsmen.",
-      "build_cost": {
-        "wood": 30,
-        "tools": 8
-      },
-      "staff": {
-        "macehualtin": 50,
-        "tlacotin": 50
-      },
-      "inputs": {
-        "tools": 0.5
-      },
-      "outputs": {
-        "obsidian": 14
-      },
-      "priority": 36
-    },
-    {
-      "id": "basic_tool_workshop",
-      "name": "Basic Tool Workshop",
-      "screen": "workshops",
-      "category": "tools",
-      "description": "A small starter workshop that prevents the estate from becoming tool-paralysed.",
-      "build_cost": {
-        "wood": 25,
-        "cloth": 5
-      },
-      "staff": {
-        "tolteca": 10
-      },
-      "inputs": {
-        "wood": 10
-      },
-      "outputs": {
-        "tools": 8
-      },
-      "priority": 40
-    },
-    {
-      "id": "cloth_workshop",
-      "name": "Cloth Workshop",
-      "screen": "workshops",
-      "category": "cloth",
-      "description": "Converts cotton and tools into cloth for upkeep, buildings and palace-facing production.",
-      "build_cost": {
-        "wood": 40,
-        "tools": 10,
-        "cotton": 20
-      },
-      "staff": {
-        "tolteca": 25
-      },
-      "inputs": {
-        "cotton": 20,
-        "tools": 0.5
-      },
-      "outputs": {
-        "cloth": 28
-      },
-      "priority": 50
-    },
-    {
-      "id": "weapon_yard",
-      "name": "Weapon Yard",
-      "screen": "workshops",
-      "category": "weapons",
-      "description": "Produces weapons from obsidian, wood, cloth and tools. This is expensive but opens war readiness.",
-      "build_cost": {
-        "wood": 50,
-        "tools": 15,
-        "obsidian": 10,
-        "cloth": 10
-      },
-      "staff": {
-        "tolteca": 25,
-        "yaotequihuaqueh": 20
-      },
-      "inputs": {
-        "obsidian": 10,
-        "wood": 10,
-        "cloth": 5,
-        "tools": 1
-      },
-      "outputs": {
-        "weapons": 8
-      },
-      "priority": 60
-    },
-    {
-      "id": "fine_textile_house",
-      "name": "Fine Textile House",
-      "screen": "workshops",
-      "category": "luxury",
-      "description": "Produces elite palace-facing fine textiles from cotton, cacao and tools.",
-      "build_cost": {
-        "wood": 45,
-        "tools": 10,
-        "cotton": 20,
-        "cacao": 3
-      },
-      "staff": {
-        "tolteca": 25
-      },
-      "inputs": {
-        "cotton": 15,
-        "cacao": 1,
-        "tools": 0.5
-      },
-      "outputs": {
-        "fine_textiles": 3
-      },
-      "priority": 70
-    },
-    {
-      "id": "small_field_labour_houses",
-      "name": "Small Field Labour Houses",
-      "screen": "housing",
-      "category": "field_labour",
-      "tier": "small",
-      "description": "Small Macehualtin household clusters for ordinary estate field labour. Cheap to build quickly, but inefficient to maintain for the capacity provided.",
-      "build_cost": {
-        "wood": 20,
-        "cloth": 4
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "macehualtin": 50
-      },
-      "housing_maintenance": {
-        "wood": 0.45,
-        "cloth": 0.18
-      },
-      "priority": 80
-    },
-    {
-      "id": "medium_field_labour_ward",
-      "name": "Medium Field Labour Ward",
-      "screen": "housing",
-      "category": "field_labour",
-      "tier": "medium",
-      "description": "A more organised field-labour ward with shared support space. Higher upfront cost, but better building-upkeep efficiency.",
-      "build_cost": {
-        "wood": 50,
-        "cloth": 10,
-        "tools": 2
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "macehualtin": 125
-      },
-      "housing_maintenance": {
-        "wood": 0.75,
-        "cloth": 0.28
-      },
-      "priority": 81
-    },
-    {
-      "id": "large_field_labour_compound",
-      "name": "Large Field Labour Compound",
-      "screen": "housing",
-      "category": "field_labour",
-      "tier": "large",
-      "description": "A substantial field-labour compound. Expensive to establish, but efficient for maintaining a large supported labour population.",
-      "build_cost": {
-        "wood": 125,
-        "cloth": 24,
-        "tools": 6
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "macehualtin": 300
-      },
-      "housing_maintenance": {
-        "wood": 1.1,
-        "cloth": 0.42
-      },
-      "priority": 82
-    },
-    {
-      "id": "small_artisan_houses",
-      "name": "Small Artisan Houses",
-      "screen": "housing",
-      "category": "artisans",
-      "tier": "small",
-      "description": "Small Tolteca artisan housing close to workshops. Cheap early specialist capacity, but inefficient to maintain.",
-      "build_cost": {
-        "wood": 20,
-        "cloth": 6,
-        "tools": 2
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "tolteca": 10
-      },
-      "housing_maintenance": {
-        "wood": 0.18,
-        "cloth": 0.12
-      },
-      "priority": 84
-    },
-    {
-      "id": "medium_artisan_ward",
-      "name": "Medium Artisan Ward",
-      "screen": "housing",
-      "category": "artisans",
-      "tier": "medium",
-      "description": "A compact artisan ward with shared workshop-adjacent support. Higher upfront cost and better upkeep per supported artisan.",
-      "build_cost": {
-        "wood": 55,
-        "cloth": 15,
-        "tools": 5
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "tolteca": 25
-      },
-      "housing_maintenance": {
-        "wood": 0.3,
-        "cloth": 0.2
-      },
-      "priority": 85
-    },
-    {
-      "id": "large_artisan_compound",
-      "name": "Large Artisan Compound",
-      "screen": "housing",
-      "category": "artisans",
-      "tier": "large",
-      "description": "A major artisan compound for a mature workshop quarter. Expensive, but best long-term maintenance efficiency for Tolteca capacity.",
-      "build_cost": {
-        "wood": 140,
-        "cloth": 36,
-        "tools": 12
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "tolteca": 60
-      },
-      "housing_maintenance": {
-        "wood": 0.55,
-        "cloth": 0.34
-      },
-      "priority": 86
-    },
-    {
-      "id": "small_tlacotin_quarters",
-      "name": "Small Tlacotin Quarters",
-      "screen": "housing",
-      "category": "tlacotin",
-      "tier": "small",
-      "description": "Basic quarters and supervision space for bonded or enslaved labour. Cheap capacity with relatively poor building-building-upkeep efficiency.",
-      "build_cost": {
-        "wood": 15,
-        "tools": 2
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "tlacotin": 30
-      },
-      "housing_maintenance": {
-        "wood": 0.25
-      },
-      "priority": 90
-    },
-    {
-      "id": "medium_tlacotin_yard",
-      "name": "Medium Tlacotin Yard",
-      "screen": "housing",
-      "category": "tlacotin",
-      "tier": "medium",
-      "description": "A larger managed yard for Tlacotin labour. More costly to build, but better organised and cheaper to maintain per worker.",
-      "build_cost": {
-        "wood": 35,
-        "tools": 5
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "tlacotin": 75
-      },
-      "housing_maintenance": {
-        "wood": 0.4
-      },
-      "priority": 91
-    },
-    {
-      "id": "large_tlacotin_compound",
-      "name": "Large Tlacotin Compound",
-      "screen": "housing",
-      "category": "tlacotin",
-      "tier": "large",
-      "description": "A major Tlacotin compound. High upfront cost, strong capacity, and the best comparative building-building-upkeep efficiency.",
-      "build_cost": {
-        "wood": 90,
-        "tools": 12
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "tlacotin": 180
-      },
-      "housing_maintenance": {
-        "wood": 0.65
-      },
-      "priority": 92
-    },
-    {
-      "id": "small_warrior_house",
-      "name": "Small Warrior House",
-      "screen": "housing",
-      "category": "warriors",
-      "tier": "small",
-      "description": "A small warrior support house. Useful for early war capacity but inefficient compared with larger warrior compounds.",
-      "build_cost": {
-        "wood": 20,
-        "cloth": 5,
-        "weapons": 2
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "yaotequihuaqueh": 20
-      },
-      "housing_maintenance": {
-        "wood": 0.25,
-        "cloth": 0.15,
-        "weapons": 0.05
-      },
-      "priority": 100
-    },
-    {
-      "id": "medium_warrior_lodge",
-      "name": "Medium Warrior Lodge",
-      "screen": "housing",
-      "category": "warriors",
-      "tier": "medium",
-      "description": "A more organised warrior lodge with better storage, sleeping space and weapon support.",
-      "build_cost": {
-        "wood": 45,
-        "cloth": 12,
-        "weapons": 5,
-        "tools": 2
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "yaotequihuaqueh": 50
-      },
-      "housing_maintenance": {
-        "wood": 0.4,
-        "cloth": 0.25,
-        "weapons": 0.08
-      },
-      "priority": 101
-    },
-    {
-      "id": "large_warrior_compound",
-      "name": "Large Warrior Compound",
-      "screen": "housing",
-      "category": "warriors",
-      "tier": "large",
-      "description": "A large warrior compound for serious Flower Wars preparation. Expensive, but comparatively efficient for the capacity provided.",
-      "build_cost": {
-        "wood": 115,
-        "cloth": 28,
-        "weapons": 12,
-        "tools": 5
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "yaotequihuaqueh": 120
-      },
-      "housing_maintenance": {
-        "wood": 0.7,
-        "cloth": 0.4,
-        "weapons": 0.15
-      },
-      "priority": 102
-    },
-    {
-      "id": "small_priest_house",
-      "name": "Small Priest House",
-      "screen": "housing",
-      "category": "priests",
-      "tier": "small",
-      "description": "Small priest housing and ritual support. Allows limited priest capacity at a manageable upfront cost.",
-      "build_cost": {
-        "wood": 15,
-        "cloth": 4,
-        "ritual_goods": 1
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "tlamacazqueh": 8
-      },
-      "housing_maintenance": {
-        "wood": 0.15,
-        "cloth": 0.1,
-        "ritual_goods": 0.05
-      },
-      "priority": 110
-    },
-    {
-      "id": "medium_priest_residence",
-      "name": "Medium Priest Residence",
-      "screen": "housing",
-      "category": "priests",
-      "tier": "medium",
-      "description": "A more stable residence for priests and ritual servants, with better comparative building-upkeep efficiency.",
-      "build_cost": {
-        "wood": 35,
-        "cloth": 9,
-        "ritual_goods": 3,
-        "cacao": 1
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "tlamacazqueh": 20
-      },
-      "housing_maintenance": {
-        "wood": 0.25,
-        "cloth": 0.15,
-        "ritual_goods": 0.08
-      },
-      "priority": 111
-    },
-    {
-      "id": "large_ritual_residence",
-      "name": "Large Ritual Residence",
-      "screen": "housing",
-      "category": "priests",
-      "tier": "large",
-      "description": "A substantial ritual residence. High upfront ritual cost, but efficient support for a larger priestly population.",
-      "build_cost": {
-        "wood": 90,
-        "cloth": 22,
-        "ritual_goods": 8,
-        "cacao": 3
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "tlamacazqueh": 50
-      },
-      "housing_maintenance": {
-        "wood": 0.45,
-        "cloth": 0.25,
-        "ritual_goods": 0.15
-      },
-      "priority": 112
-    },
-    {
-      "id": "small_noble_residence",
-      "name": "Small Noble Residence",
-      "screen": "housing",
-      "category": "nobles",
-      "tier": "small",
-      "description": "A modest noble residence. It supports a few nobles but has inefficient status upkeep.",
-      "build_cost": {
-        "wood": 20,
-        "cloth": 8,
-        "cacao": 2,
-        "fine_textiles": 1
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "pipiltin": 4
-      },
-      "housing_maintenance": {
-        "wood": 0.1,
-        "cloth": 0.1,
-        "fine_textiles": 0.02
-      },
-      "priority": 120
-    },
-    {
-      "id": "medium_noble_court",
-      "name": "Medium Noble Court",
-      "screen": "housing",
-      "category": "nobles",
-      "tier": "medium",
-      "description": "A formal noble court with better household organisation and improved support efficiency.",
-      "build_cost": {
-        "wood": 50,
-        "cloth": 18,
-        "cacao": 5,
-        "fine_textiles": 2,
-        "tools": 2
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "pipiltin": 10
-      },
-      "housing_maintenance": {
-        "wood": 0.18,
-        "cloth": 0.16,
-        "fine_textiles": 0.03
-      },
-      "priority": 121
-    },
-    {
-      "id": "large_noble_compound",
-      "name": "Large Noble Compound",
-      "screen": "housing",
-      "category": "nobles",
-      "tier": "large",
-      "description": "A major noble compound. Very expensive, but the strongest long-term capacity and building-building-upkeep efficiency for Pipiltin.",
-      "build_cost": {
-        "wood": 130,
-        "cloth": 45,
-        "cacao": 12,
-        "fine_textiles": 5,
-        "tools": 6
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "pipiltin": 25
-      },
-      "housing_maintenance": {
-        "wood": 0.35,
-        "cloth": 0.3,
-        "fine_textiles": 0.06
-      },
-      "priority": 122
-    },
-    {
-      "id": "small_captive_holding_pen",
-      "name": "Small Captive Holding Pen",
-      "screen": "housing",
-      "category": "captives",
-      "tier": "small",
-      "description": "A guarded holding pen for a small number of captives. Cheap to build but inefficient to maintain.",
-      "build_cost": {
-        "wood": 18,
-        "tools": 3,
-        "weapons": 1
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "malli": 15
-      },
-      "housing_maintenance": {
-        "wood": 0.2,
-        "weapons": 0.03
-      },
-      "priority": 130
-    },
-    {
-      "id": "medium_guarded_holding_yard",
-      "name": "Medium Guarded Holding Yard",
-      "screen": "housing",
-      "category": "captives",
-      "tier": "medium",
-      "description": "A larger guarded holding yard for captives taken in Flower Wars.",
-      "build_cost": {
-        "wood": 45,
-        "tools": 8,
-        "weapons": 3
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "malli": 40
-      },
-      "housing_maintenance": {
-        "wood": 0.35,
-        "weapons": 0.06
-      },
-      "priority": 131
-    },
-    {
-      "id": "large_captive_compound",
-      "name": "Large Captive Compound",
-      "screen": "housing",
-      "category": "captives",
-      "tier": "large",
-      "description": "A major captive compound. Expensive, but efficient if the house is regularly taking captives.",
-      "build_cost": {
-        "wood": 115,
-        "tools": 20,
-        "weapons": 7
-      },
-      "staff": {},
-      "inputs": {},
-      "outputs": {},
-      "housing_capacity": {
-        "malli": 100
-      },
-      "housing_maintenance": {
-        "wood": 0.65,
-        "weapons": 0.12
-      },
-      "priority": 132
-    }
+	{
+	  "id": "maize_chinampa",
+	  "name": "Maize Chinampa",
+	  "screen": "chinampas",
+	  "category": "food",
+	  "description": "Raised canal-fed maize plots. The estate food base and the first real production engine.",
+	  "build_cost": {
+		"wood": 25,
+		"tools": 4
+	  },
+	  "staff": {
+		"macehualtin": 75,
+		"tlacotin": 75
+	  },
+	  "inputs": {
+		"tools": 0.5
+	  },
+	  "outputs": {
+		"maize": 60
+	  },
+	  "priority": 10
+	},
+	{
+	  "id": "cacao_garden",
+	  "name": "Cacao Garden",
+	  "screen": "chinampas",
+	  "category": "raw",
+	  "description": "Protected garden plots for cacao. Valuable for ritual, nobles, tribute and market pressure.",
+	  "build_cost": {
+		"wood": 30,
+		"tools": 5
+	  },
+	  "staff": {
+		"macehualtin": 40,
+		"tlacotin": 40
+	  },
+	  "inputs": {
+		"tools": 0.25
+	  },
+	  "outputs": {
+		"cacao": 2
+	  },
+	  "priority": 20
+	},
+	{
+	  "id": "cotton_chinampa",
+	  "name": "Cotton Chinampa",
+	  "screen": "chinampas",
+	  "category": "raw",
+	  "description": "Cotton plots that feed the cloth and fine textile chains.",
+	  "build_cost": {
+		"wood": 30,
+		"tools": 5
+	  },
+	  "staff": {
+		"macehualtin": 60,
+		"tlacotin": 60
+	  },
+	  "inputs": {
+		"tools": 0.25
+	  },
+	  "outputs": {
+		"cotton": 30
+	  },
+	  "priority": 30
+	},
+	{
+	  "id": "woodcutting_yard",
+	  "name": "Woodcutting Yard",
+	  "screen": "workshops",
+	  "category": "raw",
+	  "description": "A managed woodland work yard that brings timber into the estate economy. It belongs under Production > Workshops because it is a work site rather than a chinampa, but it is staffed by ordinary Field Labour rather than Tolteca artisans.",
+	  "build_cost": {
+		"wood": 20,
+		"tools": 4
+	  },
+	  "staff": {
+		"macehualtin": 50,
+		"tlacotin": 50
+	  },
+	  "inputs": {
+		"tools": 0.25
+	  },
+	  "outputs": {
+		"wood": 35
+	  },
+	  "priority": 35
+	},
+	{
+	  "id": "obsidian_quarry_access",
+	  "name": "Obsidian Quarry Access",
+	  "screen": "workshops",
+	  "category": "raw",
+	  "description": "Quarry access and rough obsidian extraction for the estate. It appears under Production > Workshops because it is a specialised work site, but it uses ordinary Field Labour rather than craftsmen.",
+	  "build_cost": {
+		"wood": 30,
+		"tools": 8
+	  },
+	  "staff": {
+		"macehualtin": 50,
+		"tlacotin": 50
+	  },
+	  "inputs": {
+		"tools": 0.5
+	  },
+	  "outputs": {
+		"obsidian": 14
+	  },
+	  "priority": 36
+	},
+	{
+	  "id": "basic_tool_workshop",
+	  "name": "Basic Tool Workshop",
+	  "screen": "workshops",
+	  "category": "tools",
+	  "description": "A small starter workshop that prevents the estate from becoming tool-paralysed.",
+	  "build_cost": {
+		"wood": 25,
+		"cloth": 5
+	  },
+	  "staff": {
+		"tolteca": 10
+	  },
+	  "inputs": {
+		"wood": 10
+	  },
+	  "outputs": {
+		"tools": 8
+	  },
+	  "priority": 40
+	},
+	{
+	  "id": "cloth_workshop",
+	  "name": "Cloth Workshop",
+	  "screen": "workshops",
+	  "category": "cloth",
+	  "description": "Converts cotton and tools into cloth for upkeep, buildings and palace-facing production.",
+	  "build_cost": {
+		"wood": 40,
+		"tools": 10,
+		"cotton": 20
+	  },
+	  "staff": {
+		"tolteca": 25
+	  },
+	  "inputs": {
+		"cotton": 20,
+		"tools": 0.5
+	  },
+	  "outputs": {
+		"cloth": 28
+	  },
+	  "priority": 50
+	},
+	{
+	  "id": "weapon_yard",
+	  "name": "Weapon Yard",
+	  "screen": "workshops",
+	  "category": "weapons",
+	  "description": "Produces weapons from obsidian, wood, cloth and tools. This is expensive but opens war readiness.",
+	  "build_cost": {
+		"wood": 50,
+		"tools": 15,
+		"obsidian": 10,
+		"cloth": 10
+	  },
+	  "staff": {
+		"tolteca": 25,
+		"yaotequihuaqueh": 20
+	  },
+	  "inputs": {
+		"obsidian": 10,
+		"wood": 10,
+		"cloth": 5,
+		"tools": 1
+	  },
+	  "outputs": {
+		"weapons": 8
+	  },
+	  "priority": 60
+	},
+	{
+	  "id": "fine_textile_house",
+	  "name": "Fine Textile House",
+	  "screen": "workshops",
+	  "category": "luxury",
+	  "description": "Produces elite palace-facing fine textiles from cotton, cacao and tools.",
+	  "build_cost": {
+		"wood": 45,
+		"tools": 10,
+		"cotton": 20,
+		"cacao": 3
+	  },
+	  "staff": {
+		"tolteca": 25
+	  },
+	  "inputs": {
+		"cotton": 15,
+		"cacao": 1,
+		"tools": 0.5
+	  },
+	  "outputs": {
+		"fine_textiles": 3
+	  },
+	  "priority": 70
+	},
+	{
+	  "id": "small_field_labour_houses",
+	  "name": "Small Field Labour Houses",
+	  "screen": "housing",
+	  "category": "field_labour",
+	  "tier": "small",
+	  "description": "Small Macehualtin household clusters for ordinary estate field labour. Cheap to build quickly, but inefficient to maintain for the capacity provided.",
+	  "build_cost": {
+		"wood": 20,
+		"cloth": 4
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"macehualtin": 50
+	  },
+	  "housing_maintenance": {
+		"wood": 0.45,
+		"cloth": 0.18
+	  },
+	  "priority": 80
+	},
+	{
+	  "id": "medium_field_labour_ward",
+	  "name": "Medium Field Labour Ward",
+	  "screen": "housing",
+	  "category": "field_labour",
+	  "tier": "medium",
+	  "description": "A more organised field-labour ward with shared support space. Higher upfront cost, but better building-upkeep efficiency.",
+	  "build_cost": {
+		"wood": 50,
+		"cloth": 10,
+		"tools": 2
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"macehualtin": 125
+	  },
+	  "housing_maintenance": {
+		"wood": 0.75,
+		"cloth": 0.28
+	  },
+	  "priority": 81
+	},
+	{
+	  "id": "large_field_labour_compound",
+	  "name": "Large Field Labour Compound",
+	  "screen": "housing",
+	  "category": "field_labour",
+	  "tier": "large",
+	  "description": "A substantial field-labour compound. Expensive to establish, but efficient for maintaining a large supported labour population.",
+	  "build_cost": {
+		"wood": 125,
+		"cloth": 24,
+		"tools": 6
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"macehualtin": 300
+	  },
+	  "housing_maintenance": {
+		"wood": 1.1,
+		"cloth": 0.42
+	  },
+	  "priority": 82
+	},
+	{
+	  "id": "small_artisan_houses",
+	  "name": "Small Artisan Houses",
+	  "screen": "housing",
+	  "category": "artisans",
+	  "tier": "small",
+	  "description": "Small Tolteca artisan housing close to workshops. Cheap early specialist capacity, but inefficient to maintain.",
+	  "build_cost": {
+		"wood": 20,
+		"cloth": 6,
+		"tools": 2
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"tolteca": 10
+	  },
+	  "housing_maintenance": {
+		"wood": 0.18,
+		"cloth": 0.12
+	  },
+	  "priority": 84
+	},
+	{
+	  "id": "medium_artisan_ward",
+	  "name": "Medium Artisan Ward",
+	  "screen": "housing",
+	  "category": "artisans",
+	  "tier": "medium",
+	  "description": "A compact artisan ward with shared workshop-adjacent support. Higher upfront cost and better upkeep per supported artisan.",
+	  "build_cost": {
+		"wood": 55,
+		"cloth": 15,
+		"tools": 5
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"tolteca": 25
+	  },
+	  "housing_maintenance": {
+		"wood": 0.3,
+		"cloth": 0.2
+	  },
+	  "priority": 85
+	},
+	{
+	  "id": "large_artisan_compound",
+	  "name": "Large Artisan Compound",
+	  "screen": "housing",
+	  "category": "artisans",
+	  "tier": "large",
+	  "description": "A major artisan compound for a mature workshop quarter. Expensive, but best long-term maintenance efficiency for Tolteca capacity.",
+	  "build_cost": {
+		"wood": 140,
+		"cloth": 36,
+		"tools": 12
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"tolteca": 60
+	  },
+	  "housing_maintenance": {
+		"wood": 0.55,
+		"cloth": 0.34
+	  },
+	  "priority": 86
+	},
+	{
+	  "id": "small_tlacotin_quarters",
+	  "name": "Small Tlacotin Quarters",
+	  "screen": "housing",
+	  "category": "tlacotin",
+	  "tier": "small",
+	  "description": "Basic quarters and supervision space for bonded or enslaved labour. Cheap capacity with relatively poor building-building-upkeep efficiency.",
+	  "build_cost": {
+		"wood": 15,
+		"tools": 2
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"tlacotin": 30
+	  },
+	  "housing_maintenance": {
+		"wood": 0.25
+	  },
+	  "priority": 90
+	},
+	{
+	  "id": "medium_tlacotin_yard",
+	  "name": "Medium Tlacotin Yard",
+	  "screen": "housing",
+	  "category": "tlacotin",
+	  "tier": "medium",
+	  "description": "A larger managed yard for Tlacotin labour. More costly to build, but better organised and cheaper to maintain per worker.",
+	  "build_cost": {
+		"wood": 35,
+		"tools": 5
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"tlacotin": 75
+	  },
+	  "housing_maintenance": {
+		"wood": 0.4
+	  },
+	  "priority": 91
+	},
+	{
+	  "id": "large_tlacotin_compound",
+	  "name": "Large Tlacotin Compound",
+	  "screen": "housing",
+	  "category": "tlacotin",
+	  "tier": "large",
+	  "description": "A major Tlacotin compound. High upfront cost, strong capacity, and the best comparative building-building-upkeep efficiency.",
+	  "build_cost": {
+		"wood": 90,
+		"tools": 12
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"tlacotin": 180
+	  },
+	  "housing_maintenance": {
+		"wood": 0.65
+	  },
+	  "priority": 92
+	},
+	{
+	  "id": "small_warrior_house",
+	  "name": "Small Warrior House",
+	  "screen": "housing",
+	  "category": "warriors",
+	  "tier": "small",
+	  "description": "A small warrior support house. Useful for early war capacity but inefficient compared with larger warrior compounds.",
+	  "build_cost": {
+		"wood": 20,
+		"cloth": 5,
+		"weapons": 2
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"yaotequihuaqueh": 20
+	  },
+	  "housing_maintenance": {
+		"wood": 0.25,
+		"cloth": 0.15,
+		"weapons": 0.05
+	  },
+	  "priority": 100
+	},
+	{
+	  "id": "medium_warrior_lodge",
+	  "name": "Medium Warrior Lodge",
+	  "screen": "housing",
+	  "category": "warriors",
+	  "tier": "medium",
+	  "description": "A more organised warrior lodge with better storage, sleeping space and weapon support.",
+	  "build_cost": {
+		"wood": 45,
+		"cloth": 12,
+		"weapons": 5,
+		"tools": 2
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"yaotequihuaqueh": 50
+	  },
+	  "housing_maintenance": {
+		"wood": 0.4,
+		"cloth": 0.25,
+		"weapons": 0.08
+	  },
+	  "priority": 101
+	},
+	{
+	  "id": "large_warrior_compound",
+	  "name": "Large Warrior Compound",
+	  "screen": "housing",
+	  "category": "warriors",
+	  "tier": "large",
+	  "description": "A large warrior compound for serious Flower Wars preparation. Expensive, but comparatively efficient for the capacity provided.",
+	  "build_cost": {
+		"wood": 115,
+		"cloth": 28,
+		"weapons": 12,
+		"tools": 5
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"yaotequihuaqueh": 120
+	  },
+	  "housing_maintenance": {
+		"wood": 0.7,
+		"cloth": 0.4,
+		"weapons": 0.15
+	  },
+	  "priority": 102
+	},
+	{
+	  "id": "small_priest_house",
+	  "name": "Small Priest House",
+	  "screen": "housing",
+	  "category": "priests",
+	  "tier": "small",
+	  "description": "Small priest housing and ritual support. Allows limited priest capacity at a manageable upfront cost.",
+	  "build_cost": {
+		"wood": 15,
+		"cloth": 4,
+		"ritual_goods": 1
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"tlamacazqueh": 8
+	  },
+	  "housing_maintenance": {
+		"wood": 0.15,
+		"cloth": 0.1,
+		"ritual_goods": 0.05
+	  },
+	  "priority": 110
+	},
+	{
+	  "id": "medium_priest_residence",
+	  "name": "Medium Priest Residence",
+	  "screen": "housing",
+	  "category": "priests",
+	  "tier": "medium",
+	  "description": "A more stable residence for priests and ritual servants, with better comparative building-upkeep efficiency.",
+	  "build_cost": {
+		"wood": 35,
+		"cloth": 9,
+		"ritual_goods": 3,
+		"cacao": 1
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"tlamacazqueh": 20
+	  },
+	  "housing_maintenance": {
+		"wood": 0.25,
+		"cloth": 0.15,
+		"ritual_goods": 0.08
+	  },
+	  "priority": 111
+	},
+	{
+	  "id": "large_ritual_residence",
+	  "name": "Large Ritual Residence",
+	  "screen": "housing",
+	  "category": "priests",
+	  "tier": "large",
+	  "description": "A substantial ritual residence. High upfront ritual cost, but efficient support for a larger priestly population.",
+	  "build_cost": {
+		"wood": 90,
+		"cloth": 22,
+		"ritual_goods": 8,
+		"cacao": 3
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"tlamacazqueh": 50
+	  },
+	  "housing_maintenance": {
+		"wood": 0.45,
+		"cloth": 0.25,
+		"ritual_goods": 0.15
+	  },
+	  "priority": 112
+	},
+	{
+	  "id": "small_noble_residence",
+	  "name": "Small Noble Residence",
+	  "screen": "housing",
+	  "category": "nobles",
+	  "tier": "small",
+	  "description": "A modest noble residence. It supports a few nobles but has inefficient status upkeep.",
+	  "build_cost": {
+		"wood": 20,
+		"cloth": 8,
+		"cacao": 2,
+		"fine_textiles": 1
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"pipiltin": 4
+	  },
+	  "housing_maintenance": {
+		"wood": 0.1,
+		"cloth": 0.1,
+		"fine_textiles": 0.02
+	  },
+	  "priority": 120
+	},
+	{
+	  "id": "medium_noble_court",
+	  "name": "Medium Noble Court",
+	  "screen": "housing",
+	  "category": "nobles",
+	  "tier": "medium",
+	  "description": "A formal noble court with better household organisation and improved support efficiency.",
+	  "build_cost": {
+		"wood": 50,
+		"cloth": 18,
+		"cacao": 5,
+		"fine_textiles": 2,
+		"tools": 2
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"pipiltin": 10
+	  },
+	  "housing_maintenance": {
+		"wood": 0.18,
+		"cloth": 0.16,
+		"fine_textiles": 0.03
+	  },
+	  "priority": 121
+	},
+	{
+	  "id": "large_noble_compound",
+	  "name": "Large Noble Compound",
+	  "screen": "housing",
+	  "category": "nobles",
+	  "tier": "large",
+	  "description": "A major noble compound. Very expensive, but the strongest long-term capacity and building-building-upkeep efficiency for Pipiltin.",
+	  "build_cost": {
+		"wood": 130,
+		"cloth": 45,
+		"cacao": 12,
+		"fine_textiles": 5,
+		"tools": 6
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"pipiltin": 25
+	  },
+	  "housing_maintenance": {
+		"wood": 0.35,
+		"cloth": 0.3,
+		"fine_textiles": 0.06
+	  },
+	  "priority": 122
+	},
+	{
+	  "id": "small_captive_holding_pen",
+	  "name": "Small Captive Holding Pen",
+	  "screen": "housing",
+	  "category": "captives",
+	  "tier": "small",
+	  "description": "A guarded holding pen for a small number of captives. Cheap to build but inefficient to maintain.",
+	  "build_cost": {
+		"wood": 18,
+		"tools": 3,
+		"weapons": 1
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"malli": 15
+	  },
+	  "housing_maintenance": {
+		"wood": 0.2,
+		"weapons": 0.03
+	  },
+	  "priority": 130
+	},
+	{
+	  "id": "medium_guarded_holding_yard",
+	  "name": "Medium Guarded Holding Yard",
+	  "screen": "housing",
+	  "category": "captives",
+	  "tier": "medium",
+	  "description": "A larger guarded holding yard for captives taken in Flower Wars.",
+	  "build_cost": {
+		"wood": 45,
+		"tools": 8,
+		"weapons": 3
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"malli": 40
+	  },
+	  "housing_maintenance": {
+		"wood": 0.35,
+		"weapons": 0.06
+	  },
+	  "priority": 131
+	},
+	{
+	  "id": "large_captive_compound",
+	  "name": "Large Captive Compound",
+	  "screen": "housing",
+	  "category": "captives",
+	  "tier": "large",
+	  "description": "A major captive compound. Expensive, but efficient if the house is regularly taking captives.",
+	  "build_cost": {
+		"wood": 115,
+		"tools": 20,
+		"weapons": 7
+	  },
+	  "staff": {},
+	  "inputs": {},
+	  "outputs": {},
+	  "housing_capacity": {
+		"malli": 100
+	  },
+	  "housing_maintenance": {
+		"wood": 0.65,
+		"weapons": 0.12
+	  },
+	  "priority": 132
+	}
   ]
 }
