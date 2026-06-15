@@ -1,699 +1,293 @@
-# GameScreen.gd
+# GameScreenMarketOverviewPatch.gd
 # Godot 4.x
-# Project path: res://Scripts/ui/GameScreen.gd
+# Project path: res://Scripts/ui/GameScreenMarketOverviewPatch.gd
 #
-# Shared game shell with data-backed prototype systems:
-# - Estate keeps the Veintena calendar.
-# - Production combines Chinampas, Workshops and Labour in one bottom-bar department.
-# - Storehouse and Market read from TRGameState instead of hard-coded UI placeholder data.
-# - Bottom bar order locked: Estate | Production | Storehouse | Market | Housing | Shrines | Barracks | Palace | Rivals | Advance Veintena.
-extends Control
+# Thin drop-in wrapper over GameScreen.gd.
+# Keeps the current GameScreen implementation intact, while adding:
+# - Market Overview / Trade Basket / Rival Procurement dashboard behaviour.
+# - Safe gameplay-led Ritual Calendar strip and Nemontemi pacing.
+# - Turn Resolution Pipeline v1 hooks.
+# - Religion / Shrine Upgrades v2 with tiered rituals, random favour rolls, no separate Offerings tab, and overview-only global favour/priest cards.
+extends "res://Scripts/ui/GameScreen.gd"
 
-const TR_GAME_STATE_SCRIPT: Script = preload("res://Scripts/autoload/TRGameState.gd")
-const STOREHOUSE_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/StorehouseView.tscn")
-const STOCKPILE_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/StockpileLedgerRow.tscn")
-const MARKET_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/MarketView.tscn")
-const MARKET_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/MarketLedgerRow.tscn")
-const BUILDING_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/BuildingView.tscn")
-const LABOUR_ASSIGNMENT_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/LabourAssignmentView.tscn")
-const HOUSING_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/HousingView.tscn")
-const HOUSING_MOTHBALL_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/HousingMothballView.tscn")
-const BUILDING_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/BuildingLedgerRow.tscn")
-const HOUSING_LEDGER_ROW_SCENE: PackedScene = preload("res://Scenes/UI/HousingLedgerRow.tscn")
+const TRADE_BASKET_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/TradeBasketView.tscn")
 
-@export_group("Main Screen Art")
-@export var estate_art: Texture2D
-@export var production_art: Texture2D
-@export var storehouse_art: Texture2D
-@export var market_art: Texture2D
-@export var housing_art: Texture2D
-@export var shrines_art: Texture2D
-@export var barracks_art: Texture2D
-@export var palace_art: Texture2D
-@export var rivals_art: Texture2D
+@export_group("Shrine Tab Art")
+@export var shrine_overview_art: Texture2D
+@export var shrine_tlaloc_art: Texture2D
+@export var shrine_huitzilopochtli_art: Texture2D
+@export var shrine_tezcatlipoca_art: Texture2D
+@export var shrine_quetzalcoatl_art: Texture2D
+@export var shrine_offerings_art: Texture2D
 
-@export_group("Production Tab Art")
-@export var production_overview_art: Texture2D
-@export var production_chinampas_art: Texture2D
-@export var production_workshops_art: Texture2D
-@export var production_labour_art: Texture2D
 
-@export_group("Housing Tab Art")
-@export var housing_overview_art: Texture2D
-@export var housing_field_labour_art: Texture2D
-@export var housing_artisans_art: Texture2D
-@export var housing_commoners_art: Texture2D # Legacy fallback for older Commoners art.
-@export var housing_mothball_art: Texture2D
-@export var housing_tlacotin_art: Texture2D
-@export var housing_warriors_art: Texture2D
-@export var housing_priests_art: Texture2D
-@export var housing_nobles_art: Texture2D
-@export var housing_captives_art: Texture2D
+# Local UI colours for the religion/offering panels.
+# These are declared here instead of relying on inherited theme constants so the
+# wrapper compiles cleanly as a direct replacement patch.
+const COLOR_TEXT: Color = Color(0.92, 0.88, 0.78, 1.0)
+const COLOR_MUTED: Color = Color(0.70, 0.78, 0.74, 1.0)
+const COLOR_TEAL: Color = Color(0.50, 0.92, 0.84, 1.0)
 
-@export_group("UI Emblems")
-@export var prestige_emblem_art: Texture2D
+const RELIGION_STARTING_FAVOUR: float = 40.0
+const RELIGION_NORMAL_DECAY: float = 2.0
+const RELIGION_NEMONTEMI_DECAY: float = 4.0
 
-@export_group("Legacy Art Fallbacks")
-@export var chinampas_art: Texture2D
-@export var fields_art: Texture2D # Backwards-compatible fallback if you already assigned art to the older Fields Art slot.
-@export var workshops_art: Texture2D
-@export var warriors_art: Texture2D
+const GOD_IDS: Array[String] = ["tlaloc", "huitzilopochtli", "tezcatlipoca", "quetzalcoatl"]
+const OFFERING_RESOURCE_IDS: Array[String] = ["maize", "cacao", "ritual_goods", "fine_textiles", "captives"]
 
-@export var visible_veintenas: int = 7
+var _calendar_period: String = "veintena"
+var _ritual_year: int = 1
 
-@onready var top_row: HBoxContainer = get_node_or_null(^"SafeArea/MainVBox/CalendarPanel/Margin/CardRow") as HBoxContainer
-@onready var location_title: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/LocationTitle") as Label
-@onready var location_art: TextureRect = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/ArtArea/LocationArt") as TextureRect
-@onready var content_root: VBoxContainer = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/ArtArea/ContentRoot") as VBoxContainer
-@onready var content_text: RichTextLabel = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/ArtArea/ContentRoot/ContentText") as RichTextLabel
-@onready var dynamic_view_host: VBoxContainer = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/MainView/Margin/MainStack/ArtArea/ContentRoot/DynamicViewHost") as VBoxContainer
-@onready var notification_title: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/NotificationTitle") as Label
-@onready var notification_list: VBoxContainer = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/NotificationScroll/NotificationList") as VBoxContainer
-
-@onready var house_claim_panel: PanelContainer = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel") as PanelContainer
-@onready var prestige_emblem: TextureRect = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/EmblemFrame/PrestigeEmblem") as TextureRect
-@onready var prestige_glyph_label: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/EmblemFrame/PrestigeGlyphLabel") as Label
-@onready var prestige_title_label: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText/PrestigeTitleLabel") as Label
-@onready var prestige_value_label: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText/PrestigeValueLabel") as Label
-@onready var prestige_standing_label: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText/PrestigeStandingLabel") as Label
-@onready var prestige_recognition_label: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText/PrestigeRecognitionLabel") as Label
-@onready var prestige_recent_label: Label = get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel/Margin/NotificationStack/HouseClaimPanel/Margin/ClaimRow/ClaimText/PrestigeRecentLabel") as Label
-
-@onready var estate_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/EstateButton") as Button
-@onready var production_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/ProductionButton") as Button
-@onready var storehouse_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/StorehouseButton") as Button
-@onready var market_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/MarketButton") as Button
-@onready var housing_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/HousingButton") as Button
-@onready var shrines_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/ShrinesButton") as Button
-@onready var warriors_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/WarriorsButton") as Button
-@onready var palace_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/PalaceButton") as Button
-@onready var rivals_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/RivalsButton") as Button
-@onready var advance_turn_button: Button = get_node_or_null(^"SafeArea/MainVBox/BottomNav/Margin/ButtonRow/AdvanceTurnButton") as Button
-
-var current_location_id: String = "estate"
-var current_focus_by_location: Dictionary = {}
-var selected_storehouse_good_id: String = ""
-var selected_market_good_id: String = ""
-var selected_estate_report_id: String = ""
-var selected_production_report_id: String = ""
-var selected_housing_building_id: String = ""
-var selected_housing_report_id: String = ""
-var selected_building_id_by_location: Dictionary = {}
-
-var storehouse_view: Control = null
-var market_view: Control = null
-var building_view: Control = null
-var labour_assignment_view: Control = null
-var housing_view: Control = null
-var housing_mothball_view: Control = null
-var _local_state: Node = null
-var _state_connected: bool = false
-
-var _veintenas: Array[Dictionary] = [
-	{"name": "Atlcahualo", "type": "Rain", "detail": "Opening rains", "tooltip": "Opening rain signs and early Tlaloc pressure."},
-	{"name": "Tlacaxipehualiztli", "type": "War", "detail": "War rites", "tooltip": "War rites, martial display and warrior preparation."},
-	{"name": "Tozoztontli", "type": "Maize", "detail": "Fields", "tooltip": "Field labour, early maize stores and agricultural vigilance."},
-	{"name": "Huey Tozoztli", "type": "Maize", "detail": "Great vigil", "tooltip": "Great agricultural vigil and major maize pressure."},
-	{"name": "Toxcatl", "type": "Ritual", "detail": "Offering", "tooltip": "Ritual pressure, offerings and divine favour."},
-	{"name": "Etzalcualiztli", "type": "Rain", "detail": "Tlaloc", "tooltip": "Tlaloc, water, rain and food-security pressure."},
-	{"name": "Tecuilhuitontli", "type": "Palace", "detail": "Lords", "tooltip": "Noble status, palace attention and social obligation."},
-	{"name": "Huey Tecuilhuitl", "type": "Palace", "detail": "Great lords", "tooltip": "Greater noble display, palace pressure and tribute preparation."},
-	{"name": "Tlaxochimaco", "type": "Ritual", "detail": "Flowers", "tooltip": "Flowers, offerings and public ritual display."},
-	{"name": "Xocotl Huetzi", "type": "Ritual", "detail": "Festival", "tooltip": "Festival pressure, public prestige and ritual display."},
-	{"name": "Ochpaniztli", "type": "Stores", "detail": "Sweeping", "tooltip": "Sweeping, stores, obligations and preparation."},
-	{"name": "Teotleco", "type": "Ritual", "detail": "Gods arrive", "tooltip": "The gods arrive; omens and divine pressure are prominent."},
-	{"name": "Tepeilhuitl", "type": "Rain", "detail": "Mountains", "tooltip": "Mountains, water, rain and agricultural-risk pressure."},
-	{"name": "Quecholli", "type": "War", "detail": "Muster", "tooltip": "Muster, hunting, warriors and military readiness."},
-	{"name": "Panquetzaliztli", "type": "War", "detail": "Huitzilopochtli", "tooltip": "Huitzilopochtli, war, captives and martial prestige."},
-	{"name": "Atemoztli", "type": "Rain", "detail": "Waters", "tooltip": "Water descent, late rain and drought warning pressure."},
-	{"name": "Tititl", "type": "Warning", "detail": "Year-end", "tooltip": "Late-year strain, unresolved obligations and warning signs."},
-	{"name": "Izcalli", "type": "Warning", "detail": "Reckoning", "tooltip": "Final renewal, reckoning and preparation for Nemontemi."}
-]
-
-var _screen_profiles: Dictionary = {
-	"estate": {
-		"title": "Estate Court",
-		"top_mode": "calendar",
-		"report_title": "House Warnings & Reports",
-		"body": "The estate court is the whole-house planning screen. It keeps the Veintena calendar because this is where you read the year, review warnings and advance time.",
-		"sections": [
-			{"heading": "Estate overview", "lines": ["The top row shows the Veintena calendar.", "The right panel summarises the last turn and major warnings.", "Production now drives Storehouse totals through chinampas, workshops and labour.", "Use Advance Veintena to run upkeep, building inputs and building output."]}
-		],
-		"reports": []
-	},
-	"production": {
-		"title": "Production",
-		"special_view": "buildings",
-		"building_screen": "production",
-		"report_title": "Production Ledger",
-		"body": "Production is where the estate turns land, labour and buildings into goods. The Overview tab is a dashboard: it summarises expected output, input bottlenecks, blocked buildings and productive labour pressure instead of repeating the Chinampas or Workshops ledgers.",
-		"focuses": [
-			{"id": "overview", "label": "Overview"},
-			{"id": "chinampas", "label": "Chinampas"},
-			{"id": "workshops", "label": "Workshops"},
-			{"id": "labour", "label": "Labour"}
-		],
-		"sections": [
-			{"heading": "Production dashboard", "lines": ["Expected output this Veintena from built production buildings.", "Input goods that production will consume.", "Buildings blocked by missing inputs, staffing or lack of construction.", "Labour pressure across chinampas and workshops."]}
-		]
-	},
-	"storehouse": {
-		"title": "Storehouse",
-		"special_view": "storehouse",
-		"report_title": "Stockpile Ledger",
-		"focuses": [
-			{"id": "overview", "label": "Overview"},
-			{"id": "food", "label": "Food"},
-			{"id": "raw", "label": "Raw"},
-			{"id": "processed", "label": "Processed"},
-			{"id": "luxury", "label": "Luxury"},
-			{"id": "special", "label": "Special"}
-		]
-	},
-	"market": {
-		"title": "Marketplace",
-		"special_view": "market",
-		"report_title": "Market Ledger",
-		"focuses": [
-			{"id": "overview", "label": "Overview"},
-			{"id": "goods", "label": "Goods"},
-			{"id": "village", "label": "Village Economy"},
-			{"id": "trade", "label": "Trade"},
-			{"id": "rivals", "label": "Rivals"},
-			{"id": "reports", "label": "Reports"}
-		]
-	},
-	"housing": {
-		"title": "Housing",
-		"special_view": "housing",
-		"report_title": "Housing Ledger",
-		"body": "Housing controls active population capacity, population consumption, housing maintenance and mothballed buildings.",
-		"focuses": [
-			{"id": "overview", "label": "Overview"},
-			{"id": "field_labour", "label": "Field Labour"},
-			{"id": "artisans", "label": "Artisans"},
-			{"id": "tlacotin", "label": "Tlacotin"},
-			{"id": "warriors", "label": "Warriors"},
-			{"id": "priests", "label": "Priests"},
-			{"id": "nobles", "label": "Nobles"},
-			{"id": "captives", "label": "Captives"},
-			{"id": "mothball", "label": "Mothball"}
-		]
-	},
-	"shrines": {"title": "Shrines", "report_title": "Omens & Priest Reports", "body": "Offerings to Tlaloc, Huitzilopochtli, Tezcatlipoca and Quetzalcoatl will be managed here.", "focuses": [{"id": "overview", "label": "Overview"}, {"id": "tlaloc", "label": "Tlaloc"}, {"id": "huitzilopochtli", "label": "Huitzilopochtli"}, {"id": "tezcatlipoca", "label": "Tezcatlipoca"}, {"id": "quetzalcoatl", "label": "Quetzalcoatl"}, {"id": "offerings", "label": "Offerings"}], "reports": ["Shrine systems are not connected yet.", "Offerings will later consume goods from the Storehouse."]},
-	"warriors": {"title": "Barracks", "report_title": "Barracks Reports", "body": "Warriors, weapons and Flower Wars preparation will be managed here. The Barracks is the estate's military support screen.", "focuses": [{"id": "overview", "label": "Overview"}, {"id": "warriors", "label": "Warriors"}, {"id": "weapons", "label": "Weapons"}, {"id": "flower_wars", "label": "Flower Wars"}, {"id": "returns", "label": "Returns"}], "reports": ["Warrior systems are not connected yet.", "Weapons will come from the Workshop system."]},
-	"palace": {"title": "Palace", "report_title": "Palace Messages", "body": "Tribute, royal favour and recognition pressure will be managed here.", "focuses": [{"id": "overview", "label": "Overview"}, {"id": "demand", "label": "Demand"}, {"id": "tribute", "label": "Tribute"}, {"id": "royal_favour", "label": "Royal Favour"}, {"id": "recognition", "label": "Recognition"}], "reports": ["Palace systems are not connected yet.", "Tribute will later reserve goods from the Storehouse."]},
-	"rivals": {"title": "Rival Houses", "report_title": "Rival Reports", "body": "War Rival, Cunning Rival and Diplomatic Rival pressure will be shown here.", "focuses": [{"id": "overview", "label": "Overview"}, {"id": "war_rival", "label": "War Rival"}, {"id": "cunning_rival", "label": "Cunning Rival"}, {"id": "diplomatic_rival", "label": "Diplomatic Rival"}, {"id": "prestige", "label": "Prestige"}], "reports": ["Rival systems are not connected yet.", "Market procurement is the next natural hook."]}
-}
+var _religion_initialized: bool = false
+var _divine_favour: Dictionary = {}
+var _last_offering_report: Array[String] = []
+var _pending_offering_amounts: Dictionary = {}
+var _offering_slider_controls: Dictionary = {}
+var _offering_amount_labels: Dictionary = {}
+var _offering_summary_label: RichTextLabel = null
+var _offering_commit_button: Button = null
+var _offering_target_god: String = "tlaloc"
+var _shrine_levels: Dictionary = {}
+var _shrine_upgrades: Dictionary = {}
+var _ritual_capacity_used_this_veintena: float = 0.0
+var _selected_shrine_panel_id: String = ""
+var _selected_flower_war_scale: String = "minor"
+var _selected_flower_war_doctrine: String = "unspecialised"
+var _selected_flower_war_provisioning: String = "standard"
+var _selected_flower_war_commitment: int = 5
+var _optional_shrine_art_cache: Dictionary = {}
 
 func _ready() -> void:
-	_connect_state()
-	_wire_buttons()
-	_apply_style()
-	_apply_bottom_bar_labels()
-	show_location("estate")
+	_remove_shrine_offerings_focus()
+	super._ready()
 
-func _state() -> Node:
-	var autoload_state: Node = get_node_or_null("/root/TRGameState")
-	if autoload_state != null:
-		return autoload_state
-	if _local_state == null:
-		_local_state = TR_GAME_STATE_SCRIPT.new() as Node
-		add_child(_local_state)
-		if _local_state.has_method("new_game"):
-			_local_state.call("new_game")
-	return _local_state
-
-func _connect_state() -> void:
-	if _state_connected:
+func _remove_shrine_offerings_focus() -> void:
+	# Offerings are now handled inside each god's Ritual Tiers panel, not as a
+	# separate top Shrine tab. This mutates the inherited screen profile before
+	# the base GameScreen builds the top focus row.
+	if not _screen_profiles.has("shrines"):
 		return
-	var state: Node = _state()
-	if state != null and state.has_signal("state_changed"):
-		state.connect("state_changed", Callable(self, "_on_state_changed"))
-	_state_connected = true
+	var shrine_profile: Dictionary = _screen_profiles["shrines"] as Dictionary
+	var focuses: Array = shrine_profile.get("focuses", []) as Array
+	var filtered: Array = []
+	for focus_variant: Variant in focuses:
+		if focus_variant is Dictionary:
+			var focus: Dictionary = focus_variant as Dictionary
+			if String(focus.get("id", "")) == "offerings":
+				continue
+		filtered.append(focus_variant)
+	shrine_profile["focuses"] = filtered
+	_screen_profiles["shrines"] = shrine_profile
 
-func _wire_buttons() -> void:
-	if estate_button:
-		estate_button.pressed.connect(func() -> void: show_location("estate"))
-	if production_button:
-		production_button.pressed.connect(func() -> void: show_location("production"))
-	if storehouse_button:
-		storehouse_button.pressed.connect(func() -> void: show_location("storehouse"))
-	if market_button:
-		market_button.pressed.connect(func() -> void: show_location("market"))
-	if housing_button:
-		housing_button.pressed.connect(func() -> void: show_location("housing"))
-	if shrines_button:
-		shrines_button.pressed.connect(func() -> void: show_location("shrines"))
-	if warriors_button:
-		warriors_button.pressed.connect(func() -> void: show_location("warriors"))
-	if palace_button:
-		palace_button.pressed.connect(func() -> void: show_location("palace"))
-	if rivals_button:
-		rivals_button.pressed.connect(func() -> void: show_location("rivals"))
-	if advance_turn_button:
-		advance_turn_button.pressed.connect(_on_advance_turn_pressed)
+# -----------------------------------------------------------------------------
+# Shrine background art
+# -----------------------------------------------------------------------------
 
-func _apply_bottom_bar_labels() -> void:
-	if estate_button:
-		estate_button.text = "Estate"
-	if production_button:
-		production_button.text = "Production"
-	if storehouse_button:
-		storehouse_button.text = "Storehouse"
-	if market_button:
-		market_button.text = "Market"
-	if housing_button:
-		housing_button.text = "Housing"
-	if shrines_button:
-		shrines_button.text = "Shrines"
-	if warriors_button:
-		warriors_button.text = "Barracks"
-	if palace_button:
-		palace_button.text = "Palace"
-	if rivals_button:
-		rivals_button.text = "Rivals"
-	if advance_turn_button:
-		advance_turn_button.text = "Advance Veintena"
+func _art_for_location(location_id: String) -> Texture2D:
+	if location_id == "shrines":
+		return _art_for_shrine_focus(_current_focus_id())
+	return super._art_for_location(location_id)
+
+func _art_for_shrine_focus(focus_id: String) -> Texture2D:
+	match focus_id:
+		"tlaloc":
+			return _first_texture([shrine_tlaloc_art, _optional_shrine_art([
+				"res://Assets/main_menu/Tlaloc Shrine.png",
+				"res://Assets/main_menu/Tlaloc.png",
+				"res://Assets/main_menu/Shrine_Tlaloc.png",
+				"res://Assets/main_menu/Tlaloc shrine.png"
+			])])
+		"huitzilopochtli":
+			return _first_texture([shrine_huitzilopochtli_art, _optional_shrine_art([
+				"res://Assets/main_menu/Huitzilopochtli Shrine.png",
+				"res://Assets/main_menu/Huitzilopochtli.png",
+				"res://Assets/main_menu/Shrine_Huitzilopochtli.png",
+				"res://Assets/main_menu/War Shrine.png"
+			])])
+		"tezcatlipoca":
+			return _first_texture([shrine_tezcatlipoca_art, _optional_shrine_art([
+				"res://Assets/main_menu/Tezcatlipoca Shrine.png",
+				"res://Assets/main_menu/Tezcatlipoca.png",
+				"res://Assets/main_menu/Shrine_Tezcatlipoca.png",
+				"res://Assets/main_menu/Night Shrine.png"
+			])])
+		"quetzalcoatl":
+			return _first_texture([shrine_quetzalcoatl_art, _optional_shrine_art([
+				"res://Assets/main_menu/Quetzalcoatl Shrine.png",
+				"res://Assets/main_menu/Quetzalcoatl.png",
+				"res://Assets/main_menu/Shrine_Quetzalcoatl.png",
+				"res://Assets/main_menu/Feathered Serpent Shrine.png"
+			])])
+		"offerings":
+			var festival_god: String = _current_festival_god_id()
+			if shrine_offerings_art != null:
+				return shrine_offerings_art
+			var offerings_art: Texture2D = _optional_shrine_art([
+				"res://Assets/main_menu/Shrine Offerings.png",
+				"res://Assets/main_menu/Offerings.png",
+				"res://Assets/main_menu/Ritual Offerings.png"
+			])
+			if offerings_art != null:
+				return offerings_art
+			if festival_god != "":
+				return _art_for_shrine_focus(festival_god)
+		_:
+			pass
+	return _first_texture([shrine_overview_art, _optional_shrine_art([
+		"res://Assets/main_menu/Shrine Overview.png",
+		"res://Assets/main_menu/Shrines Overview.png",
+		"res://Assets/main_menu/Shrines.png"
+	]), shrines_art])
+
+func _first_texture(textures: Array) -> Texture2D:
+	for texture_variant: Variant in textures:
+		if texture_variant is Texture2D:
+			return texture_variant as Texture2D
+	return null
+
+func _optional_shrine_art(paths: Array[String]) -> Texture2D:
+	var cache_key: String = "|".join(paths)
+	if _optional_shrine_art_cache.has(cache_key):
+		return _optional_shrine_art_cache[cache_key] as Texture2D
+	for path: String in paths:
+		if ResourceLoader.exists(path):
+			var loaded: Resource = load(path)
+			if loaded is Texture2D:
+				_optional_shrine_art_cache[cache_key] = loaded
+				return loaded as Texture2D
+	_optional_shrine_art_cache[cache_key] = null
+	return null
+
+# -----------------------------------------------------------------------------
+# Main content intercepts
+# -----------------------------------------------------------------------------
 
 func show_location(location_id: String) -> void:
-	current_location_id = location_id
-	_ensure_focus_for_location(location_id)
-	_refresh_all()
+	if location_id == "shrines" and current_location_id != "shrines":
+		_selected_shrine_panel_id = ""
+	super.show_location(location_id)
 
 func show_focus(location_id: String, focus_id: String) -> void:
-	current_location_id = location_id
-	current_focus_by_location[location_id] = focus_id
-	if location_id == "storehouse":
-		selected_storehouse_good_id = ""
-	if location_id == "market":
-		selected_market_good_id = ""
-	if location_id == "production":
-		selected_production_report_id = ""
-		selected_building_id_by_location[location_id] = ""
-	if location_id == "housing":
-		selected_housing_building_id = ""
-		selected_housing_report_id = ""
-		selected_building_id_by_location[location_id] = ""
-	_refresh_all()
-
-func _refresh_all() -> void:
-	_refresh_top_area()
-	_refresh_main_content()
-	_refresh_right_panel()
-	_update_button_pressed_state()
-
-func _ensure_focus_for_location(location_id: String) -> void:
-	if current_focus_by_location.has(location_id):
-		return
-	current_focus_by_location[location_id] = "overview"
-
-func _current_focus_id() -> String:
-	return String(current_focus_by_location.get(current_location_id, "overview"))
-
-func _profile(location_id: String) -> Dictionary:
-	if _screen_profiles.has(location_id):
-		return _screen_profiles[location_id] as Dictionary
-	return _screen_profiles["estate"] as Dictionary
-
-func _refresh_top_area() -> void:
-	if top_row == null:
-		return
-	_clear_children(top_row)
-	var profile: Dictionary = _profile(current_location_id)
-	if String(profile.get("top_mode", "focus")) == "calendar":
-		_build_calendar_row()
-	else:
-		_build_focus_row(profile)
-
-func _build_calendar_row() -> void:
-	var state: Node = _state()
-	var current_veintena: int = 1
-	if state != null and state.has_method("get_current_veintena"):
-		current_veintena = int(state.call("get_current_veintena"))
-	var start_index: int = clampi(current_veintena - 1, 0, _veintenas.size() - 1)
-	var end_index: int = mini(start_index + visible_veintenas, _veintenas.size())
-	for i: int in range(start_index, end_index):
-		var card_data: Dictionary = _veintenas[i] as Dictionary
-		var card: PanelContainer = PanelContainer.new()
-		card.custom_minimum_size = Vector2(166, 106)
-		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		card.tooltip_text = "Veintena " + str(i + 1) + " — " + String(card_data.get("name", "")) + ". " + String(card_data.get("tooltip", ""))
-		var style: StyleBoxFlat = _make_panel_style(Color(0.055, 0.08, 0.075, 0.92), Color(0.33, 0.70, 0.62, 0.55), 10)
-		if i == start_index:
-			style = _make_panel_style(Color(0.09, 0.13, 0.115, 0.98), Color(0.76, 0.63, 0.32, 0.85), 10)
-		card.add_theme_stylebox_override("panel", style)
-		var margin: MarginContainer = MarginContainer.new()
-		margin.add_theme_constant_override("margin_left", 8)
-		margin.add_theme_constant_override("margin_right", 8)
-		margin.add_theme_constant_override("margin_top", 7)
-		margin.add_theme_constant_override("margin_bottom", 7)
-		card.add_child(margin)
-		var stack: VBoxContainer = VBoxContainer.new()
-		stack.alignment = BoxContainer.ALIGNMENT_CENTER
-		margin.add_child(stack)
-		_add_center_label(stack, "Veintena " + str(i + 1), 17)
-		_add_center_label(stack, String(card_data.get("name", "")), 15)
-		_add_center_label(stack, String(card_data.get("type", "")), 17)
-		_add_center_label(stack, String(card_data.get("detail", "")), 15)
-		top_row.add_child(card)
-
-func _build_focus_row(profile: Dictionary) -> void:
-	var focuses: Array = profile.get("focuses", []) as Array
-	if focuses.is_empty():
-		return
-	var selected_focus: String = _current_focus_id()
-	for focus_variant: Variant in focuses:
-		var focus: Dictionary = focus_variant as Dictionary
-		var focus_id: String = String(focus.get("id", "overview"))
-		var button: Button = Button.new()
-		button.text = String(focus.get("label", focus_id.capitalize()))
-		button.toggle_mode = true
-		button.button_pressed = focus_id == selected_focus
-		button.custom_minimum_size = Vector2(150, 64)
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.add_theme_font_size_override("font_size", 21)
-		button.pressed.connect(func() -> void:
-			show_focus(current_location_id, focus_id)
-		)
-		top_row.add_child(button)
+	if location_id == "shrines":
+		# The old Offerings tab has been removed; rituals now live inside each
+		# god's Ritual Tiers panel. Redirect any stale/manual reference safely.
+		if focus_id == "offerings":
+			focus_id = "overview"
+		_selected_shrine_panel_id = ""
+	super.show_focus(location_id, focus_id)
 
 func _refresh_main_content() -> void:
-	_clear_dynamic_views()
+	if current_location_id == "warriors":
+		_clear_dynamic_views()
+		if location_title:
+			location_title.text = "Barracks"
+		if location_art:
+			location_art.texture = _art_for_location(current_location_id)
+		_show_barracks_content()
+		return
+	if current_location_id == "shrines":
+		_clear_dynamic_views()
+		if location_title:
+			location_title.text = "Shrines"
+		if location_art:
+			location_art.texture = _art_for_location(current_location_id)
+		_show_shrine_content()
+		return
+	super._refresh_main_content()
+
+func _refresh_right_panel() -> void:
+	_clear_children(notification_list)
 	var profile: Dictionary = _profile(current_location_id)
-	if location_title:
-		location_title.text = String(profile.get("title", "Estate"))
-	if location_art:
-		location_art.texture = _art_for_location(current_location_id)
+	if notification_title:
+		notification_title.text = _report_title_for_current_focus(profile)
+
+	_refresh_house_claim()
+
+	if current_location_id == "shrines":
+		_build_shrine_reports()
+		return
+	if current_location_id == "warriors":
+		_build_barracks_reports()
+		return
+
 	var special_view: String = String(profile.get("special_view", ""))
 	if current_location_id == "estate":
-		_show_estate_report_content(profile)
-	elif current_location_id == "production" and _current_focus_id() == "overview":
-		_show_production_overview_content()
-	elif current_location_id == "production" and _current_focus_id() == "labour":
-		_show_labour_assignment_view()
+		_build_estate_reports()
 	elif special_view == "storehouse":
-		_show_storehouse_view()
+		_build_storehouse_ledger()
 	elif special_view == "market":
-		_show_market_view()
+		var market_focus: String = _current_focus_id()
+		if market_focus == "overview":
+			_build_market_overview()
+		elif market_focus == "trade":
+			_build_market_trade_summary()
+		elif market_focus == "rivals":
+			_build_market_rivals_summary()
+		elif market_focus == "reports":
+			_build_market_reports()
+		else:
+			_build_market_ledger()
 	elif special_view == "housing":
-		_show_housing_view()
+		if _current_focus_id() == "overview":
+			_build_housing_overview_reports()
+		elif _current_focus_id() == "mothball":
+			_build_housing_mothball_summary()
+		else:
+			_build_housing_ledger()
 	elif special_view == "buildings":
-		_show_building_view(profile)
+		if current_location_id == "production" and _current_focus_id() == "overview":
+			_build_production_overview_reports()
+		elif current_location_id == "production" and _current_focus_id() == "labour":
+			_build_labour_assignment_summary()
+		else:
+			_build_building_ledger(profile)
 	else:
-		_show_text_content(profile)
+		_build_report_list(profile)
 
-func _set_content_root_layout(expanded: bool) -> void:
-	if content_root == null:
-		return
+func _report_title_for_current_focus(profile: Dictionary) -> String:
+	if current_location_id == "warriors":
+		match _current_focus_id():
+			"overview":
+				return "Barracks Readiness"
+			"warriors":
+				return "Warrior Muster"
+			"weapons":
+				return "Weapon Readiness"
+			"flower_wars":
+				return "Flower Wars"
+			"returns":
+				return "War Returns"
+		return "Barracks Reports"
+	if current_location_id == "shrines":
+		match _current_focus_id():
+			"overview":
+				return "Divine Favour"
+			"tlaloc":
+				return "Tlaloc Reports"
+			"huitzilopochtli":
+				return "Huitzilopochtli Reports"
+			"tezcatlipoca":
+				return "Tezcatlipoca Reports"
+			"quetzalcoatl":
+				return "Quetzalcoatl Reports"
+		return "Shrine Reports"
+	return super._report_title_for_current_focus(profile)
 
-	# ContentRoot sits over the image area. Text-only screens still use a
-	# compact lower card, but item detail pop-outs now use the full left image
-	# area so Storehouse, Market, Production, Housing and later systems have
-	# enough readable space for their detailed reports.
-	content_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	content_root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	content_root.custom_minimum_size = Vector2.ZERO
-
-	if expanded:
-		content_root.anchor_left = 0.0
-		content_root.anchor_top = 0.0
-		content_root.anchor_right = 1.0
-		content_root.anchor_bottom = 1.0
-		content_root.offset_left = 18.0
-		content_root.offset_top = 18.0
-		content_root.offset_right = -18.0
-		content_root.offset_bottom = -18.0
-	else:
-		content_root.anchor_left = 0.0
-		content_root.anchor_top = 1.0
-		content_root.anchor_right = 1.0
-		content_root.anchor_bottom = 1.0
-		content_root.offset_left = 18.0
-		content_root.offset_top = -340.0
-		content_root.offset_right = -18.0
-		content_root.offset_bottom = -18.0
-
-func _show_text_content(profile: Dictionary) -> void:
-	_set_content_root_layout(false)
-	if content_root:
-		content_root.visible = true
-	if dynamic_view_host:
-		dynamic_view_host.visible = false
-	if content_text:
-		content_text.visible = true
-		content_text.bbcode_enabled = true
-		content_text.scroll_active = true
-		content_text.fit_content = false
-		content_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		content_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		content_text.custom_minimum_size = Vector2(0, 300)
-		content_text.text = _build_standard_text(profile)
-
-func _show_estate_report_content(profile: Dictionary) -> void:
-	if selected_estate_report_id == "":
-		_show_text_content(profile)
-		return
-
-	_set_content_root_layout(true)
-	if content_text:
-		content_text.visible = false
-	if content_root:
-		content_root.visible = true
-	if dynamic_view_host == null:
-		return
-	dynamic_view_host.visible = true
-
-	var panel: PanelContainer = PanelContainer.new()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.64), Color(0.50, 0.82, 0.74, 0.36), 14))
-	dynamic_view_host.add_child(panel)
-
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_top", 14)
-	margin.add_theme_constant_override("margin_bottom", 14)
-	panel.add_child(margin)
-
-	var stack: VBoxContainer = VBoxContainer.new()
-	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	stack.add_theme_constant_override("separation", 10)
-	margin.add_child(stack)
-
-	var header: HBoxContainer = HBoxContainer.new()
-	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_theme_constant_override("separation", 12)
-	stack.add_child(header)
-
-	var title_label: Label = Label.new()
-	title_label.text = _estate_report_title(selected_estate_report_id)
-	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_label.add_theme_font_size_override("font_size", 27)
-	title_label.clip_text = true
-	header.add_child(title_label)
-
-	var close_button: Button = Button.new()
-	close_button.text = "X"
-	close_button.custom_minimum_size = Vector2(46, 42)
-	close_button.add_theme_font_size_override("font_size", 22)
-	close_button.pressed.connect(_on_estate_report_closed)
-	header.add_child(close_button)
-
-	var body: RichTextLabel = RichTextLabel.new()
-	body.bbcode_enabled = true
-	body.fit_content = false
-	body.scroll_active = true
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_font_size_override("normal_font_size", 22)
-	body.add_theme_font_size_override("bold_font_size", 24)
-	body.add_theme_constant_override("line_separation", 6)
-	body.text = _build_estate_report_detail_text(selected_estate_report_id)
-	stack.add_child(body)
-
-func _show_production_overview_content() -> void:
-	_set_content_root_layout(true)
-	if content_text:
-		content_text.visible = false
-
-	if selected_production_report_id == "":
-		if content_root:
-			content_root.visible = false
-		return
-
-	if content_root:
-		content_root.visible = true
-	if dynamic_view_host == null:
-		return
-	dynamic_view_host.visible = true
-
-	var panel: PanelContainer = PanelContainer.new()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.62), Color(0.50, 0.82, 0.74, 0.35), 14))
-	dynamic_view_host.add_child(panel)
-
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_top", 14)
-	margin.add_theme_constant_override("margin_bottom", 14)
-	panel.add_child(margin)
-
-	var stack: VBoxContainer = VBoxContainer.new()
-	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	stack.add_theme_constant_override("separation", 10)
-	margin.add_child(stack)
-
-	var header: HBoxContainer = HBoxContainer.new()
-	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_theme_constant_override("separation", 12)
-	stack.add_child(header)
-
-	var title_label: Label = Label.new()
-	title_label.text = _production_report_title(selected_production_report_id)
-	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_label.add_theme_font_size_override("font_size", 27)
-	title_label.clip_text = true
-	header.add_child(title_label)
-
-	var close_button: Button = Button.new()
-	close_button.text = "X"
-	close_button.custom_minimum_size = Vector2(46, 42)
-	close_button.add_theme_font_size_override("font_size", 22)
-	close_button.pressed.connect(_on_production_report_closed)
-	header.add_child(close_button)
-
-	var body: RichTextLabel = RichTextLabel.new()
-	body.bbcode_enabled = true
-	body.fit_content = false
-	body.scroll_active = true
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_font_size_override("normal_font_size", 22)
-	body.add_theme_font_size_override("bold_font_size", 24)
-	body.add_theme_constant_override("line_separation", 6)
-	body.text = _build_production_report_detail_text(selected_production_report_id)
-	stack.add_child(body)
-
-func _build_production_report_detail_text(report_id: String) -> String:
-	match report_id:
-		"expected_output":
-			return _build_expected_output_report_text()
-		"input_demand":
-			return _build_input_demand_report_text()
-		"labour_pressure":
-			return _build_labour_pressure_report_text()
-		"building_times":
-			return _build_building_times_report_text()
-	return "Select a production report from the right-hand panel."
-
-func _build_expected_output_report_text() -> String:
-	var text: String = ""
-	text += "[b]Expected Output This Veintena[/b]\n"
-	text += "This shows what built and operating production buildings are expected to add to the estate Storehouse when the Veintena advances.\n\n"
-	text += _resource_dictionary_lines(_production_output_totals(), "No output expected. Build or staff productive buildings first.", 10)
-	text += "\n"
-	var summary: Dictionary = _production_building_summary()
-	text += "[b]Operating read[/b]\n"
-	text += "• Built production buildings: " + str(int(summary.get("built", 0))) + "\n"
-	text += "• Expected operating instances: " + str(int(summary.get("operating", 0))) + "\n"
-	text += "• Blocked instances: " + str(int(summary.get("blocked", 0))) + "\n"
-	return text.strip_edges()
-
-func _build_input_demand_report_text() -> String:
-	var text: String = ""
-	var inputs: Dictionary = _production_input_totals()
-	text += "[b]Input Demand This Veintena[/b]\n"
-	text += "These goods will be consumed by productive buildings before output is created. This does not include population upkeep or construction costs.\n\n"
-	text += _resource_dictionary_lines(inputs, "No production inputs currently required.", 10)
-	text += "\n"
-	text += "[b]Input pressure[/b]\n"
-	var pressure_lines: Array[String] = _input_pressure_lines(inputs)
-	if pressure_lines.is_empty():
-		text += "• No input pressure detected.\n"
-	else:
-		for line: String in pressure_lines:
-			text += "• " + line + "\n"
-	return text.strip_edges()
-
-func _build_labour_pressure_report_text() -> String:
-	var text: String = ""
-	text += "[b]Labour Pressure[/b]\n"
-	text += "This reads the productive workforce attached to chinampas and workshops. It should help show whether production is limited by people rather than goods.\n\n"
-	var labour_lines: Array[String] = _production_labour_dashboard_lines(12)
-	if labour_lines.is_empty():
-		text += "• Labour data is not connected yet.\n"
-	else:
-		for labour_line: String in labour_lines:
-			text += "• " + labour_line + "\n"
-	return text.strip_edges()
-
-func _build_building_times_report_text() -> String:
-	var text: String = ""
-	text += "[b]Building Times / Build Readiness[/b]\n"
-	text += "This panel separates building readiness from the Chinampas and Workshops construction ledgers. In the current prototype, new buildings complete immediately when built; this section is ready for multi-Veintena build timers later.\n\n"
-	var build_lines: Array[String] = _production_build_time_lines(12)
-	if build_lines.is_empty():
-		text += "• No production buildings are available yet.\n"
-	else:
-		for build_line: String in build_lines:
-			text += "• " + build_line + "\n"
-	return text.strip_edges()
-
-func _build_standard_text(profile: Dictionary) -> String:
-	var text: String = String(profile.get("body", "")) + "\n\n"
-	var sections: Array = profile.get("sections", []) as Array
-	for section_variant: Variant in sections:
-		var section: Dictionary = section_variant as Dictionary
-		text += "[b]" + String(section.get("heading", "Section")) + "[/b]\n"
-		var lines: Array = section.get("lines", []) as Array
-		for line_variant: Variant in lines:
-			text += "• " + String(line_variant) + "\n"
-		text += "\n"
-	return text.strip_edges()
-
-func _show_storehouse_view() -> void:
-	_set_content_root_layout(true)
-	if content_text:
-		content_text.visible = false
-	if selected_storehouse_good_id == "":
-		if content_root:
-			content_root.visible = false
-		return
-	if content_root:
-		content_root.visible = true
-	if dynamic_view_host == null:
-		return
-	dynamic_view_host.visible = true
-	storehouse_view = STOREHOUSE_VIEW_SCENE.instantiate() as Control
-	if storehouse_view == null:
-		return
-	storehouse_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	storehouse_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	dynamic_view_host.add_child(storehouse_view)
-	if storehouse_view.has_signal("good_selected"):
-		storehouse_view.connect("good_selected", Callable(self, "_on_storehouse_good_selected"))
-	if storehouse_view.has_signal("good_closed"):
-		storehouse_view.connect("good_closed", Callable(self, "_on_storehouse_good_closed"))
-	if storehouse_view.has_method("setup"):
-		storehouse_view.call("setup", _storehouse_goods(), _current_focus_id(), selected_storehouse_good_id)
+# -----------------------------------------------------------------------------
+# Market / Trade Basket patch
+# -----------------------------------------------------------------------------
 
 func _show_market_view() -> void:
 	_set_content_root_layout(true)
 	if content_text:
 		content_text.visible = false
 	var market_focus: String = _current_focus_id()
-	# Overview / Goods / Rivals should behave like Storehouse and Production ledgers:
-	# the left detail panel stays closed until the player clicks a specific good.
-	# Village, Trade and Reports are screen-level reports, so they may open without
-	# a selected good. This prevents the Marketplace Overview from being impossible
-	# to close and lets stock rows open their own detail panels.
-	var auto_open_market_report: bool = market_focus == "village" or market_focus == "trade" or market_focus == "reports"
+
+	if market_focus == "trade":
+		_show_trade_basket_view()
+		return
+
+	var auto_open_market_report: bool = market_focus == "overview" or market_focus == "village" or market_focus == "rivals" or market_focus == "reports"
 	if selected_market_good_id == "" and not auto_open_market_report:
 		if content_root:
 			content_root.visible = false
@@ -716,79 +310,162 @@ func _show_market_view() -> void:
 	if market_view.has_method("setup"):
 		market_view.call("setup", _market_goods(), _current_focus_id(), selected_market_good_id)
 
-
-func _show_labour_assignment_view() -> void:
-	_set_content_root_layout(true)
-	if content_root:
-		content_root.visible = true
-	if content_text:
-		content_text.visible = false
-	if dynamic_view_host == null:
-		return
-	dynamic_view_host.visible = true
-	labour_assignment_view = LABOUR_ASSIGNMENT_VIEW_SCENE.instantiate() as Control
-	if labour_assignment_view == null:
-		return
-	labour_assignment_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	labour_assignment_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	dynamic_view_host.add_child(labour_assignment_view)
-	if labour_assignment_view.has_signal("staffing_preview_changed"):
-		labour_assignment_view.connect("staffing_preview_changed", Callable(self, "_on_labour_staffing_preview_changed"))
-	if labour_assignment_view.has_signal("staffing_group_changed"):
-		labour_assignment_view.connect("staffing_group_changed", Callable(self, "_on_labour_staffing_group_changed"))
-	elif labour_assignment_view.has_signal("staffing_changed"):
-		labour_assignment_view.connect("staffing_changed", Callable(self, "_on_labour_staffing_changed"))
-	elif labour_assignment_view.has_signal("assignment_changed"):
-		labour_assignment_view.connect("assignment_changed", Callable(self, "_on_labour_assignment_changed"))
-	var state: Node = _state()
-	if state != null and state.has_method("get_labour_assignment_data") and labour_assignment_view.has_method("setup"):
-		labour_assignment_view.call("setup", state.call("get_labour_assignment_data"))
-
-func _show_housing_view() -> void:
-	var focus_id: String = _current_focus_id()
-	if focus_id == "overview":
-		_show_housing_overview_content()
-		return
-	if focus_id == "mothball":
-		_show_housing_mothball_view()
-		return
-
-	_set_content_root_layout(true)
-	if content_text:
-		content_text.visible = false
-	if selected_housing_building_id == "":
-		if content_root:
-			content_root.visible = false
-		return
+func _show_trade_basket_view() -> void:
 	if content_root:
 		content_root.visible = true
 	if dynamic_view_host == null:
 		return
 	dynamic_view_host.visible = true
-	housing_view = HOUSING_VIEW_SCENE.instantiate() as Control
-	if housing_view == null:
+	var trade_view: Control = TRADE_BASKET_VIEW_SCENE.instantiate() as Control
+	if trade_view == null:
 		return
-	housing_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	housing_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	dynamic_view_host.add_child(housing_view)
-	if housing_view.has_signal("housing_closed"):
-		housing_view.connect("housing_closed", Callable(self, "_on_housing_closed"))
-	if housing_view.has_signal("build_requested"):
-		housing_view.connect("build_requested", Callable(self, "_on_housing_build_requested"))
-	if housing_view.has_signal("destroy_requested"):
-		housing_view.connect("destroy_requested", Callable(self, "_on_housing_destroy_requested"))
-	var state: Node = _state()
-	if state != null and state.has_method("get_housing_summary") and state.has_method("get_housing_rows") and housing_view.has_method("setup"):
-		housing_view.call("setup", state.call("get_housing_summary"), state.call("get_housing_rows", focus_id), focus_id, selected_housing_building_id)
+	trade_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	trade_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	dynamic_view_host.add_child(trade_view)
+	if trade_view.has_signal("trade_accepted"):
+		trade_view.connect("trade_accepted", Callable(self, "_on_trade_basket_accepted"))
+	if trade_view.has_signal("trade_changed"):
+		trade_view.connect("trade_changed", Callable(self, "_on_trade_basket_changed"))
+	if trade_view.has_method("setup"):
+		trade_view.call("setup", _state())
 
-func _show_housing_overview_content() -> void:
+func _on_trade_basket_accepted() -> void:
+	selected_market_good_id = ""
+	_refresh_main_content()
+	_refresh_right_panel()
+
+func _on_trade_basket_changed() -> void:
+	_refresh_right_panel()
+
+func _build_market_overview() -> void:
+	var goods: Array[Dictionary] = _market_goods()
+	if goods.is_empty():
+		_add_notification("No market data is connected yet.")
+		return
+
+	var crisis_goods: Array[String] = []
+	var shortage_goods: Array[String] = []
+	var tight_goods: Array[String] = []
+	var abundant_goods: Array[String] = []
+	var high_value_goods: Array[String] = []
+	var low_value_goods: Array[String] = []
+	var falling_goods: Array[String] = []
+	var rising_goods: Array[String] = []
+
+	for good: Dictionary in goods:
+		var name: String = String(good.get("name", "Good"))
+		var label: String = String(good.get("label", "Unknown"))
+		var trend: String = String(good.get("trend", "Stable"))
+		var current_value: float = float(good.get("current_value", good.get("projected_value", 0.0)))
+		var base_value: float = float(good.get("base_value", 1.0))
+		var net_change: float = float(good.get("village_net_change", 0.0))
+
+		match label:
+			"Crisis":
+				crisis_goods.append(name)
+			"Shortage":
+				shortage_goods.append(name)
+			"Tight":
+				tight_goods.append(name)
+			"Abundant":
+				abundant_goods.append(name)
+
+		if base_value > 0.0 and current_value >= base_value * 1.35:
+			high_value_goods.append(name + " " + _format_float(current_value))
+		elif base_value > 0.0 and current_value <= base_value * 0.75:
+			low_value_goods.append(name + " " + _format_float(current_value))
+
+		if net_change < -0.01 or trend == "Falling" or trend == "Falling fast":
+			falling_goods.append(name + " " + _format_float(net_change))
+		elif net_change > 0.01 or trend == "Rising" or trend == "Rising fast":
+			rising_goods.append(name + " +" + _format_float(net_change))
+
+	_add_notification("Overview is the quick pressure read. Use Goods for the full good-by-good ledger and click a good for its supply, demand and price detail.")
+	_add_notification("Market pressure: " + _market_group_summary(crisis_goods, "Crisis", shortage_goods, "Shortage", tight_goods, "Tight"))
+	if not high_value_goods.is_empty():
+		_add_notification("Best sale/value pressure: " + _patch_join_limited(high_value_goods, 4) + ".")
+	else:
+		_add_notification("No obvious high-value sale pressure yet.")
+	if not falling_goods.is_empty():
+		_add_notification("Draining goods: " + _patch_join_limited(falling_goods, 5) + ".")
+	else:
+		_add_notification("No major market drains currently visible.")
+	if not rising_goods.is_empty():
+		_add_notification("Recovering/supplied goods: " + _patch_join_limited(rising_goods, 5) + ".")
+	elif not abundant_goods.is_empty():
+		_add_notification("Abundant goods: " + _patch_join_limited(abundant_goods, 5) + ".")
+	if not low_value_goods.is_empty():
+		_add_notification("Cheap buying opportunities: " + _patch_join_limited(low_value_goods, 4) + ".")
+
+func _build_market_trade_summary() -> void:
+	_add_notification("Trade Basket is a barter interface. Drag a good left to sell estate free stock, or right to buy from the market.")
+	_add_notification("Accept Trade is enabled only when sold value covers bought value. Positive surplus is lost as barter inefficiency; it is not stored as Wealth or credit.")
+	_add_notification("Sell caps use Storehouse free stock after reserves. Buy caps use current market stock.")
+	_add_notification("This connects Storehouse and Market directly without creating a currency resource.")
+
+func _build_market_rivals_summary() -> void:
+	var goods: Array[Dictionary] = _market_goods()
+	if goods.is_empty():
+		_add_notification("No market data is connected yet.")
+		return
+	_add_notification("Rival Procurement is a dashboard, not a duplicate goods ledger. Use it to read which goods each rival is likely to pressure once proper Rival AI is connected.")
+	_add_notification(_rival_pressure_line("War Rival", ["obsidian", "weapons", "armour", "cloth", "tools", "captives"], goods, "Wants Flower War readiness, warrior equipment and captive-taking capacity."))
+	_add_notification(_rival_pressure_line("Cunning Rival", ["tools", "cloth", "wood", "cacao", "cotton"], goods, "Wants practical bottlenecks, flexible build materials and market leverage."))
+	_add_notification(_rival_pressure_line("Diplomatic Rival", ["cacao", "fine_textiles", "cloth", "cotton", "tools"], goods, "Wants palace-facing goods, legitimacy goods and tribute-ready luxury supply."))
+
+func _rival_pressure_line(rival_name: String, target_ids: Array[String], goods: Array[Dictionary], motive: String) -> String:
+	var pressure_goods: Array[String] = []
+	var quiet_goods: Array[String] = []
+	for good: Dictionary in goods:
+		var good_id: String = String(good.get("id", ""))
+		if not target_ids.has(good_id):
+			continue
+		var name: String = String(good.get("name", good_id.capitalize()))
+		var label: String = String(good.get("label", "Unknown"))
+		var trend: String = String(good.get("trend", "Stable"))
+		var net_change: float = float(good.get("village_net_change", 0.0))
+		if label == "Crisis" or label == "Shortage" or label == "Tight" or trend == "Falling" or trend == "Falling fast" or net_change < -0.01:
+			pressure_goods.append(name + " (" + label + ", " + _format_float(net_change) + ")")
+		else:
+			quiet_goods.append(name)
+	var line: String = rival_name + ": " + motive
+	if not pressure_goods.is_empty():
+		line += " Current pressure: " + _patch_join_limited(pressure_goods, 4) + "."
+	elif not quiet_goods.is_empty():
+		line += " Watched goods: " + _patch_join_limited(quiet_goods, 5) + "."
+	else:
+		line += " Target goods are not present in the market data yet."
+	return line
+
+func _market_group_summary(first: Array[String], first_label: String, second: Array[String], second_label: String, third: Array[String], third_label: String) -> String:
+	var parts: Array[String] = []
+	if not first.is_empty(): parts.append(first_label + " — " + _patch_join_limited(first, 4))
+	if not second.is_empty(): parts.append(second_label + " — " + _patch_join_limited(second, 4))
+	if not third.is_empty(): parts.append(third_label + " — " + _patch_join_limited(third, 4))
+	if parts.is_empty():
+		return "no crisis, shortage or tight goods visible."
+	return "; ".join(parts) + "."
+
+func _patch_join_limited(values: Array[String], max_items: int) -> String:
+	var parts: Array[String] = []
+	for value: String in values:
+		if parts.size() >= max_items:
+			break
+		parts.append(value)
+	var text: String = ", ".join(parts)
+	if values.size() > max_items:
+		text += ", +" + str(values.size() - max_items) + " more"
+	return text
+
+
+# -----------------------------------------------------------------------------
+# Barracks / Flower Wars v1 UI
+# -----------------------------------------------------------------------------
+
+func _show_barracks_content() -> void:
 	_set_content_root_layout(true)
 	if content_text:
 		content_text.visible = false
-	if selected_housing_report_id == "":
-		if content_root:
-			content_root.visible = false
-		return
 	if content_root:
 		content_root.visible = true
 	if dynamic_view_host == null:
@@ -797,1615 +474,1665 @@ func _show_housing_overview_content() -> void:
 	var panel: PanelContainer = PanelContainer.new()
 	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.64), Color(0.50, 0.82, 0.74, 0.36), 14))
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.64), Color(0.84, 0.35, 0.24, 0.46), 14))
 	dynamic_view_host.add_child(panel)
 	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 18)
-	margin.add_theme_constant_override("margin_right", 18)
-	margin.add_theme_constant_override("margin_top", 16)
-	margin.add_theme_constant_override("margin_bottom", 16)
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_bottom", 14)
 	panel.add_child(margin)
-	var stack: VBoxContainer = VBoxContainer.new()
-	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	stack.add_theme_constant_override("separation", 12)
-	margin.add_child(stack)
+	var root: VBoxContainer = VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 10)
+	margin.add_child(root)
+	var focus_id: String = _current_focus_id()
+	match focus_id:
+		"warriors":
+			_build_barracks_warriors_panel(root)
+		"weapons":
+			_build_barracks_weapons_panel(root)
+		"flower_wars":
+			_build_flower_war_panel(root)
+		"returns":
+			_build_flower_war_returns_panel(root)
+		_:
+			_build_barracks_overview_panel(root)
+
+func _barracks_summary() -> Dictionary:
+	var state: Node = _state()
+	if state != null and state.has_method("get_barracks_summary"):
+		return state.call("get_barracks_summary") as Dictionary
+	return {}
+
+func _build_barracks_overview_panel(root: VBoxContainer) -> void:
+	var summary: Dictionary = _barracks_summary()
+	root.add_child(_religion_label("Barracks Overview", 30, COLOR_TEXT))
+	root.add_child(_religion_wrapped_label("Barracks v1 connects Warrior Houses, warriors, weapons and Flower War readiness. Early 5-warrior bands are for Minor wars; 10 warriors are the Standard target; Major wars need mature investment.", 19, COLOR_MUTED))
+	root.add_child(_religion_wrapped_label("Warriors: " + str(int(summary.get("warriors", 0))) + " / " + str(int(summary.get("capacity", 0))) + ". Weapons: " + _format_float(float(summary.get("weapons", 0.0))) + ". Prestige: " + _format_float(float(summary.get("prestige", 0.0))) + ".", 22, COLOR_TEAL))
+	root.add_child(_religion_wrapped_label("Minor ready: " + _yes_no(bool(summary.get("minor_ready", false))) + ". Standard ready: " + _yes_no(bool(summary.get("standard_ready", false))) + ". Major ready: " + _yes_no(bool(summary.get("major_ready", false))) + ".", 20, COLOR_MUTED))
+	root.add_child(_religion_wrapped_label("Current war season: " + _current_festival_text() + ". Veintena 8 is the main Flower War season; Nemontemi will block Flower Wars later.", 18, COLOR_MUTED))
+
+func _build_barracks_warriors_panel(root: VBoxContainer) -> void:
+	var summary: Dictionary = _barracks_summary()
+	root.add_child(_religion_label("Warrior Muster", 30, COLOR_TEXT))
+	root.add_child(_religion_wrapped_label("Warriors are the Yaotequihuaqueh population group. They consume upkeep through the normal population system and are limited by Warrior House capacity.", 19, COLOR_MUTED))
+	root.add_child(_religion_wrapped_label("Current warriors: " + str(int(summary.get("warriors", 0))) + " / " + str(int(summary.get("capacity", 0))) + ". Recruitments remaining this Veintena: " + str(int(summary.get("recruits_remaining", 0))) + ".", 21, COLOR_TEAL))
+	for amount: int in [1, 2]:
+		var button: Button = Button.new()
+		button.text = "Recruit " + str(amount) + " warrior" + ("s" if amount > 1 else "")
+		button.custom_minimum_size = Vector2(0, 48)
+		button.add_theme_font_size_override("font_size", 20)
+		var state: Node = _state()
+		if state != null and state.has_method("can_recruit_warriors"):
+			var status: Dictionary = state.call("can_recruit_warriors", amount) as Dictionary
+			button.disabled = not bool(status.get("ok", false))
+			button.tooltip_text = String(status.get("reason", ""))
+		button.pressed.connect(func() -> void:
+			var s: Node = _state()
+			if s != null and s.has_method("recruit_warriors"):
+				s.call("recruit_warriors", amount)
+			_refresh_all()
+		)
+		root.add_child(button)
+
+func _build_barracks_weapons_panel(root: VBoxContainer) -> void:
+	var summary: Dictionary = _barracks_summary()
+	root.add_child(_religion_label("Weapon Readiness", 30, COLOR_TEXT))
+	root.add_child(_religion_wrapped_label("Flower Wars require one weapon committed per warrior. Weapons are checked before launch, while losses after battle depend on result severity.", 19, COLOR_MUTED))
+	root.add_child(_religion_wrapped_label("Weapons available: " + _format_float(float(summary.get("weapons", 0.0))) + ". Warriors: " + str(int(summary.get("warriors", 0))) + ".", 22, COLOR_TEAL))
+	root.add_child(_religion_wrapped_label("Minor needs 5 weapons. Standard needs 10. Major needs 20. Weapon Yards and market trade are the main support routes.", 18, COLOR_MUTED))
+
+func _build_flower_war_panel(root: VBoxContainer) -> void:
+	root.add_child(_religion_label("Prepare Flower War", 30, COLOR_TEXT))
+	root.add_child(_religion_wrapped_label("Choose scale, doctrine, provisioning and committed warriors. This v1 resolver is strategic: no tactical battle, only commitment and outcome.", 19, COLOR_MUTED))
+	_add_choice_row(root, "Scale", {"minor": "Minor", "standard": "Standard", "major": "Major"}, _selected_flower_war_scale, func(id: String) -> void:
+		_selected_flower_war_scale = id
+		_selected_flower_war_commitment = int(({"minor":5,"standard":10,"major":20}).get(id, 5))
+		_refresh_all()
+	)
+	_add_choice_row(root, "Doctrine", {"unspecialised": "Unspecialised", "eagle": "Eagle", "jaguar": "Jaguar", "otomi": "Otomi", "coyote": "Coyote"}, _selected_flower_war_doctrine, func(id: String) -> void:
+		_selected_flower_war_doctrine = id
+		_refresh_all()
+	)
+	_add_choice_row(root, "Provisioning", {"standard": "Standard", "well": "Well", "royal": "Royal"}, _selected_flower_war_provisioning, func(id: String) -> void:
+		_selected_flower_war_provisioning = id
+		_refresh_all()
+	)
+	var spin: SpinBox = SpinBox.new()
+	spin.min_value = 1
+	spin.max_value = max(1, int(_barracks_summary().get("warriors", 0)))
+	spin.step = 1
+	spin.value = clampi(_selected_flower_war_commitment, 1, int(spin.max_value))
+	spin.custom_minimum_size = Vector2(0, 44)
+	spin.value_changed.connect(func(value: float) -> void:
+		_selected_flower_war_commitment = int(value)
+		_refresh_all()
+	)
+	root.add_child(_religion_wrapped_label("Committed warriors", 18, COLOR_MUTED))
+	root.add_child(spin)
+	var state: Node = _state()
+	var preview: Dictionary = {}
+	if state != null and state.has_method("get_flower_war_preview"):
+		preview = state.call("get_flower_war_preview", _selected_flower_war_scale, _selected_flower_war_doctrine, _selected_flower_war_provisioning, _selected_flower_war_commitment) as Dictionary
+	root.add_child(_religion_wrapped_label("Readiness: " + String(preview.get("risk", "Unknown")) + ". Cost: " + _format_cost(preview.get("cost", {}) as Dictionary) + ".", 19, COLOR_TEAL))
+	if not bool(preview.get("ok", false)):
+		root.add_child(_religion_wrapped_label("Blocked: " + String(preview.get("reason", "")), 17, Color(1.0, 0.74, 0.40, 1.0)))
+	var launch: Button = Button.new()
+	launch.text = "Commit to Flower War"
+	launch.custom_minimum_size = Vector2(0, 54)
+	launch.add_theme_font_size_override("font_size", 22)
+	launch.disabled = not bool(preview.get("ok", false))
+	launch.pressed.connect(func() -> void:
+		var s: Node = _state()
+		if s != null and s.has_method("launch_flower_war"):
+			s.call("launch_flower_war", _selected_flower_war_scale, _selected_flower_war_doctrine, _selected_flower_war_provisioning, _selected_flower_war_commitment)
+		show_focus("warriors", "returns")
+	)
+	root.add_child(launch)
+
+func _build_flower_war_returns_panel(root: VBoxContainer) -> void:
+	root.add_child(_religion_label("Flower War Returns", 30, COLOR_TEXT))
+	var state: Node = _state()
+	var lines: Array = []
+	if state != null and state.has_method("get_last_flower_war_report"):
+		lines = state.call("get_last_flower_war_report") as Array
+	if lines.is_empty():
+		root.add_child(_religion_wrapped_label("No Flower War has been resolved yet.", 20, COLOR_MUTED))
+	else:
+		for line_variant: Variant in lines:
+			root.add_child(_religion_wrapped_label("• " + String(line_variant), 19, COLOR_TEXT))
+
+func _build_barracks_reports() -> void:
+	var summary: Dictionary = _barracks_summary()
+	_add_notification("Warriors " + str(int(summary.get("warriors", 0))) + " / " + str(int(summary.get("capacity", 0))) + "; weapons " + _format_float(float(summary.get("weapons", 0.0))) + ".")
+	_add_notification("Readiness: Minor " + _yes_no(bool(summary.get("minor_ready", false))) + "; Standard " + _yes_no(bool(summary.get("standard_ready", false))) + "; Major " + _yes_no(bool(summary.get("major_ready", false))) + ".")
+	_add_notification("Doctrine roles: Eagles captives; Jaguars prestige; Otomi survival; Coyotes loot; Unspecialised baseline.")
+	if _current_focus_id() == "returns":
+		var lines: Array = summary.get("last_report", []) as Array
+		for line_variant: Variant in lines:
+			_add_notification(String(line_variant))
+
+func _add_choice_row(parent: VBoxContainer, title: String, options: Dictionary, selected_id: String, callback: Callable) -> void:
+	parent.add_child(_religion_wrapped_label(title, 18, COLOR_MUTED))
+	var row: HBoxContainer = HBoxContainer.new()
+	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_theme_constant_override("separation", 6)
+	parent.add_child(row)
+	for key_variant: Variant in options.keys():
+		var id: String = String(key_variant)
+		var button: Button = Button.new()
+		button.text = String(options[key_variant])
+		button.toggle_mode = true
+		button.button_pressed = id == selected_id
+		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.custom_minimum_size = Vector2(0, 42)
+		button.pressed.connect(func() -> void:
+			callback.call(id)
+		)
+		row.add_child(button)
+
+func _yes_no(value: bool) -> String:
+	return "Yes" if value else "No"
+
+# -----------------------------------------------------------------------------
+# Religion / Shrine Upgrades + Tiered Rituals v2
+# -----------------------------------------------------------------------------
+
+func _ensure_religion_state() -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("get_religion_state"):
+		var religion_state: Dictionary = state.call("get_religion_state") as Dictionary
+		_divine_favour = religion_state.get("divine_favour", {}) as Dictionary
+		_shrine_levels = religion_state.get("shrine_levels", {}) as Dictionary
+		_shrine_upgrades = religion_state.get("shrine_upgrades", {}) as Dictionary
+		_ritual_capacity_used_this_veintena = float(religion_state.get("ritual_capacity_used_this_veintena", 0.0))
+		_last_offering_report.clear()
+		for line_variant: Variant in religion_state.get("recent_ritual_reports", []) as Array:
+			_last_offering_report.append(String(line_variant))
+		_religion_initialized = true
+		return
+	for god_id: String in GOD_IDS:
+		_divine_favour[god_id] = RELIGION_STARTING_FAVOUR
+		_shrine_levels[god_id] = 1
+		_shrine_upgrades[god_id] = []
+	_religion_initialized = true
+
+func _show_shrine_content() -> void:
+	_ensure_religion_state()
+	_set_content_root_layout(true)
+	if content_text:
+		content_text.visible = false
+
+	# Shrine screens now behave like the other information views: the right-hand
+	# report bar is the navigation layer, and the left image area only opens a
+	# detail/action panel after the player selects a shrine report card.
+	# With nothing selected, the shrine background art remains visible.
+	if _selected_shrine_panel_id == "":
+		if content_root:
+			content_root.visible = false
+		return
+
+	if content_root:
+		content_root.visible = true
+	if dynamic_view_host == null:
+		return
+	dynamic_view_host.visible = true
+
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.64), Color(0.50, 0.82, 0.74, 0.36), 14))
+	dynamic_view_host.add_child(panel)
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_top", 14)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_bottom", 14)
+	panel.add_child(margin)
+
+	var root: VBoxContainer = VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 10)
+	margin.add_child(root)
+
 	var header: HBoxContainer = HBoxContainer.new()
 	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	header.add_theme_constant_override("separation", 12)
-	stack.add_child(header)
-	var title_label: Label = Label.new()
-	title_label.text = _housing_report_title(selected_housing_report_id)
+	root.add_child(header)
+
+	var title_label: Label = _religion_label(_shrine_panel_title(_selected_shrine_panel_id), 29, COLOR_TEXT)
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_label.add_theme_font_size_override("font_size", 29)
 	title_label.clip_text = true
 	header.add_child(title_label)
+
 	var close_button: Button = Button.new()
 	close_button.text = "X"
 	close_button.custom_minimum_size = Vector2(48, 44)
 	close_button.add_theme_font_size_override("font_size", 22)
-	close_button.pressed.connect(_on_housing_report_closed)
+	close_button.pressed.connect(_on_shrine_panel_closed)
 	header.add_child(close_button)
-	var body: RichTextLabel = RichTextLabel.new()
-	body.bbcode_enabled = true
-	body.fit_content = false
-	body.scroll_active = true
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_font_size_override("normal_font_size", 22)
-	body.add_theme_font_size_override("bold_font_size", 24)
-	body.add_theme_constant_override("line_separation", 6)
-	body.text = _build_housing_report_detail_text(selected_housing_report_id)
-	stack.add_child(body)
 
-func _show_housing_mothball_view() -> void:
-	_set_content_root_layout(true)
-	if content_root:
-		content_root.visible = true
-	if content_text:
-		content_text.visible = false
-	if dynamic_view_host == null:
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+
+	var list: VBoxContainer = VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 10)
+	scroll.add_child(list)
+
+	_build_selected_shrine_panel(list, _selected_shrine_panel_id)
+
+func _build_shrine_overview_content(root: VBoxContainer) -> void:
+	var heading: Label = _religion_label("Divine Favour, Shrines & Rituals", 30, COLOR_TEXT)
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root.add_child(heading)
+	root.add_child(_religion_wrapped_label("Religion now uses shrine levels, shrine upgrades, priest capacity and fixed ritual tiers. Build stronger shrines, perform Minor / Medium / Large rituals, roll random favour gains, and spend real estate goods without creating Wealth.", 20, COLOR_MUTED))
+	root.add_child(_religion_wrapped_label("Current ritual focus: " + _current_festival_text() + ". Remaining priest ritual capacity this Veintena: " + _format_religion_amount(_religion_remaining_ritual_capacity()) + " / " + _format_religion_amount(_religion_priest_conversion_cap()) + ".", 19, COLOR_TEAL))
+
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var list: VBoxContainer = VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 8)
+	scroll.add_child(list)
+
+	for god_id: String in GOD_IDS:
+		_add_god_summary_panel(list, god_id)
+
+func _build_god_content(root: VBoxContainer, god_id: String) -> void:
+	if god_id == "":
+		god_id = "tlaloc"
+	var title: Label = _religion_label(_god_name(god_id), 30, COLOR_TEXT)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root.add_child(title)
+	root.add_child(_religion_wrapped_label(_god_domain(god_id), 20, _god_colour(god_id)))
+	root.add_child(_religion_wrapped_label(_god_description(god_id), 19, COLOR_MUTED))
+	_add_favour_bar(root, god_id)
+
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var list: VBoxContainer = VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 10)
+	scroll.add_child(list)
+
+	_build_shrine_level_panel(list, god_id)
+	_build_shrine_upgrade_cards(list, god_id)
+	_build_ritual_tier_cards(list, god_id)
+
+func _build_offerings_content(root: VBoxContainer, suggested_god_id: String) -> void:
+	var title: Label = _religion_label("Offerings", 30, COLOR_TEXT)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root.add_child(title)
+	if suggested_god_id == "":
+		root.add_child(_religion_wrapped_label("No major god dominates this Veintena. This is a breathing-room period: conserve goods, upgrade shrines, or open a god tab to perform a ritual without a festival visibility bonus.", 20, COLOR_MUTED))
+		_build_shrine_overview_content(root)
 		return
-	dynamic_view_host.visible = true
-	housing_mothball_view = HOUSING_MOTHBALL_VIEW_SCENE.instantiate() as Control
-	if housing_mothball_view == null:
+	root.add_child(_religion_wrapped_label("The current festival focus is " + _god_name(suggested_god_id) + ". Rituals to this god roll extra favour this Veintena.", 20, COLOR_MUTED))
+	_build_god_content(root, suggested_god_id)
+
+func _add_god_summary_panel(parent: VBoxContainer, god_id: String) -> void:
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.02, 0.05, 0.05, 0.74), _god_colour(god_id), 10))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 5)
+	margin.add_child(stack)
+	var row: HBoxContainer = HBoxContainer.new()
+	row.add_theme_constant_override("separation", 8)
+	stack.add_child(row)
+	var name_label: Label = _religion_label(_god_name(god_id), 22, COLOR_TEXT)
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(name_label)
+	var level_label: Label = _religion_label("Shrine L" + str(_shrine_level(god_id)), 19, COLOR_TEAL)
+	level_label.custom_minimum_size = Vector2(120, 0)
+	level_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	row.add_child(level_label)
+	var value_label: Label = _religion_label(_format_religion_amount(float(_divine_favour.get(god_id, 0.0))) + " / 100", 21, _god_colour(god_id))
+	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	value_label.custom_minimum_size = Vector2(140, 0)
+	row.add_child(value_label)
+	_add_favour_bar(stack, god_id)
+	var upgrade_count: int = _purchased_upgrade_ids(god_id).size()
+	stack.add_child(_religion_wrapped_label(_god_short_role(god_id), 17, COLOR_MUTED))
+	stack.add_child(_religion_wrapped_label("Unlocked rituals: " + _unlocked_ritual_text(god_id) + ". Upgrades built: " + str(upgrade_count) + "/" + str(_god_upgrade_definitions(god_id).size()) + ".", 16, COLOR_MUTED))
+
+func _add_favour_bar(parent: VBoxContainer, god_id: String) -> void:
+	var bar: ProgressBar = ProgressBar.new()
+	bar.min_value = 0.0
+	bar.max_value = 100.0
+	bar.value = clampf(float(_divine_favour.get(god_id, RELIGION_STARTING_FAVOUR)), 0.0, 100.0)
+	bar.show_percentage = false
+	bar.custom_minimum_size = Vector2(0, 24)
+	bar.add_theme_stylebox_override("background", _make_panel_style(Color(0.03, 0.04, 0.04, 0.84), Color(0.15, 0.18, 0.18, 0.5), 6))
+	bar.add_theme_stylebox_override("fill", _make_panel_style(_god_colour(god_id).darkened(0.15), _god_colour(god_id), 6))
+	parent.add_child(bar)
+
+func _build_shrine_level_panel(parent: VBoxContainer, god_id: String) -> void:
+	var level: int = _shrine_level(god_id)
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.015, 0.035, 0.035, 0.78), _god_colour(god_id), 12))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 6)
+	margin.add_child(stack)
+	stack.add_child(_religion_label(_god_name(god_id) + " Shrine Level " + str(level), 24, COLOR_TEXT))
+	stack.add_child(_religion_wrapped_label(_shrine_level_description(level), 17, COLOR_MUTED))
+	stack.add_child(_religion_wrapped_label("Unlocked rituals: " + _unlocked_ritual_text(god_id) + ". Active priest support: " + str(_religion_active_priest_count()) + " priests.", 17, COLOR_TEAL))
+	if level >= 4:
+		stack.add_child(_religion_wrapped_label("Maximum shrine level reached. Level 4 is ready for future boon-spending systems.", 17, COLOR_MUTED))
 		return
-	housing_mothball_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	housing_mothball_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	dynamic_view_host.add_child(housing_mothball_view)
-	if housing_mothball_view.has_signal("active_housing_changed"):
-		housing_mothball_view.connect("active_housing_changed", Callable(self, "_on_housing_active_count_changed"))
-	var state: Node = _state()
-	if state != null and state.has_method("get_housing_mothball_data") and housing_mothball_view.has_method("setup"):
-		housing_mothball_view.call("setup", state.call("get_housing_mothball_data"))
-
-func _show_building_view(profile: Dictionary) -> void:
-	_set_content_root_layout(true)
-	if content_text:
-		content_text.visible = false
-	var selected_id: String = String(selected_building_id_by_location.get(current_location_id, ""))
-	if selected_id == "":
-		if content_root:
-			content_root.visible = false
-		return
-	if content_root:
-		content_root.visible = true
-	if dynamic_view_host == null:
-		return
-	dynamic_view_host.visible = true
-	building_view = BUILDING_VIEW_SCENE.instantiate() as Control
-	if building_view == null:
-		return
-	building_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	building_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	dynamic_view_host.add_child(building_view)
-	if building_view.has_signal("build_requested"):
-		building_view.connect("build_requested", Callable(self, "_on_build_requested"))
-	if building_view.has_signal("destroy_requested"):
-		building_view.connect("destroy_requested", Callable(self, "_on_destroy_requested"))
-	if building_view.has_signal("building_closed"):
-		building_view.connect("building_closed", Callable(self, "_on_building_closed"))
-	var building_data: Array[Dictionary] = _buildings_for_current_screen(profile)
-	if building_view.has_method("setup"):
-		building_view.call("setup", building_data, selected_id)
-
-func _clear_dynamic_views() -> void:
-	storehouse_view = null
-	market_view = null
-	building_view = null
-	labour_assignment_view = null
-	housing_view = null
-	housing_mothball_view = null
-	if dynamic_view_host:
-		_clear_children(dynamic_view_host)
-
-func _refresh_right_panel() -> void:
-	_clear_children(notification_list)
-	var profile: Dictionary = _profile(current_location_id)
-	if notification_title:
-		notification_title.text = _report_title_for_current_focus(profile)
-
-	_refresh_house_claim()
-
-	var special_view: String = String(profile.get("special_view", ""))
-	if current_location_id == "estate":
-		_build_estate_reports()
-	elif special_view == "storehouse":
-		_build_storehouse_ledger()
-	elif special_view == "market":
-		if _current_focus_id() == "reports":
-			_build_market_reports()
-		else:
-			_build_market_ledger()
-	elif special_view == "housing":
-		if _current_focus_id() == "overview":
-			_build_housing_overview_reports()
-		elif _current_focus_id() == "mothball":
-			_build_housing_mothball_summary()
-		else:
-			_build_housing_ledger()
-	elif special_view == "buildings":
-		if current_location_id == "production" and _current_focus_id() == "overview":
-			_build_production_overview_reports()
-		elif current_location_id == "production" and _current_focus_id() == "labour":
-			_build_labour_assignment_summary()
-		else:
-			_build_building_ledger(profile)
-	else:
-		_build_report_list(profile)
-
-func _refresh_house_claim() -> void:
-	if house_claim_panel == null:
-		return
-
-	var estate_visible: bool = current_location_id == "estate"
-	house_claim_panel.visible = estate_visible
-	if not estate_visible:
-		return
-
-	var summary: Dictionary = _prestige_summary()
-	var prestige_value: float = float(summary.get("prestige", 0.0))
-	var standing_text: String = String(summary.get("standing", "Standing: not ranked yet"))
-	var recognition_text: String = String(summary.get("recognition", "Recognition: unproven"))
-	var recent_text: String = String(summary.get("recent", "Last change: none"))
-
-	if prestige_emblem:
-		prestige_emblem.texture = prestige_emblem_art
-		prestige_emblem.visible = prestige_emblem_art != null
-	if prestige_glyph_label:
-		prestige_glyph_label.visible = prestige_emblem_art == null
-	if prestige_title_label:
-		prestige_title_label.text = "House Claim"
-	if prestige_value_label:
-		prestige_value_label.text = "Prestige: " + _format_float(prestige_value)
-	if prestige_standing_label:
-		prestige_standing_label.text = standing_text
-	if prestige_recognition_label:
-		prestige_recognition_label.text = recognition_text
-	if prestige_recent_label:
-		prestige_recent_label.text = recent_text
-
-	house_claim_panel.tooltip_text = "Prestige is public recognition of the house. The Estate screen shows the quick claim; the Rivals and Palace screens should later show full comparison."
-
-func _prestige_summary() -> Dictionary:
-	var summary: Dictionary = {
-		"prestige": 0.0,
-		"standing": "Standing: not ranked yet",
-		"recognition": "Recognition: unproven",
-		"recent": "Last change: none"
-	}
-
-	var state: Node = _state()
-	if state == null:
-		return summary
-
-	if state.has_method("get_prestige_summary"):
-		var raw_summary: Variant = state.call("get_prestige_summary")
-		if raw_summary is Dictionary:
-			var state_summary: Dictionary = raw_summary as Dictionary
-			for key_variant: Variant in state_summary.keys():
-				var key: String = String(key_variant)
-				summary[key] = state_summary[key]
-			return summary
-
-	if state.has_method("get_player_prestige"):
-		summary["prestige"] = float(state.call("get_player_prestige"))
-	if state.has_method("get_prestige_standing_text"):
-		summary["standing"] = String(state.call("get_prestige_standing_text"))
-	if state.has_method("get_recognition_text"):
-		summary["recognition"] = String(state.call("get_recognition_text"))
-	if state.has_method("get_recent_prestige_text"):
-		summary["recent"] = String(state.call("get_recent_prestige_text"))
-
-	return summary
-
-func _report_title_for_current_focus(profile: Dictionary) -> String:
-	if current_location_id == "estate":
-		return "Estate Reports"
-	if current_location_id == "market":
-		match _current_focus_id():
-			"overview":
-				return "Market Pressure"
-			"goods":
-				return "Goods Ledger"
-			"village":
-				return "Village Economy"
-			"trade":
-				return "Trade Basket"
-			"rivals":
-				return "Rival Procurement"
-			"reports":
-				return "Market Reports"
-		return "Market Ledger"
-	if current_location_id == "housing":
-		match _current_focus_id():
-			"overview":
-				return "Housing Reports"
-			"field_labour":
-				return "Field Labour Housing"
-			"artisans":
-				return "Artisan Housing"
-			"tlacotin":
-				return "Tlacotin Housing"
-			"warriors":
-				return "Warrior Housing"
-			"priests":
-				return "Priest Housing"
-			"nobles":
-				return "Noble Housing"
-			"captives":
-				return "Captive Holding"
-			"mothball":
-				return "Mothball Housing"
-		return "Housing Ledger"
-	if current_location_id != "production":
-		return String(profile.get("report_title", "Warnings & Reports"))
-	match _current_focus_id():
-		"overview":
-			return "Production Reports"
-		"chinampas":
-			return "Chinampa Ledger"
-		"workshops":
-			return "Workshop Ledger"
-		"labour":
-			return "Productive Labour"
-	return "Production Reports"
-
-func _build_estate_reports() -> void:
-	for report: Dictionary in _estate_report_definitions():
-		_add_estate_report_button(report)
-	if selected_estate_report_id != "":
-		var close_button: Button = Button.new()
-		close_button.text = "Close Report"
-		close_button.custom_minimum_size = Vector2(0, 54)
-		close_button.add_theme_font_size_override("font_size", 19)
-		close_button.pressed.connect(_on_estate_report_closed)
-		notification_list.add_child(close_button)
-
-func _estate_report_definitions() -> Array[Dictionary]:
-	return [
-		{"id": "previous_turn", "title": "Previous Turn Summary", "subtitle": _estate_report_subtitle("previous_turn")},
-		{"id": "next_turn", "title": "Estimated Next Turn", "subtitle": _estate_report_subtitle("next_turn")},
-		{"id": "goods_warnings", "title": "Goods Warnings", "subtitle": _estate_report_subtitle("goods_warnings")},
-		{"id": "population_housing", "title": "Population & Housing", "subtitle": _estate_report_subtitle("population_housing")},
-		{"id": "production_labour", "title": "Production & Labour", "subtitle": _estate_report_subtitle("production_labour")},
-		{"id": "action_priorities", "title": "Action Priorities", "subtitle": _estate_report_subtitle("action_priorities")}
-	]
-
-func _estate_report_title(report_id: String) -> String:
-	match report_id:
-		"previous_turn":
-			return "Previous Turn Summary"
-		"next_turn":
-			return "Estimated Next Turn"
-		"goods_warnings":
-			return "Goods Warnings"
-		"population_housing":
-			return "Population & Housing"
-		"production_labour":
-			return "Production & Labour"
-		"action_priorities":
-			return "Action Priorities"
-	return "Estate Report"
-
-func _estate_report_subtitle(report_id: String) -> String:
-	match report_id:
-		"previous_turn":
-			var previous_lines: Array[String] = _last_turn_report_lines()
-			if previous_lines.is_empty():
-				return "No previous turn resolved"
-			return _shorten_report_line(previous_lines[0], 58)
-		"next_turn":
-			var warnings: Array[String] = _estate_goods_warning_lines(1)
-			if not warnings.is_empty():
-				return _shorten_report_line(warnings[0], 58)
-			var outputs: String = _resource_dictionary_inline(_production_output_totals(), 3)
-			if outputs == "":
-				return "No expected production output"
-			return "Expected output: " + outputs
-		"goods_warnings":
-			var goods_warnings: Array[String] = _estate_goods_warning_lines(99)
-			if goods_warnings.is_empty():
-				return "No immediate goods warning"
-			return str(goods_warnings.size()) + " good(s) need attention"
-		"population_housing":
-			var summary: Dictionary = _housing_summary()
-			return "Active " + str(int(summary.get("total_active_population", 0))) + " / total " + str(int(summary.get("total_population", 0))) + "; inactive " + str(int(summary.get("total_inactive_population", 0)))
-		"production_labour":
-			var production_summary: Dictionary = _production_building_summary()
-			return "Operating " + str(int(production_summary.get("operating", 0))) + "; blocked " + str(int(production_summary.get("blocked", 0)))
-		"action_priorities":
-			var priorities: Array[String] = _estate_action_priority_lines(1)
-			if priorities.is_empty():
-				return "No urgent action"
-			return _shorten_report_line(priorities[0], 58)
-	return "Open report"
-
-func _add_estate_report_button(report: Dictionary) -> void:
-	if notification_list == null:
-		return
-	var report_id: String = String(report.get("id", ""))
-	var selected: bool = report_id == selected_estate_report_id
+	var next_level: int = level + 1
+	var cost: Dictionary = _shrine_level_cost(next_level)
+	var status: Dictionary = _can_upgrade_shrine_level(god_id)
+	stack.add_child(_religion_wrapped_label("Upgrade to Level " + str(next_level) + " cost: " + _format_cost(cost) + ". Requires " + str(_shrine_level_priest_requirement(next_level)) + " active priests.", 17, COLOR_MUTED))
 	var button: Button = Button.new()
-	button.text = String(report.get("title", "Report")) + "\n" + String(report.get("subtitle", "Open report"))
-	button.custom_minimum_size = Vector2(0, 94)
-	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	button.toggle_mode = true
-	button.button_pressed = selected
-	button.clip_text = true
-	button.add_theme_font_size_override("font_size", 19)
-	var border: Color = Color(0.34, 0.71, 0.63, 0.45)
-	if selected:
-		border = Color(0.76, 0.63, 0.32, 0.86)
-	button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.04, 0.07, 0.065, 0.93), border, 10))
-	button.add_theme_stylebox_override("hover", _make_panel_style(Color(0.06, 0.095, 0.085, 0.96), Color(0.50, 0.82, 0.74, 0.75), 10))
-	button.add_theme_stylebox_override("pressed", _make_panel_style(Color(0.10, 0.12, 0.095, 0.98), Color(0.76, 0.63, 0.32, 0.86), 10))
+	button.text = "Upgrade Shrine to Level " + str(next_level)
+	button.custom_minimum_size = Vector2(0, 46)
+	button.add_theme_font_size_override("font_size", 20)
+	button.disabled = not bool(status.get("ok", false))
+	button.tooltip_text = String(status.get("reason", ""))
 	button.pressed.connect(func() -> void:
-		_on_estate_report_selected(report_id)
+		_upgrade_shrine_level(god_id)
 	)
-	notification_list.add_child(button)
+	stack.add_child(button)
+	if not bool(status.get("ok", false)):
+		stack.add_child(_religion_wrapped_label("Blocked: " + String(status.get("reason", "")), 16, Color(1.0, 0.74, 0.40, 1.0)))
 
-func _build_estate_report_detail_text(report_id: String) -> String:
-	match report_id:
-		"previous_turn":
-			return _build_estate_previous_turn_report_text()
-		"next_turn":
-			return _build_estate_next_turn_report_text()
-		"goods_warnings":
-			return _build_estate_goods_warnings_report_text()
-		"population_housing":
-			return _build_estate_population_housing_report_text()
-		"production_labour":
-			return _build_estate_production_labour_report_text()
-		"action_priorities":
-			return _build_estate_action_priorities_report_text()
-	return "Select an Estate report from the right-hand panel."
+func _build_shrine_upgrade_cards(parent: VBoxContainer, god_id: String) -> void:
+	var heading: Label = _religion_label("Shrine Upgrades", 24, COLOR_TEXT)
+	parent.add_child(heading)
+	parent.add_child(_religion_wrapped_label("Upgrades make a shrine more powerful. They cost goods, require shrine level, and need enough active priests to function. Their mechanical effects are deliberately small now, but they already improve ritual rolls and favour decay.", 17, COLOR_MUTED))
+	for upgrade: Dictionary in _god_upgrade_definitions(god_id):
+		_add_single_upgrade_card(parent, god_id, upgrade)
 
-func _build_estate_previous_turn_report_text() -> String:
-	var text: String = "[b]Previous Turn Summary[/b]\n"
-	text += "This is the last resolved Veintena report from the estate simulation.\n\n"
-	var lines: Array[String] = _last_turn_report_lines()
-	if lines.is_empty():
-		text += "• No previous turn has resolved yet. Press Advance Veintena to generate a turn report.\n"
-	else:
-		for line: String in lines:
-			text += "• " + line + "\n"
-	return text.strip_edges()
-
-func _build_estate_next_turn_report_text() -> String:
-	var text: String = "[b]Estimated Next Turn[/b]\n"
-	text += "This report estimates what will happen if you press Advance Veintena now. It combines population upkeep, housing building maintenance, production inputs and expected production outputs.\n\n"
-	text += "[b]Expected production output[/b]\n"
-	text += _resource_dictionary_lines(_production_output_totals(), "No production output expected.", 10)
-	text += "\n[b]Expected production input demand[/b]\n"
-	text += _resource_dictionary_lines(_production_input_totals(), "No production inputs expected.", 10)
-	text += "\n[b]Population upkeep[/b]\n"
-	text += _resource_dictionary_lines(_population_upkeep_totals(), "No active population upkeep currently required.", 10)
-	text += "\n[b]Housing building maintenance[/b]\n"
-	var housing: Dictionary = _housing_summary()
-	text += _resource_dictionary_lines(housing.get("maintenance", {}) as Dictionary, "No housing maintenance currently required.", 10)
-	text += "\n[b]Main warnings[/b]\n"
-	var warnings: Array[String] = _estate_goods_warning_lines(10)
-	if warnings.is_empty():
-		text += "• No immediate projected goods shortage.\n"
-	else:
-		for warning: String in warnings:
-			text += "• " + warning + "\n"
-	return text.strip_edges()
-
-func _build_estate_goods_warnings_report_text() -> String:
-	var text: String = "[b]Goods Warnings[/b]\n"
-	text += "This reads Storehouse projections. It looks for goods that are reserved, declining, or projected to fall below zero after expected upkeep, maintenance, inputs and outputs.\n\n"
-	var warnings: Array[String] = _estate_goods_warning_lines(12)
-	if warnings.is_empty():
-		text += "• No immediate goods warning. Keep checking this after construction, staffing and mothball changes.\n"
-	else:
-		for warning: String in warnings:
-			text += "• " + warning + "\n"
-	text += "\n[b]All visible storehouse projections[/b]\n"
-	for good: Dictionary in _storehouse_goods():
-		var stored: float = float(good.get("stored", 0.0))
-		var incoming: float = float(good.get("incoming", 0.0))
-		var outgoing: float = float(good.get("outgoing", 0.0))
-		var projected: float = stored + incoming - outgoing
-		text += "• " + String(good.get("name", "Good")) + ": now " + _format_float(stored) + "; in " + _format_float(incoming) + "; out " + _format_float(outgoing) + "; projected " + _format_float(projected) + "\n"
-	return text.strip_edges()
-
-func _build_estate_population_housing_report_text() -> String:
-	var summary: Dictionary = _housing_summary()
-	var text: String = "[b]Population & Housing[/b]\n"
-	text += "Housing decides how much of the estate population is active. Active people consume upkeep and can work; inactive people are unsupported and do not contribute.\n\n"
-	text += "• Total population: " + str(int(summary.get("total_population", 0))) + "\n"
-	text += "• Active population: " + str(int(summary.get("total_active_population", 0))) + "\n"
-	text += "• Inactive population: " + str(int(summary.get("total_inactive_population", 0))) + "\n"
-	text += "• Active capacity: " + str(int(summary.get("total_active_capacity", 0))) + "\n"
-	text += "• Built capacity: " + str(int(summary.get("total_capacity", 0))) + "\n\n"
-	for tier: Dictionary in summary.get("tiers", []) as Array:
-		text += "• " + String(tier.get("name", "Housing")) + ": active " + str(int(tier.get("active_population", 0))) + " / total " + str(int(tier.get("population", 0))) + "; active capacity " + str(int(tier.get("active_capacity", 0))) + "; free " + str(int(tier.get("free_capacity", 0))) + "; " + String(tier.get("status", "Unknown")) + "\n"
-	return text.strip_edges()
-
-func _build_estate_production_labour_report_text() -> String:
-	var text: String = "[b]Production & Labour[/b]\n"
-	var summary: Dictionary = _production_building_summary()
-	text += "• Built production buildings: " + str(int(summary.get("built", 0))) + "\n"
-	text += "• Expected operating instances: " + str(int(summary.get("operating", 0))) + "\n"
-	text += "• Blocked instances: " + str(int(summary.get("blocked", 0))) + "\n\n"
-	text += "[b]Outputs[/b]\n"
-	text += _resource_dictionary_lines(_production_output_totals(), "No production output expected.", 10)
-	text += "\n[b]Inputs[/b]\n"
-	text += _resource_dictionary_lines(_production_input_totals(), "No production input demand.", 10)
-	text += "\n[b]Labour read[/b]\n"
-	var labour_lines: Array[String] = _production_labour_dashboard_lines(12)
-	if labour_lines.is_empty():
-		text += "• Labour data is not connected yet.\n"
-	else:
-		for line: String in labour_lines:
-			text += "• " + line + "\n"
-	var blocked_lines: Array = summary.get("blocked_lines", []) as Array
-	if not blocked_lines.is_empty():
-		text += "\n[b]Blocked production[/b]\n"
-		for blocked_variant: Variant in blocked_lines:
-			text += "• " + String(blocked_variant) + "\n"
-	return text.strip_edges()
-
-func _build_estate_action_priorities_report_text() -> String:
-	var text: String = "[b]Action Priorities[/b]\n"
-	text += "This turns the current estate state into a short action list. It should help you decide whether to adjust housing, staffing, production or market use before advancing time.\n\n"
-	var priorities: Array[String] = _estate_action_priority_lines(12)
-	if priorities.is_empty():
-		text += "• No urgent action. You can advance the Veintena or plan longer-term expansion.\n"
-	else:
-		for priority: String in priorities:
-			text += "• " + priority + "\n"
-	return text.strip_edges()
-
-func _estate_goods_warning_lines(max_items: int = 8) -> Array[String]:
-	var output: Array[String] = []
-	for good: Dictionary in _storehouse_goods():
-		if output.size() >= max_items:
-			break
-		var name: String = String(good.get("name", "Good"))
-		var stored: float = float(good.get("stored", 0.0))
-		var incoming: float = float(good.get("incoming", 0.0))
-		var outgoing: float = float(good.get("outgoing", 0.0))
-		var free_value: float = float(good.get("free", maxf(0.0, stored - outgoing)))
-		var projected: float = stored + incoming - outgoing
-		if projected < -0.001:
-			output.append(name + ": projected shortage of " + _format_float(absf(projected)) + " after next turn.")
-		elif free_value <= 0.001 and outgoing > 0.001:
-			output.append(name + ": fully reserved by upkeep, maintenance or inputs.")
-		elif incoming - outgoing < -0.001:
-			output.append(name + ": declining by " + _format_float(absf(incoming - outgoing)) + " this turn.")
-	return output
-
-func _estate_action_priority_lines(max_items: int = 8) -> Array[String]:
-	var output: Array[String] = []
-	for warning: String in _estate_goods_warning_lines(4):
-		output.append("Resolve goods pressure — " + warning)
-	var housing: Dictionary = _housing_summary()
-	var inactive: int = int(housing.get("total_inactive_population", 0))
-	if inactive > 0:
-		output.append("Open Housing or Mothball — " + str(inactive) + " people are inactive.")
-	var production_summary: Dictionary = _production_building_summary()
-	var blocked: int = int(production_summary.get("blocked", 0))
-	if blocked > 0:
-		output.append("Open Production — " + str(blocked) + " production instance(s) are blocked or unstaffed.")
-	var buildable_count: int = _production_buildable_count()
-	if buildable_count > 0:
-		output.append("Consider Production expansion — " + str(buildable_count) + " production building type(s) are buildable now.")
-	if output.is_empty():
-		var outputs: String = _resource_dictionary_inline(_production_output_totals(), 3)
-		if outputs != "":
-			output.append("Production looks stable. Expected output: " + outputs + ".")
+func _add_single_upgrade_card(parent: VBoxContainer, god_id: String, upgrade: Dictionary) -> void:
+	var upgrade_id: String = String(upgrade.get("id", ""))
+	var purchased: bool = _has_shrine_upgrade(god_id, upgrade_id)
+	var active: bool = purchased and _upgrade_is_active(upgrade)
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var border: Color = _god_colour(god_id)
+	if not active:
+		border = Color(0.55, 0.55, 0.50, 0.45)
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.02, 0.045, 0.045, 0.72), border, 8))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 4)
+	margin.add_child(stack)
+	var title: String = String(upgrade.get("title", "Upgrade"))
+	var req_level: int = int(upgrade.get("level", 1))
+	var req_priests: int = int(upgrade.get("priests", 0))
+	var state_text: String = "Available"
+	if purchased:
+		state_text = "Active"
+		if not active:
+			state_text = "Built, but inactive"
+	stack.add_child(_religion_label(title + " — " + state_text, 20, COLOR_TEXT))
+	stack.add_child(_religion_wrapped_label(String(upgrade.get("description", "")), 16, COLOR_MUTED))
+	stack.add_child(_religion_wrapped_label("Requires Shrine L" + str(req_level) + ", " + str(req_priests) + " active priests. Cost: " + _format_cost(upgrade.get("cost", {}) as Dictionary) + ". Effect: " + _upgrade_effect_text(upgrade) + ".", 15, COLOR_MUTED))
+	if purchased:
+		if active:
+			stack.add_child(_religion_wrapped_label("This upgrade is functioning.", 15, Color(0.55, 1.0, 0.65, 1.0)))
 		else:
-			output.append("No urgent warning, but production output is low. Consider building or staffing production.")
-	while output.size() > max_items:
-		output.pop_back()
-	return output
-
-func _last_turn_report_lines() -> Array[String]:
-	var output: Array[String] = []
-	var state: Node = _state()
-	if state != null and state.has_method("get_last_report"):
-		var raw: Array = state.call("get_last_report") as Array
-		for line_variant: Variant in raw:
-			var line: String = String(line_variant)
-			if line.strip_edges() != "":
-				output.append(line)
-	return output
-
-func _shorten_report_line(line: String, max_chars: int = 60) -> String:
-	if line.length() <= max_chars:
-		return line
-	return line.substr(0, max(0, max_chars - 3)) + "..."
-
-func _build_production_overview_reports() -> void:
-	for report: Dictionary in _production_report_definitions():
-		_add_production_report_button(report)
-	if selected_production_report_id != "":
-		var close_button: Button = Button.new()
-		close_button.text = "Close Report"
-		close_button.custom_minimum_size = Vector2(0, 54)
-		close_button.add_theme_font_size_override("font_size", 19)
-		close_button.pressed.connect(_on_production_report_closed)
-		notification_list.add_child(close_button)
-
-func _production_report_definitions() -> Array[Dictionary]:
-	return [
-		{"id": "expected_output", "title": "Expected Output", "subtitle": _production_report_subtitle("expected_output")},
-		{"id": "input_demand", "title": "Input Demand", "subtitle": _production_report_subtitle("input_demand")},
-		{"id": "labour_pressure", "title": "Labour Pressure", "subtitle": _production_report_subtitle("labour_pressure")},
-		{"id": "building_times", "title": "Building Times", "subtitle": _production_report_subtitle("building_times")}
-	]
-
-func _production_report_title(report_id: String) -> String:
-	match report_id:
-		"expected_output":
-			return "Expected Output"
-		"input_demand":
-			return "Input Demand"
-		"labour_pressure":
-			return "Labour Pressure"
-		"building_times":
-			return "Building Times / Build Readiness"
-	return "Production Report"
-
-func _production_report_subtitle(report_id: String) -> String:
-	match report_id:
-		"expected_output":
-			var output_summary: String = _resource_dictionary_inline(_production_output_totals(), 3)
-			if output_summary == "":
-				return "No output expected"
-			return output_summary
-		"input_demand":
-			var input_summary: String = _resource_dictionary_inline(_production_input_totals(), 3)
-			if input_summary == "":
-				return "No inputs consumed"
-			return input_summary
-		"labour_pressure":
-			var labour_lines: Array[String] = _production_labour_dashboard_lines(1)
-			if labour_lines.is_empty():
-				return "No labour data yet"
-			return labour_lines[0]
-		"building_times":
-			var buildable_count: int = _production_buildable_count()
-			if buildable_count > 0:
-				return str(buildable_count) + " buildable now"
-			return "No build fully affordable"
-	return "Open report"
-
-func _add_production_report_button(report: Dictionary) -> void:
-	if notification_list == null:
+			stack.add_child(_religion_wrapped_label("Inactive: not enough active priests are currently supported.", 15, Color(1.0, 0.74, 0.40, 1.0)))
 		return
-	var report_id: String = String(report.get("id", ""))
-	var selected: bool = report_id == selected_production_report_id
+	var status: Dictionary = _can_build_shrine_upgrade(god_id, upgrade)
 	var button: Button = Button.new()
-	button.text = String(report.get("title", "Report")) + "\n" + String(report.get("subtitle", "Open report"))
-	button.custom_minimum_size = Vector2(0, 94)
-	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	button.toggle_mode = true
-	button.button_pressed = selected
-	button.clip_text = true
-	button.add_theme_font_size_override("font_size", 19)
-	var border: Color = Color(0.34, 0.71, 0.63, 0.45)
-	if selected:
-		border = Color(0.76, 0.63, 0.32, 0.86)
-	button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.04, 0.07, 0.065, 0.93), border, 10))
-	button.add_theme_stylebox_override("hover", _make_panel_style(Color(0.06, 0.095, 0.085, 0.96), Color(0.50, 0.82, 0.74, 0.75), 10))
-	button.add_theme_stylebox_override("pressed", _make_panel_style(Color(0.10, 0.12, 0.095, 0.98), Color(0.76, 0.63, 0.32, 0.86), 10))
+	button.text = "Build Upgrade"
+	button.custom_minimum_size = Vector2(0, 42)
+	button.add_theme_font_size_override("font_size", 18)
+	button.disabled = not bool(status.get("ok", false))
+	button.tooltip_text = String(status.get("reason", ""))
 	button.pressed.connect(func() -> void:
-		_on_production_report_selected(report_id)
+		_build_shrine_upgrade(god_id, upgrade_id)
 	)
-	notification_list.add_child(button)
+	stack.add_child(button)
+	if not bool(status.get("ok", false)):
+		stack.add_child(_religion_wrapped_label("Blocked: " + String(status.get("reason", "")), 15, Color(1.0, 0.74, 0.40, 1.0)))
 
-func _production_overview_report_messages() -> Array[String]:
+func _build_ritual_tier_cards(parent: VBoxContainer, god_id: String) -> void:
+	var heading: Label = _religion_label("Rituals", 24, COLOR_TEXT)
+	parent.add_child(heading)
+	parent.add_child(_religion_wrapped_label("Choose a fixed ritual tier. The favour gain is random within the shown range. Current festival focus and active shrine upgrades improve the roll. No ritual value is stored.", 17, COLOR_MUTED))
+	for tier_id: String in ["minor", "medium", "large"]:
+		_add_ritual_tier_card(parent, god_id, tier_id)
+
+func _add_ritual_tier_card(parent: VBoxContainer, god_id: String, tier_id: String) -> void:
+	var data: Dictionary = _ritual_data(god_id, tier_id)
+	var status: Dictionary = _can_perform_ritual(god_id, tier_id)
+	var range: Array = _ritual_favour_range(god_id, tier_id)
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.02, 0.045, 0.045, 0.76), _god_colour(god_id), 9))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 4)
+	margin.add_child(stack)
+	stack.add_child(_religion_label(String(data.get("title", tier_id.capitalize())), 21, COLOR_TEXT))
+	stack.add_child(_religion_wrapped_label(String(data.get("description", "")), 16, COLOR_MUTED))
+	stack.add_child(_religion_wrapped_label("Requires Shrine L" + str(int(data.get("level", 1))) + ". Cost: " + _format_cost(data.get("cost", {}) as Dictionary) + ". Priest capacity: " + _format_religion_amount(float(data.get("capacity", 0.0))) + ".", 15, COLOR_MUTED))
+	stack.add_child(_religion_wrapped_label("Favour roll: +" + str(int(range[0])) + " to +" + str(int(range[1])) + ". Current favour: " + _format_religion_amount(float(_divine_favour.get(god_id, RELIGION_STARTING_FAVOUR))) + "/100.", 16, COLOR_TEAL))
+	var button: Button = Button.new()
+	button.text = "Perform " + String(data.get("title", "Ritual"))
+	button.custom_minimum_size = Vector2(0, 44)
+	button.add_theme_font_size_override("font_size", 19)
+	button.disabled = not bool(status.get("ok", false))
+	button.tooltip_text = String(status.get("reason", ""))
+	button.pressed.connect(func() -> void:
+		_perform_ritual(god_id, tier_id)
+	)
+	stack.add_child(button)
+	if not bool(status.get("ok", false)):
+		stack.add_child(_religion_wrapped_label("Blocked: " + String(status.get("reason", "")), 15, Color(1.0, 0.74, 0.40, 1.0)))
+
+func _shrine_level(god_id: String) -> int:
+	var state: Node = _state()
+	if state != null and state.has_method("get_shrine_level"):
+		return int(state.call("get_shrine_level", god_id))
+	_ensure_religion_state()
+	return clampi(int(_shrine_levels.get(god_id, 1)), 1, 4)
+
+func _purchased_upgrade_ids(god_id: String) -> Array[String]:
+	var state: Node = _state()
+	if state != null and state.has_method("get_purchased_shrine_upgrades"):
+		var state_upgrades: Array = state.call("get_purchased_shrine_upgrades", god_id) as Array
+		var state_output: Array[String] = []
+		for item: Variant in state_upgrades:
+			state_output.append(String(item))
+		return state_output
+	_ensure_religion_state()
 	var output: Array[String] = []
-	var outputs: Dictionary = _production_output_totals()
-	var inputs: Dictionary = _production_input_totals()
-	var summary: Dictionary = _production_building_summary()
-
-	var output_summary: String = _resource_dictionary_inline(outputs, 4)
-	if output_summary == "":
-		output.append("No expected output. Build production buildings or check staffing.")
-	else:
-		output.append("Output this Veintena: " + output_summary + ".")
-
-	var input_summary: String = _resource_dictionary_inline(inputs, 4)
-	if input_summary == "":
-		output.append("No production input demand this Veintena.")
-	else:
-		output.append("Inputs consumed: " + input_summary + ".")
-
-	var blocked_count: int = int(summary.get("blocked", 0))
-	if blocked_count > 0:
-		var blocked_lines: Array = summary.get("blocked_lines", []) as Array
-		output.append("Blocked production: " + _join_string_items(blocked_lines, "; ", 2) + ".")
-	else:
-		output.append("No built production buildings are currently blocked.")
-
-	var buildable_count: int = _production_buildable_count()
-	if buildable_count > 0:
-		output.append(str(buildable_count) + " production buildings can be built now. Open Chinampas or Workshops to choose one.")
-	else:
-		output.append("No new production building is fully affordable right now.")
-
+	var raw: Array = _shrine_upgrades.get(god_id, []) as Array
+	for item: Variant in raw:
+		output.append(String(item))
 	return output
 
-func _production_output_totals() -> Dictionary:
-	var state: Node = _state()
-	if state != null and state.has_method("estimate_building_outputs"):
-		return state.call("estimate_building_outputs") as Dictionary
+func _has_shrine_upgrade(god_id: String, upgrade_id: String) -> bool:
+	return _purchased_upgrade_ids(god_id).has(upgrade_id)
+
+func _unlocked_ritual_text(god_id: String) -> String:
+	var level: int = _shrine_level(god_id)
+	if level >= 3:
+		return "Minor, Medium and Large"
+	if level >= 2:
+		return "Minor and Medium"
+	return "Minor"
+
+func _shrine_level_description(level: int) -> String:
+	match level:
+		1:
+			return "A founded household shrine. It supports Minor Rites and basic divine maintenance."
+		2:
+			return "An established shrine. It unlocks Medium Ceremonies and stronger upgrade branches."
+		3:
+			return "A major shrine. It unlocks Large Festivals and serious public religious statements."
+		4:
+			return "A regional religious complex. It prepares the shrine for future boon-spending and late-game divine power."
+	return "Shrine level."
+
+func _shrine_level_cost(next_level: int) -> Dictionary:
+	match next_level:
+		2:
+			return {"wood": 20.0, "cloth": 6.0, "ritual_goods": 1.0}
+		3:
+			return {"wood": 50.0, "cloth": 15.0, "ritual_goods": 4.0, "cacao": 2.0}
+		4:
+			return {"wood": 100.0, "cloth": 30.0, "ritual_goods": 8.0, "cacao": 4.0, "fine_textiles": 1.0}
 	return {}
 
-func _production_input_totals() -> Dictionary:
+func _shrine_level_priest_requirement(next_level: int) -> int:
+	match next_level:
+		2:
+			return 2
+		3:
+			return 5
+		4:
+			return 8
+	return 0
+
+func _can_upgrade_shrine_level(god_id: String) -> Dictionary:
+	var level: int = _shrine_level(god_id)
+	if level >= 4:
+		return {"ok": false, "reason": "Shrine is already Level 4."}
+	var next_level: int = level + 1
+	var priest_req: int = _shrine_level_priest_requirement(next_level)
+	if _religion_active_priest_count() < priest_req:
+		return {"ok": false, "reason": "Requires " + str(priest_req) + " active priests."}
+	return _can_pay_religion_cost(_shrine_level_cost(next_level))
+
+func _upgrade_shrine_level(god_id: String) -> void:
 	var state: Node = _state()
-	if state != null and state.has_method("estimate_building_inputs"):
-		return state.call("estimate_building_inputs") as Dictionary
+	if state != null and state.has_method("upgrade_shrine"):
+		state.call("upgrade_shrine", god_id)
+		_religion_initialized = false
+		_ensure_religion_state()
+		_refresh_all()
+		return
+	var status: Dictionary = _can_upgrade_shrine_level(god_id)
+	if not bool(status.get("ok", false)):
+		_last_offering_report.clear()
+		_last_offering_report.append("Shrine upgrade failed: " + String(status.get("reason", "")))
+		_refresh_all()
+		return
+	var next_level: int = _shrine_level(god_id) + 1
+	_pay_religion_cost(_shrine_level_cost(next_level))
+	_shrine_levels[god_id] = next_level
+	_last_offering_report.clear()
+	_last_offering_report.append(_god_name(god_id) + " Shrine upgraded to Level " + str(next_level) + ". " + _shrine_level_description(next_level))
+	_emit_religion_state_changed()
+	_refresh_all()
+
+func _god_upgrade_definitions(god_id: String) -> Array[Dictionary]:
+	match god_id:
+		"tlaloc":
+			return [
+				{"id": "rain_basin", "title": "Rain Basin", "level": 1, "priests": 1, "cost": {"wood": 8.0, "ritual_goods": 1.0}, "description": "A basin for reading water, clouds and lake signs.", "favour_bonus": 1, "decay_reduction": 0.0},
+				{"id": "canal_offering_steps", "title": "Canal Offering Steps", "level": 2, "priests": 2, "cost": {"wood": 20.0, "cloth": 5.0, "ritual_goods": 2.0}, "description": "Ritual steps linking shrine offerings to fields, canals and chinampas.", "favour_bonus": 2, "decay_reduction": 0.25},
+				{"id": "harvest_idol", "title": "Harvest Idol", "level": 3, "priests": 4, "cost": {"wood": 35.0, "cacao": 1.0, "ritual_goods": 4.0}, "description": "A major idol for harvest gratitude and drought protection hooks.", "favour_bonus": 3, "decay_reduction": 0.35},
+				{"id": "storm_court", "title": "Storm Court", "level": 4, "priests": 6, "cost": {"wood": 70.0, "cloth": 15.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, "description": "A full court for future rain boons, drought softening and agricultural rites.", "favour_bonus": 5, "decay_reduction": 0.50}
+			]
+		"huitzilopochtli":
+			return [
+				{"id": "war_banners", "title": "War Banners", "level": 1, "priests": 1, "cost": {"wood": 8.0, "ritual_goods": 1.0}, "description": "Battle banners sanctify warrior musters and small martial rites.", "favour_bonus": 1, "decay_reduction": 0.0},
+				{"id": "captive_stone", "title": "Captive Stone", "level": 2, "priests": 2, "cost": {"wood": 18.0, "cacao": 1.0, "ritual_goods": 2.0}, "description": "A ritual stone for future captive sacrifice and Flower War payoff.", "favour_bonus": 2, "decay_reduction": 0.20},
+				{"id": "eagle_arsenal_altar", "title": "Eagle Arsenal Altar", "level": 3, "priests": 4, "cost": {"wood": 35.0, "cloth": 8.0, "ritual_goods": 4.0}, "description": "An altar binding weapon preparation to martial prestige.", "favour_bonus": 3, "decay_reduction": 0.30},
+				{"id": "sun_war_court", "title": "Sun-War Court", "level": 4, "priests": 6, "cost": {"wood": 70.0, "cloth": 15.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, "description": "A full war court for future Flower War boons, captive yield and martial recognition.", "favour_bonus": 5, "decay_reduction": 0.45}
+			]
+		"tezcatlipoca":
+			return [
+				{"id": "obsidian_mirror", "title": "Obsidian Mirror", "level": 1, "priests": 1, "cost": {"wood": 8.0, "ritual_goods": 1.0}, "description": "A mirror for reading first omens and hidden danger.", "favour_bonus": 1, "decay_reduction": 0.0},
+				{"id": "smoke_vestry", "title": "Smoke Vestry", "level": 2, "priests": 2, "cost": {"wood": 18.0, "cacao": 1.0, "ritual_goods": 2.0}, "description": "A chamber for controlled smoke rites, future warnings and rival pressure hooks.", "favour_bonus": 2, "decay_reduction": 0.25},
+				{"id": "jaguar_shadow_wall", "title": "Jaguar Shadow Wall", "level": 3, "priests": 4, "cost": {"wood": 35.0, "cloth": 8.0, "ritual_goods": 4.0}, "description": "A symbolic barrier against plots, scandals and sabotage.", "favour_bonus": 3, "decay_reduction": 0.35},
+				{"id": "night_court", "title": "Night Court", "level": 4, "priests": 6, "cost": {"wood": 70.0, "cloth": 15.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, "description": "A court for future intrigue boons, counter-plots and hidden information.", "favour_bonus": 5, "decay_reduction": 0.50}
+			]
+		"quetzalcoatl":
+			return [
+				{"id": "feathered_brazier", "title": "Feathered Brazier", "level": 1, "priests": 1, "cost": {"wood": 8.0, "ritual_goods": 1.0}, "description": "A civilising fire for transition rites and household legitimacy.", "favour_bonus": 1, "decay_reduction": 0.0},
+				{"id": "scribe_mat", "title": "Scribe Mat", "level": 2, "priests": 2, "cost": {"wood": 18.0, "cacao": 1.0, "ritual_goods": 2.0}, "description": "A ritual space for record, order, tribute promises and palace-facing legitimacy.", "favour_bonus": 2, "decay_reduction": 0.25},
+				{"id": "market_wind_gate", "title": "Market Wind Gate", "level": 3, "priests": 4, "cost": {"wood": 35.0, "cloth": 8.0, "ritual_goods": 4.0}, "description": "A ceremonial gate linking trade, diplomacy and public order.", "favour_bonus": 3, "decay_reduction": 0.35},
+				{"id": "feathered_court", "title": "Feathered Court", "level": 4, "priests": 6, "cost": {"wood": 70.0, "cloth": 15.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, "description": "A full court for future recognition boons, ruler interactions and legitimacy protection.", "favour_bonus": 5, "decay_reduction": 0.50}
+			]
+	return []
+
+func _upgrade_by_id(god_id: String, upgrade_id: String) -> Dictionary:
+	for data: Dictionary in _god_upgrade_definitions(god_id):
+		if String(data.get("id", "")) == upgrade_id:
+			return data
 	return {}
 
-func _production_building_summary() -> Dictionary:
-	var result: Dictionary = {
-		"built": 0,
-		"operating": 0,
-		"blocked": 0,
-		"blocked_lines": [],
-		"unbuilt_lines": []
-	}
+func _upgrade_is_active(upgrade: Dictionary) -> bool:
+	return _religion_active_priest_count() >= int(upgrade.get("priests", 0))
 
-	var all_buildings: Array[Dictionary] = []
-	var state: Node = _state()
-	if state != null and state.has_method("get_buildings_for_screen"):
-		var chinampas: Array = state.call("get_buildings_for_screen", "chinampas", "overview") as Array
-		for item_variant: Variant in chinampas:
-			all_buildings.append(item_variant as Dictionary)
-		var workshops: Array = state.call("get_buildings_for_screen", "workshops", "overview") as Array
-		for item_variant: Variant in workshops:
-			all_buildings.append(item_variant as Dictionary)
-
-	var blocked_lines: Array[String] = []
-	var unbuilt_lines: Array[String] = []
-	var built_count: int = 0
-	var operating_count: int = 0
-	var blocked_count: int = 0
-
-	for building: Dictionary in all_buildings:
-		var count: int = int(building.get("count", 0))
-		var operating: int = int(building.get("operating", 0))
-		var blocked: int = int(building.get("blocked", 0))
-		var name: String = String(building.get("name", "Building"))
-		built_count += count
-		operating_count += operating
-		blocked_count += blocked
-		if count <= 0:
-			unbuilt_lines.append(name + " not built")
-		elif blocked > 0:
-			blocked_lines.append(name + " " + String(building.get("status_text", "blocked")))
-
-	result["built"] = built_count
-	result["operating"] = operating_count
-	result["blocked"] = blocked_count
-	result["blocked_lines"] = blocked_lines
-	result["unbuilt_lines"] = unbuilt_lines
-	return result
-
-func _input_pressure_lines(inputs: Dictionary) -> Array[String]:
-	var lines: Array[String] = []
-	if inputs.is_empty():
-		return lines
-	for key_variant: Variant in inputs.keys():
-		var resource_id: String = String(key_variant)
-		var needed: float = float(inputs[key_variant])
-		if needed <= 0.001:
-			continue
-		var stored: float = _storehouse_value_for(resource_id, "stored")
-		var free: float = _storehouse_value_for(resource_id, "free")
-		var projected: float = stored - needed
-		var line: String = _resource_name(resource_id) + ": needs " + _format_float(needed) + "; stored " + _format_float(stored) + "; free " + _format_float(free)
-		if projected < 0.0:
-			line += " — shortage risk"
-		elif free < needed:
-			line += " — tight after reserves"
-		else:
-			line += " — covered"
-		lines.append(line)
-	return lines
-
-func _storehouse_value_for(resource_id: String, field_name: String) -> float:
-	for good: Dictionary in _storehouse_goods():
-		if String(good.get("id", "")) == resource_id:
-			return float(good.get(field_name, 0.0))
-	return 0.0
-
-func _production_labour_summary_lines() -> Array[String]:
-	var output: Array[String] = []
-	var state: Node = _state()
-	if state == null or not state.has_method("get_productive_labour_rows"):
-		return output
-	var rows: Array = state.call("get_productive_labour_rows") as Array
-	for row_variant: Variant in rows:
-		var row: Dictionary = row_variant as Dictionary
-		var name: String = String(row.get("name", "Labour"))
-		var status: String = String(row.get("status_text", ""))
-		output.append(name + " — " + status)
-	return output
-
-func _production_labour_dashboard_lines(max_items: int = 5) -> Array[String]:
-	var output: Array[String] = []
-	var state: Node = _state()
-	if state == null or not state.has_method("get_productive_labour_rows"):
-		return output
-	var rows: Array = state.call("get_productive_labour_rows") as Array
-	for row_variant: Variant in rows:
-		if output.size() >= max_items:
-			break
-		var row: Dictionary = row_variant as Dictionary
-		var name: String = String(row.get("name", "Labour"))
-		var staff: Dictionary = row.get("staff", {}) as Dictionary
-		var total: int = int(staff.get("total_population", row.get("count", 0)))
-		var required: int = int(staff.get("required_by_built_production", row.get("operating", 0)))
-		var free: int = int(staff.get("free_or_background_labour", max(0, total - required)))
-		var status: String = String(row.get("status_text", ""))
-		var short_status: String = "available"
-		if status.find("Overstretched") >= 0:
-			short_status = "overstretched"
-		elif status.find("Fully") >= 0:
-			short_status = "fully assigned"
-		elif status.find("Tight") >= 0:
-			short_status = "tight"
-		elif status.find("Absent") >= 0:
-			short_status = "absent"
-		output.append(name + ": " + str(required) + " required / " + str(total) + " available; " + str(free) + " free — " + short_status + ".")
-	return output
-
-func _production_build_time_lines(max_items: int = 7) -> Array[String]:
-	var output: Array[String] = []
-	var buildings_for_view: Array[Dictionary] = _production_building_rows()
-	var buildable: Array[String] = []
-	var blocked: Array[String] = []
-	var operating_notes: Array[String] = []
-
-	for building: Dictionary in buildings_for_view:
-		var name: String = String(building.get("name", "Building"))
-		var count: int = int(building.get("count", 0))
-		var operating: int = int(building.get("operating", 0))
-		var blocked_instances: int = int(building.get("blocked", 0))
-		var can_build: bool = bool(building.get("can_build", false))
-		var build_status: String = String(building.get("build_status", ""))
-		if count > 0:
-			var status_line: String = name + ": built " + str(count) + ", operating " + str(operating) + " / " + str(count)
-			if blocked_instances > 0:
-				status_line += "; " + str(blocked_instances) + " blocked"
-			operating_notes.append(status_line)
-		if can_build:
-			buildable.append(name + " — buildable now; completes immediately in this prototype.")
-		elif build_status != "":
-			blocked.append(name + " — " + build_status)
-
-	output.append("Current prototype timing: new buildings complete immediately when built. This section is ready for multi-Veintena build timers later.")
-	if not operating_notes.is_empty():
-		output.append("Operating now: " + _join_string_items(operating_notes, "; ", 2) + ".")
-	if not buildable.is_empty():
-		output.append("Buildable now: " + _join_string_items(buildable, "; ", 2) + ".")
-	if not blocked.is_empty():
-		output.append("Blocked next builds: " + _join_string_items(blocked, "; ", 3) + ".")
-
-	while output.size() > max_items:
-		output.pop_back()
-	return output
-
-func _production_building_rows() -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	var state: Node = _state()
-	if state == null or not state.has_method("get_buildings_for_screen"):
-		return output
-	var chinampas: Array = state.call("get_buildings_for_screen", "chinampas", "overview") as Array
-	for item_variant: Variant in chinampas:
-		output.append(item_variant as Dictionary)
-	var workshops: Array = state.call("get_buildings_for_screen", "workshops", "overview") as Array
-	for item_variant: Variant in workshops:
-		output.append(item_variant as Dictionary)
-	return output
-
-func _production_buildable_count() -> int:
-	var total: int = 0
-	for building: Dictionary in _production_building_rows():
-		if bool(building.get("can_build", false)):
-			total += 1
-	return total
-
-func _resource_dictionary_lines(values: Dictionary, empty_text: String, max_items: int = 8) -> String:
-	var keys: Array = values.keys()
-	if keys.is_empty():
-		return "• " + empty_text + "\n"
-	var lines: String = ""
-	var count: int = 0
-	for key_variant: Variant in keys:
-		if count >= max_items:
-			var remaining: int = keys.size() - count
-			lines += "• +" + str(remaining) + " more goods\n"
-			break
-		var resource_id: String = String(key_variant)
-		var amount: float = float(values[key_variant])
-		if absf(amount) <= 0.001:
-			continue
-		lines += "• " + _resource_name(resource_id) + ": " + _format_float(amount) + "\n"
-		count += 1
-	if lines == "":
-		return "• " + empty_text + "\n"
-	return lines
-
-func _resource_dictionary_inline(values: Dictionary, max_items: int = 4) -> String:
+func _upgrade_effect_text(upgrade: Dictionary) -> String:
 	var parts: Array[String] = []
-	for key_variant: Variant in values.keys():
-		if parts.size() >= max_items:
-			break
-		var resource_id: String = String(key_variant)
-		var amount: float = float(values[key_variant])
-		if absf(amount) <= 0.001:
-			continue
-		parts.append(_resource_name(resource_id) + " " + _format_float(amount))
+	var favour_bonus: int = int(upgrade.get("favour_bonus", 0))
+	var decay_reduction: float = float(upgrade.get("decay_reduction", 0.0))
+	if favour_bonus > 0:
+		parts.append("+" + str(favour_bonus) + " ritual favour roll")
+	if decay_reduction > 0.001:
+		parts.append("-" + _format_religion_amount(decay_reduction) + " favour decay")
+	if parts.is_empty():
+		return "future system hook"
 	return ", ".join(parts)
 
-func _resource_name(resource_id: String) -> String:
+func _can_build_shrine_upgrade(god_id: String, upgrade: Dictionary) -> Dictionary:
+	if _has_shrine_upgrade(god_id, String(upgrade.get("id", ""))):
+		return {"ok": false, "reason": "Already built."}
+	var req_level: int = int(upgrade.get("level", 1))
+	if _shrine_level(god_id) < req_level:
+		return {"ok": false, "reason": "Requires Shrine Level " + str(req_level) + "."}
+	var req_priests: int = int(upgrade.get("priests", 0))
+	if _religion_active_priest_count() < req_priests:
+		return {"ok": false, "reason": "Requires " + str(req_priests) + " active priests."}
+	return _can_pay_religion_cost(upgrade.get("cost", {}) as Dictionary)
+
+func _build_shrine_upgrade(god_id: String, upgrade_id: String) -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("purchase_shrine_upgrade"):
+		state.call("purchase_shrine_upgrade", god_id, upgrade_id)
+		_religion_initialized = false
+		_ensure_religion_state()
+		_refresh_all()
+		return
+	var upgrade: Dictionary = _upgrade_by_id(god_id, upgrade_id)
+	if upgrade.is_empty():
+		return
+	var status: Dictionary = _can_build_shrine_upgrade(god_id, upgrade)
+	if not bool(status.get("ok", false)):
+		_last_offering_report.clear()
+		_last_offering_report.append("Shrine upgrade failed: " + String(status.get("reason", "")))
+		_refresh_all()
+		return
+	_pay_religion_cost(upgrade.get("cost", {}) as Dictionary)
+	var upgrades: Array[String] = _purchased_upgrade_ids(god_id)
+	upgrades.append(upgrade_id)
+	_shrine_upgrades[god_id] = upgrades
+	_last_offering_report.clear()
+	_last_offering_report.append("Built " + String(upgrade.get("title", "upgrade")) + " for " + _god_name(god_id) + ". " + _upgrade_effect_text(upgrade) + ".")
+	_emit_religion_state_changed()
+	_refresh_all()
+
+func _ritual_data(god_id: String, tier_id: String) -> Dictionary:
+	var title_prefix: String = "Ritual"
+	match tier_id:
+		"minor":
+			title_prefix = "Minor Rite"
+		"medium":
+			title_prefix = "Medium Ceremony"
+		"large":
+			title_prefix = "Large Festival"
+	var data: Dictionary = {"tier": tier_id, "title": title_prefix, "level": 1, "capacity": 4.0, "min": 3, "max": 7, "cost": {}, "description": ""}
+	match tier_id:
+		"minor":
+			data["level"] = 1
+			data["capacity"] = 4.0
+			data["min"] = 3
+			data["max"] = 7
+		"medium":
+			data["level"] = 2
+			data["capacity"] = 10.0
+			data["min"] = 8
+			data["max"] = 16
+		"large":
+			data["level"] = 3
+			data["capacity"] = 18.0
+			data["min"] = 18
+			data["max"] = 32
+	match god_id:
+		"tlaloc":
+			if tier_id == "minor":
+				data["cost"] = {"maize": 10.0}
+				data["description"] = "A small food and water rite to maintain rain favour."
+			elif tier_id == "medium":
+				data["cost"] = {"maize": 25.0, "cacao": 1.0, "ritual_goods": 1.0}
+				data["description"] = "A serious agricultural ceremony for rain, canals and fertility."
+			else:
+				data["cost"] = {"maize": 60.0, "cacao": 2.0, "ritual_goods": 3.0, "fine_textiles": 1.0}
+				data["description"] = "A public harvest and rain festival with major future drought-protection hooks."
+		"huitzilopochtli":
+			if tier_id == "minor":
+				data["cost"] = {"maize": 8.0, "ritual_goods": 1.0}
+				data["description"] = "A small martial rite for warrior courage and public discipline."
+			elif tier_id == "medium":
+				data["cost"] = {"maize": 15.0, "cacao": 1.0, "ritual_goods": 2.0}
+				data["description"] = "A warrior ceremony preparing the house for Flower Wars and sacrifice."
+			else:
+				data["cost"] = {"cacao": 2.0, "ritual_goods": 4.0, "fine_textiles": 1.0, "captives": 2.0}
+				data["description"] = "A great war festival using captives for major future martial-prestige hooks."
+		"tezcatlipoca":
+			if tier_id == "minor":
+				data["cost"] = {"cacao": 1.0}
+				data["description"] = "A small omen rite using elite goods to read hidden pressure."
+			elif tier_id == "medium":
+				data["cost"] = {"cacao": 2.0, "ritual_goods": 2.0}
+				data["description"] = "A smoke and mirror ceremony for intrigue, ambition and rival danger."
+			else:
+				data["cost"] = {"cacao": 4.0, "ritual_goods": 4.0, "fine_textiles": 1.0, "captives": 1.0}
+				data["description"] = "A dangerous night festival for future sabotage, counter-plot and scandal hooks."
+		"quetzalcoatl":
+			if tier_id == "minor":
+				data["cost"] = {"maize": 5.0, "cacao": 1.0}
+				data["description"] = "A small legitimacy rite for order, wisdom and transition."
+			elif tier_id == "medium":
+				data["cost"] = {"cacao": 2.0, "ritual_goods": 1.0}
+				data["description"] = "A civil ceremony for trade, diplomacy and palace-facing legitimacy."
+			else:
+				data["cost"] = {"cacao": 3.0, "ritual_goods": 3.0, "fine_textiles": 2.0}
+				data["description"] = "A great ceremonial festival for future recognition and ruler-interaction hooks."
+	return data
+
+func _ritual_favour_range(god_id: String, tier_id: String) -> Array:
+	var data: Dictionary = _ritual_data(god_id, tier_id)
+	var min_value: int = int(data.get("min", 0))
+	var max_value: int = int(data.get("max", 0))
+	var bonus: int = _ritual_favour_bonus(god_id, tier_id)
+	return [min_value + bonus, max_value + bonus]
+
+func _ritual_favour_bonus(god_id: String, tier_id: String) -> int:
+	var bonus: int = max(0, _shrine_level(god_id) - 1)
+	if _current_festival_god_id() == god_id:
+		match tier_id:
+			"minor":
+				bonus += 1
+			"medium":
+				bonus += 2
+			"large":
+				bonus += 4
+	for upgrade_id: String in _purchased_upgrade_ids(god_id):
+		var upgrade: Dictionary = _upgrade_by_id(god_id, upgrade_id)
+		if not upgrade.is_empty() and _upgrade_is_active(upgrade):
+			bonus += int(upgrade.get("favour_bonus", 0))
+	return bonus
+
+func _can_perform_ritual(god_id: String, tier_id: String) -> Dictionary:
+	if _calendar_period == "nemontemi":
+		return {"ok": false, "reason": "Rituals are suspended during Nemontemi."}
+	var data: Dictionary = _ritual_data(god_id, tier_id)
+	var req_level: int = int(data.get("level", 1))
+	if _shrine_level(god_id) < req_level:
+		return {"ok": false, "reason": "Requires Shrine Level " + str(req_level) + "."}
+	var capacity_cost: float = float(data.get("capacity", 0.0))
+	if _religion_remaining_ritual_capacity() + 0.001 < capacity_cost:
+		return {"ok": false, "reason": "Not enough remaining priest ritual capacity this Veintena."}
+	return _can_pay_religion_cost(data.get("cost", {}) as Dictionary)
+
+func _perform_ritual(god_id: String, tier_id: String) -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("perform_ritual"):
+		state.call("perform_ritual", god_id, tier_id, _current_festival_god_id())
+		_religion_initialized = false
+		_ensure_religion_state()
+		_refresh_all()
+		return
+	var status: Dictionary = _can_perform_ritual(god_id, tier_id)
+	if not bool(status.get("ok", false)):
+		_last_offering_report.clear()
+		_last_offering_report.append("Ritual failed: " + String(status.get("reason", "")))
+		_refresh_all()
+		return
+	var data: Dictionary = _ritual_data(god_id, tier_id)
+	_pay_religion_cost(data.get("cost", {}) as Dictionary)
+	_ritual_capacity_used_this_veintena += float(data.get("capacity", 0.0))
+	var range: Array = _ritual_favour_range(god_id, tier_id)
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.randomize()
+	var gain: int = rng.randi_range(int(range[0]), int(range[1]))
+	var before: float = float(_divine_favour.get(god_id, RELIGION_STARTING_FAVOUR))
+	var after: float = clampf(before + float(gain), 0.0, 100.0)
+	_divine_favour[god_id] = after
+	var report_line: String = String(data.get("title", "Ritual")) + " performed for " + _god_name(god_id) + ". Favour roll: +" + str(gain) + ". Favour " + _format_religion_amount(before) + " → " + _format_religion_amount(after) + "."
+	_last_offering_report.clear()
+	_last_offering_report.append(report_line)
+	_emit_religion_state_changed()
+	_refresh_all()
+
+func _can_pay_religion_cost(cost: Dictionary) -> Dictionary:
+	for resource_variant: Variant in cost.keys():
+		var resource_id: String = String(resource_variant)
+		var needed: float = float(cost[resource_variant])
+		if _free_stock_for_offering(resource_id) + 0.001 < needed:
+			return {"ok": false, "reason": "Need " + _format_religion_amount(needed) + " free " + _resource_display_name(resource_id) + " after reserves."}
+	return {"ok": true, "reason": "Ready."}
+
+func _pay_religion_cost(cost: Dictionary) -> void:
+	var state: Node = _state()
+	if state == null:
+		return
+	var stock_variant: Variant = state.get("estate_stockpiles")
+	if not (stock_variant is Dictionary):
+		return
+	var stockpiles: Dictionary = stock_variant as Dictionary
+	for resource_variant: Variant in cost.keys():
+		var resource_id: String = String(resource_variant)
+		stockpiles[resource_id] = maxf(0.0, float(stockpiles.get(resource_id, 0.0)) - float(cost[resource_variant]))
+	state.set("estate_stockpiles", stockpiles)
+
+func _format_cost(cost: Dictionary) -> String:
+	if cost.is_empty():
+		return "none"
+	var parts: Array[String] = []
+	for resource_variant: Variant in cost.keys():
+		var resource_id: String = String(resource_variant)
+		parts.append(_resource_display_name(resource_id) + " " + _format_religion_amount(float(cost[resource_variant])))
+	return ", ".join(parts)
+
+func _build_shrine_reports() -> void:
+	_ensure_religion_state()
+	var focus_id: String = _current_focus_id()
+	if focus_id == "offerings":
+		focus_id = "overview"
+
+	if focus_id == "overview":
+		# Global religion information belongs only on the Overview tab.
+		# Individual god tabs should stay focused on that god's shrine level,
+		# upgrades, ritual tiers and future boons.
+		_add_shrine_report_card("overview|favour", "Divine Favour", "All four favour meters, bands, decay and festival focus.", "")
+		_add_shrine_report_card("overview|priests", "Priest Capacity", "Active priests, remaining ritual capacity and capacity spent this Veintena.", "")
+		_add_shrine_report_card("overview|shrines", "Shrine Overview", "Levels, unlocked ritual tiers and upgrade progress for every god.", "")
+		_add_shrine_report_card("overview|upgrades", "Upgrade Overview", "Built, available and locked upgrades across all shrines.", "")
+		_add_shrine_report_card("overview|recent", "Recent Ritual Reports", "Last shrine upgrade, ritual result or religion warning.", "")
+	else:
+		var god_id: String = _god_id_from_focus(focus_id)
+		if god_id == "":
+			god_id = "tlaloc"
+		_add_shrine_report_card("god|" + god_id + "|summary", _god_name(god_id) + " Summary", _god_short_role(god_id), god_id)
+		_add_shrine_report_card("god|" + god_id + "|level", "Shrine Level", "Level " + str(_shrine_level(god_id)) + ". Unlocks: " + _unlocked_ritual_text(god_id) + ".", god_id)
+		_add_shrine_report_card("god|" + god_id + "|upgrades", "Shrine Upgrades", str(_purchased_upgrade_ids(god_id).size()) + "/" + str(_god_upgrade_definitions(god_id).size()) + " built. Upgrade the shrine to strengthen rituals.", god_id)
+		_add_shrine_report_card("god|" + god_id + "|rituals", "Ritual Tiers", "Minor, Medium and Large rites with fixed costs and random favour rolls.", god_id)
+		_add_shrine_report_card("god|" + god_id + "|boons", "Boons", "Future favour-spending powers unlocked by higher shrine development.", god_id)
+
+	if _last_offering_report.is_empty():
+		_add_notification("No ritual or shrine upgrade has been performed this session yet.")
+	else:
+		for line: String in _last_offering_report:
+			_add_notification(line)
+
+func _add_shrine_report_card(panel_id: String, title: String, subtitle: String, god_id: String = "") -> void:
+	var button: Button = Button.new()
+	button.toggle_mode = true
+	button.button_pressed = panel_id == _selected_shrine_panel_id
+	button.custom_minimum_size = Vector2(0, 82)
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.clip_contents = true
+	# Keep the Button itself textless and draw wrapped labels inside it.
+	# Long shrine subtitles were overflowing into the right-hand border when they
+	# were placed directly into Button.text.
+	button.text = ""
+	button.tooltip_text = title + " — " + subtitle
+	var border: Color = COLOR_TEAL
+	if god_id != "":
+		border = _god_colour(god_id)
+	if panel_id == _selected_shrine_panel_id:
+		button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.08, 0.12, 0.11, 0.96), border.lightened(0.18), 10))
+		button.add_theme_stylebox_override("pressed", _make_panel_style(Color(0.08, 0.12, 0.11, 0.96), border.lightened(0.18), 10))
+	else:
+		button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.035, 0.055, 0.052, 0.86), border.darkened(0.12), 10))
+		button.add_theme_stylebox_override("hover", _make_panel_style(Color(0.055, 0.08, 0.075, 0.94), border, 10))
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	margin.set_anchors_preset(Control.PRESET_FULL_RECT)
+	margin.offset_left = 10.0
+	margin.offset_top = 7.0
+	margin.offset_right = -10.0
+	margin.offset_bottom = -7.0
+	button.add_child(margin)
+
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	stack.add_theme_constant_override("separation", 2)
+	margin.add_child(stack)
+
+	var title_label: Label = Label.new()
+	title_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	title_label.text = title
+	title_label.clip_text = true
+	title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	title_label.add_theme_font_size_override("font_size", 17)
+	title_label.add_theme_color_override("font_color", COLOR_TEXT)
+	stack.add_child(title_label)
+
+	var subtitle_label: Label = Label.new()
+	subtitle_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	subtitle_label.text = subtitle
+	subtitle_label.clip_text = true
+	subtitle_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	subtitle_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	subtitle_label.add_theme_font_size_override("font_size", 13)
+	subtitle_label.add_theme_color_override("font_color", COLOR_MUTED)
+	stack.add_child(subtitle_label)
+
+	button.pressed.connect(func() -> void:
+		_on_shrine_panel_pressed(panel_id)
+	)
+	notification_list.add_child(button)
+
+func _on_shrine_panel_pressed(panel_id: String) -> void:
+	_selected_shrine_panel_id = panel_id
+	_refresh_main_content()
+	_refresh_right_panel()
+
+func _on_shrine_panel_closed() -> void:
+	_selected_shrine_panel_id = ""
+	_refresh_main_content()
+	_refresh_right_panel()
+
+func _shrine_panel_title(panel_id: String) -> String:
+	var parts: PackedStringArray = panel_id.split("|")
+	if parts.size() >= 3 and String(parts[0]) == "god":
+		var god_id: String = String(parts[1])
+		var section: String = String(parts[2])
+		match section:
+			"summary":
+				return _god_name(god_id) + " Shrine"
+			"favour":
+				return _god_name(god_id) + " Favour"
+			"level":
+				return _god_name(god_id) + " Shrine Level"
+			"upgrades":
+				return _god_name(god_id) + " Shrine Upgrades"
+			"rituals":
+				return _god_name(god_id) + " Rituals"
+			"boons":
+				return _god_name(god_id) + " Boons"
+	if panel_id == "overview|favour":
+		return "Divine Favour"
+	if panel_id == "overview|priests":
+		return "Priest Capacity"
+	if panel_id == "overview|shrines":
+		return "Shrine Overview"
+	if panel_id == "overview|upgrades":
+		return "Upgrade Overview"
+	if panel_id == "overview|recent":
+		return "Recent Ritual Reports"
+	return "Shrine Report"
+
+func _build_selected_shrine_panel(parent: VBoxContainer, panel_id: String) -> void:
+	var parts: PackedStringArray = panel_id.split("|")
+	if parts.size() >= 3 and String(parts[0]) == "god":
+		var god_id: String = String(parts[1])
+		var section: String = String(parts[2])
+		_build_god_shrine_panel(parent, god_id, section)
+		return
+	match panel_id:
+		"overview|favour":
+			_build_divine_favour_panel(parent)
+		"overview|priests":
+			_build_priest_capacity_panel(parent)
+		"overview|shrines":
+			_build_all_shrines_overview_panel(parent)
+		"overview|upgrades":
+			_build_all_upgrades_overview_panel(parent)
+		"overview|recent":
+			_build_recent_ritual_reports_panel(parent)
+		_:
+			parent.add_child(_religion_wrapped_label("Select a shrine report from the right-hand bar.", 20, COLOR_MUTED))
+
+func _build_god_shrine_panel(parent: VBoxContainer, god_id: String, section: String) -> void:
+	if god_id == "":
+		god_id = "tlaloc"
+	match section:
+		"summary":
+			parent.add_child(_religion_wrapped_label(_god_domain(god_id), 20, _god_colour(god_id)))
+			parent.add_child(_religion_wrapped_label(_god_description(god_id), 18, COLOR_MUTED))
+			_add_favour_bar(parent, god_id)
+			_add_god_summary_panel(parent, god_id)
+		"favour":
+			_build_single_god_favour_panel(parent, god_id)
+		"level":
+			_build_shrine_level_panel(parent, god_id)
+		"upgrades":
+			_build_shrine_upgrade_cards(parent, god_id)
+		"rituals":
+			_build_ritual_tier_cards(parent, god_id)
+		"boons":
+			_build_god_boons_placeholder(parent, god_id)
+		_:
+			parent.add_child(_religion_wrapped_label("Unknown shrine section.", 20, COLOR_MUTED))
+
+func _build_divine_favour_panel(parent: VBoxContainer) -> void:
+	parent.add_child(_religion_wrapped_label("Favour protects the estate from future god-linked dangers and will later power boons. It decays each Veintena, with harsher pressure during Nemontemi.", 19, COLOR_MUTED))
+	parent.add_child(_religion_wrapped_label("Current ritual focus: " + _current_festival_text() + ".", 19, COLOR_TEAL))
+	for god_id: String in GOD_IDS:
+		_add_god_summary_panel(parent, god_id)
+
+func _build_single_god_favour_panel(parent: VBoxContainer, god_id: String) -> void:
+	var favour: float = float(_divine_favour.get(god_id, RELIGION_STARTING_FAVOUR))
+	parent.add_child(_religion_wrapped_label(_god_short_role(god_id), 19, _god_colour(god_id)))
+	_add_favour_bar(parent, god_id)
+	parent.add_child(_religion_wrapped_label("Current favour: " + _format_religion_amount(favour) + "/100 — " + _favour_band(favour) + ".", 20, COLOR_TEXT))
+	parent.add_child(_religion_wrapped_label("Normal decay next Veintena: -" + _format_religion_amount(_religion_decay_for_god(god_id, RELIGION_NORMAL_DECAY)) + ". Nemontemi decay: -" + _format_religion_amount(_religion_decay_for_god(god_id, RELIGION_NEMONTEMI_DECAY)) + ".", 18, COLOR_MUTED))
+	parent.add_child(_religion_wrapped_label("Active upgrades reduce decay and improve ritual rolls while enough priests are supported.", 18, COLOR_MUTED))
+
+func _build_priest_capacity_panel(parent: VBoxContainer) -> void:
+	parent.add_child(_religion_wrapped_label("Priests limit how much ritual work can be performed in a single Veintena. This prevents the player from dumping unlimited goods into favour in one turn.", 19, COLOR_MUTED))
+	parent.add_child(_religion_wrapped_label("Active priests: " + str(_religion_active_priest_count()) + ". Capacity used: " + _format_religion_amount(_ritual_capacity_used_this_veintena) + " / " + _format_religion_amount(_religion_priest_conversion_cap()) + ". Remaining: " + _format_religion_amount(_religion_remaining_ritual_capacity()) + ".", 20, COLOR_TEAL))
+	parent.add_child(_religion_wrapped_label("Capacity resets when the Veintena advances. Later this should depend on functioning priest houses and shrine staffing rather than only population count.", 18, COLOR_MUTED))
+
+func _build_all_shrines_overview_panel(parent: VBoxContainer) -> void:
+	parent.add_child(_religion_wrapped_label("Each god begins with a Level 1 shrine. Higher levels unlock Medium Ceremonies, Large Festivals and future boon-spending powers.", 19, COLOR_MUTED))
+	for god_id: String in GOD_IDS:
+		_add_god_summary_panel(parent, god_id)
+
+func _build_all_upgrades_overview_panel(parent: VBoxContainer) -> void:
+	parent.add_child(_religion_wrapped_label("Shrine upgrades cost real goods, require shrine level, and need enough active priests to function. Built upgrades improve ritual favour rolls and reduce favour decay.", 19, COLOR_MUTED))
+	for god_id: String in GOD_IDS:
+		var built_count: int = _purchased_upgrade_ids(god_id).size()
+		parent.add_child(_religion_label(_god_name(god_id) + " Upgrades — " + str(built_count) + "/" + str(_god_upgrade_definitions(god_id).size()) + " built", 22, _god_colour(god_id)))
+		for upgrade: Dictionary in _god_upgrade_definitions(god_id):
+			var upgrade_id: String = String(upgrade.get("id", ""))
+			var status_text: String = "Locked / available later"
+			if _has_shrine_upgrade(god_id, upgrade_id):
+				if _upgrade_is_active(upgrade):
+					status_text = "Built and active"
+				else:
+					status_text = "Built but inactive"
+			else:
+				var status: Dictionary = _can_build_shrine_upgrade(god_id, upgrade)
+				if bool(status.get("ok", false)):
+					status_text = "Buildable now"
+				else:
+					status_text = String(status.get("reason", "Locked"))
+			parent.add_child(_religion_wrapped_label("• " + String(upgrade.get("title", "Upgrade")) + ": " + status_text + ". " + _upgrade_effect_text(upgrade) + ".", 16, COLOR_MUTED))
+
+func _build_recent_ritual_reports_panel(parent: VBoxContainer) -> void:
+	if _last_offering_report.is_empty():
+		parent.add_child(_religion_wrapped_label("No ritual or shrine upgrade has been performed this session yet.", 20, COLOR_MUTED))
+		return
+	for line: String in _last_offering_report:
+		parent.add_child(_religion_wrapped_label("• " + line, 19, COLOR_TEXT))
+
+func _build_god_boons_placeholder(parent: VBoxContainer, god_id: String) -> void:
+	parent.add_child(_religion_wrapped_label("Boons are the future favour-spending layer. They should consume favour for strong god-specific actions once farming, Flower Wars, rivals and palace systems exist.", 19, COLOR_MUTED))
+	parent.add_child(_religion_wrapped_label(_god_name(god_id) + " boon direction: " + _god_description(god_id), 18, COLOR_MUTED))
+	if _shrine_level(god_id) < 4:
+		parent.add_child(_religion_wrapped_label("Upgrade this shrine to Level 4 before late shrine boons become available.", 18, Color(1.0, 0.74, 0.40, 1.0)))
+	else:
+		parent.add_child(_religion_wrapped_label("Shrine Level 4 reached. This shrine is ready for future boon implementation.", 18, COLOR_TEAL))
+
+func _apply_divine_favour_decay(report: Array, decay_amount: float = RELIGION_NORMAL_DECAY) -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("apply_divine_favour_decay"):
+		var parts: Array = state.call("apply_divine_favour_decay", decay_amount) as Array
+		report.append("Divine favour decays: " + "; ".join(parts) + ".")
+		_religion_initialized = false
+		_ensure_religion_state()
+		return
+	_ensure_religion_state()
+	var parts: Array[String] = []
+	for god_id: String in GOD_IDS:
+		var before: float = float(_divine_favour.get(god_id, RELIGION_STARTING_FAVOUR))
+		var actual_decay: float = _religion_decay_for_god(god_id, decay_amount)
+		var after: float = clampf(before - actual_decay, 0.0, 100.0)
+		_divine_favour[god_id] = after
+		parts.append(_god_name(god_id) + " " + _format_religion_amount(before) + "→" + _format_religion_amount(after))
+	report.append("Divine favour decays: " + "; ".join(parts) + ".")
+
+func _religion_decay_for_god(god_id: String, base_decay: float) -> float:
+	var reduction: float = 0.0
+	for upgrade_id: String in _purchased_upgrade_ids(god_id):
+		var upgrade: Dictionary = _upgrade_by_id(god_id, upgrade_id)
+		if not upgrade.is_empty() and _upgrade_is_active(upgrade):
+			reduction += float(upgrade.get("decay_reduction", 0.0))
+	return maxf(0.0, base_decay - reduction)
+
+func _reset_religion_veintena_capacity() -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("reset_religion_veintena_capacity"):
+		state.call("reset_religion_veintena_capacity")
+	_ritual_capacity_used_this_veintena = 0.0
+
+func _free_stock_for_offering(resource_id: String) -> float:
+	var state: Node = _state()
+	if state == null:
+		return 0.0
+	if state.has_method("free_stock_after_reserves"):
+		return maxf(0.0, float(state.call("free_stock_after_reserves", resource_id)))
+	var stock_variant: Variant = state.get("estate_stockpiles")
+	if stock_variant is Dictionary:
+		var stockpiles: Dictionary = stock_variant as Dictionary
+		return maxf(0.0, float(stockpiles.get(resource_id, 0.0)))
+	return 0.0
+
+func _religion_priest_conversion_cap() -> float:
+	var state: Node = _state()
+	if state != null and state.has_method("religion_priest_conversion_cap"):
+		return float(state.call("religion_priest_conversion_cap"))
+	var priests: int = _religion_active_priest_count()
+	return 8.0 + float(priests) * 2.0
+
+func _religion_remaining_ritual_capacity() -> float:
+	var state: Node = _state()
+	if state != null and state.has_method("religion_remaining_ritual_capacity"):
+		return float(state.call("religion_remaining_ritual_capacity"))
+	return maxf(0.0, _religion_priest_conversion_cap() - _ritual_capacity_used_this_veintena)
+
+func _religion_active_priest_count() -> int:
+	var state: Node = _state()
+	if state == null:
+		return 0
+	var population_variant: Variant = state.get("population")
+	if population_variant is Dictionary:
+		var population_data: Dictionary = population_variant as Dictionary
+		return int(population_data.get("tlamacazqueh", 0))
+	return 0
+
+func _favour_band(value: float) -> String:
+	if value < 20.0:
+		return "Neglected"
+	if value < 40.0:
+		return "Weak"
+	if value < 60.0:
+		return "Honoured"
+	if value < 80.0:
+		return "Favoured"
+	return "Greatly favoured"
+
+func _current_festival_god_id() -> String:
+	if _calendar_period == "nemontemi":
+		return ""
+	var god_name: String = _calendar_god_for_veintena(_calendar_current_veintena())
+	match god_name:
+		"Tlaloc":
+			return "tlaloc"
+		"Huitzilopochtli":
+			return "huitzilopochtli"
+		"Tezcatlipoca":
+			return "tezcatlipoca"
+		"Quetzalcoatl":
+			return "quetzalcoatl"
+	return ""
+
+func _current_festival_text() -> String:
+	if _calendar_period == "nemontemi":
+		return "Nemontemi — Unlucky Days"
+	var god_id: String = _current_festival_god_id()
+	if god_id == "":
+		return "Minor / No major festival"
+	return _god_name(god_id) + " festival"
+
+func _god_id_from_focus(focus_id: String) -> String:
+	match focus_id:
+		"tlaloc":
+			return "tlaloc"
+		"huitzilopochtli":
+			return "huitzilopochtli"
+		"tezcatlipoca":
+			return "tezcatlipoca"
+		"quetzalcoatl":
+			return "quetzalcoatl"
+	return ""
+
+func _god_name(god_id: String) -> String:
+	match god_id:
+		"tlaloc":
+			return "Tlaloc"
+		"huitzilopochtli":
+			return "Huitzilopochtli"
+		"tezcatlipoca":
+			return "Tezcatlipoca"
+		"quetzalcoatl":
+			return "Quetzalcoatl"
+	return "Unknown God"
+
+func _god_short_role(god_id: String) -> String:
+	match god_id:
+		"tlaloc":
+			return "Rain, lakes, agriculture, fertility, harvest and drought protection."
+		"huitzilopochtli":
+			return "War, sacrifice, Flower Wars, warriors, captives and martial prestige."
+		"tezcatlipoca":
+			return "Intrigue, fate, omens, ambition, manipulation and rival-house danger."
+		"quetzalcoatl":
+			return "Wisdom, legitimacy, trade, diplomacy, civilisation and transitions."
+	return ""
+
+func _god_domain(god_id: String) -> String:
+	return _god_short_role(god_id)
+
+func _god_description(god_id: String) -> String:
+	match god_id:
+		"tlaloc":
+			return "Build the Tlaloc shrine to strengthen rain, agriculture and harvest religion. Upgrades prepare future drought protection, maize output and water-omen systems."
+		"huitzilopochtli":
+			return "Build the Huitzilopochtli shrine to strengthen war religion. Upgrades prepare future Flower War, captive, warrior and martial-prestige systems."
+		"tezcatlipoca":
+			return "Build the Tezcatlipoca shrine to strengthen omen and intrigue religion. Upgrades prepare future sabotage warnings, rival disruption and scandal resistance."
+		"quetzalcoatl":
+			return "Build the Quetzalcoatl shrine to strengthen legitimacy, order and diplomacy. Upgrades prepare future palace interpretation, trade and recognition systems."
+	return ""
+
+func _god_colour(god_id: String) -> Color:
+	match god_id:
+		"tlaloc":
+			return Color(0.22, 0.68, 0.86, 0.95)
+		"huitzilopochtli":
+			return Color(0.84, 0.35, 0.24, 0.95)
+		"tezcatlipoca":
+			return Color(0.62, 0.45, 0.84, 0.95)
+		"quetzalcoatl":
+			return Color(0.37, 0.82, 0.57, 0.95)
+	return COLOR_MUTED
+
+func _resource_display_name(resource_id: String) -> String:
 	var state: Node = _state()
 	if state != null and state.has_method("get_resource_name"):
 		return String(state.call("get_resource_name", resource_id))
 	return resource_id.replace("_", " ").capitalize()
 
-func _build_storehouse_ledger() -> void:
-	var focus_id: String = _current_focus_id()
-	var goods: Array[Dictionary] = _filtered_storehouse_goods(focus_id)
-	if goods.is_empty():
-		_add_notification("No goods match this Storehouse focus.")
-		return
-	for good_variant: Variant in goods:
-		var good: Dictionary = good_variant as Dictionary
-		var row: Control = STOCKPILE_LEDGER_ROW_SCENE.instantiate() as Control
-		if row == null:
-			continue
-		if row.has_method("set_good_data"):
-			row.call("set_good_data", good, String(good.get("id", "")) == selected_storehouse_good_id)
-		if row.has_signal("good_selected"):
-			row.connect("good_selected", Callable(self, "_on_storehouse_good_selected"))
-		notification_list.add_child(row)
-
-func _build_market_ledger() -> void:
-	var goods: Array[Dictionary] = _filtered_market_goods(_current_focus_id())
-	if goods.is_empty():
-		_add_notification("No market goods match this focus.")
-		return
-	for good_variant: Variant in goods:
-		var good: Dictionary = good_variant as Dictionary
-		var row: Control = MARKET_LEDGER_ROW_SCENE.instantiate() as Control
-		if row == null:
-			continue
-		if row.has_method("set_good_data"):
-			row.call("set_good_data", good, String(good.get("id", "")) == selected_market_good_id)
-		if row.has_signal("good_selected"):
-			row.connect("good_selected", Callable(self, "_on_market_good_selected"))
-		notification_list.add_child(row)
-
-
-func _build_market_reports() -> void:
-	var messages: Array[String] = _market_report_messages()
-	for message: String in messages:
-		_add_notification(message)
-
-func _market_report_messages() -> Array[String]:
-	var goods: Array[Dictionary] = _market_goods()
-	var output: Array[String] = []
-	output.append("Market reports show stock, demand, coverage, value, trend and rival buying pressure.")
-	var crisis_goods: Array[String] = []
-	var shortage_goods: Array[String] = []
-	var high_value_goods: Array[String] = []
-	for good_variant: Variant in goods:
-		var good: Dictionary = good_variant as Dictionary
-		var name: String = String(good.get("name", "Good"))
-		var label: String = String(good.get("label", "Unknown"))
-		var current_value: float = float(good.get("current_value", 0.0))
-		var base_value: float = float(good.get("base_value", 1.0))
-		if label == "Crisis":
-			crisis_goods.append(name)
-		elif label == "Shortage":
-			shortage_goods.append(name)
-		if base_value > 0.0 and current_value >= base_value * 1.5:
-			high_value_goods.append(name + " (" + _format_float(current_value) + ")")
-	if not crisis_goods.is_empty():
-		output.append("Crisis goods: " + ", ".join(crisis_goods) + ".")
-	if not shortage_goods.is_empty():
-		output.append("Shortage goods: " + ", ".join(shortage_goods) + ".")
-	if not high_value_goods.is_empty():
-		output.append("High-value sale opportunities: " + ", ".join(high_value_goods) + ".")
-	output.append("Rival procurement reports will become more specific once rival market buying is connected.")
-	return output
-
-
-func _build_labour_assignment_summary() -> void:
-	var state: Node = _state()
-	if state == null or not state.has_method("get_labour_assignment_data"):
-		_add_notification("Labour assignment data is not connected yet.")
-		return
-	var labour_data: Dictionary = state.call("get_labour_assignment_data") as Dictionary
-	_add_notification("Use the assignment bars on the left to choose how many built chinampas and workshops are staffed.")
-	var groups: Array = labour_data.get("groups", []) as Array
-	for group_variant: Variant in groups:
-		var group: Dictionary = group_variant as Dictionary
-		var line: String = String(group.get("name", "Labour")) + ": "
-		line += str(int(group.get("assigned", 0))) + " assigned / " + str(int(group.get("total", 0))) + " total; "
-		line += str(int(group.get("unassigned", 0))) + " unassigned"
-		var shortfall: int = int(group.get("shortfall", 0))
-		if shortfall > 0:
-			line += "; short " + str(shortfall)
-		_add_notification(line)
-	var buildings: Array = labour_data.get("buildings", []) as Array
-	if buildings.is_empty():
-		_add_notification("No built productive buildings currently need assigned labour.")
-	else:
-		_add_notification(str(buildings.size()) + " built productive building type(s) can be staffed.")
-
-func _build_housing_overview_reports() -> void:
-	for report: Dictionary in _housing_report_definitions():
-		_add_housing_report_button(report)
-	if selected_housing_report_id != "":
-		var close_button: Button = Button.new()
-		close_button.text = "Close Report"
-		close_button.custom_minimum_size = Vector2(0, 54)
-		close_button.add_theme_font_size_override("font_size", 19)
-		close_button.pressed.connect(_on_housing_report_closed)
-		notification_list.add_child(close_button)
-
-func _housing_report_definitions() -> Array[Dictionary]:
-	return [
-		{"id": "population_capacity", "title": "Population & Capacity", "subtitle": _housing_report_subtitle("population_capacity")},
-		{"id": "consumption", "title": "Consumption", "subtitle": _housing_report_subtitle("consumption")},
-		{"id": "building_maintenance", "title": "Building Maintenance", "subtitle": _housing_report_subtitle("building_maintenance")},
-		{"id": "spare_capacity", "title": "Spare Capacity", "subtitle": _housing_report_subtitle("spare_capacity")},
-		{"id": "inactive", "title": "Inactive / Mothballed", "subtitle": _housing_report_subtitle("inactive")}
-	]
-
-func _housing_report_title(report_id: String) -> String:
-	match report_id:
-		"population_capacity":
-			return "Population & Capacity"
-		"consumption":
-			return "Population Consumption"
-		"building_maintenance":
-			return "Building Maintenance"
-		"spare_capacity":
-			return "Overcrowding / Spare Capacity"
-		"inactive":
-			return "Inactive / Mothballed Housing"
-	return "Housing Report"
-
-func _housing_report_subtitle(report_id: String) -> String:
-	var summary: Dictionary = _housing_summary()
-	match report_id:
-		"population_capacity":
-			return "Active " + str(int(summary.get("total_active_population", 0))) + " / total " + str(int(summary.get("total_population", 0)))
-		"consumption":
-			return _resource_dictionary_inline(_population_upkeep_totals(), 3)
-		"building_maintenance":
-			return _resource_dictionary_inline(summary.get("maintenance", {}) as Dictionary, 3)
-		"spare_capacity":
-			return "Free active space " + str(int(summary.get("total_free_capacity", 0)))
-		"inactive":
-			return str(int(summary.get("total_inactive_population", 0))) + " inactive people"
-	return "Open report"
-
-func _add_housing_report_button(report: Dictionary) -> void:
-	if notification_list == null:
-		return
-	var report_id: String = String(report.get("id", ""))
-	var selected: bool = report_id == selected_housing_report_id
-	var button: Button = Button.new()
-	button.text = String(report.get("title", "Report")) + "\n" + String(report.get("subtitle", "Open report"))
-	button.custom_minimum_size = Vector2(0, 94)
-	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	button.toggle_mode = true
-	button.button_pressed = selected
-	button.clip_text = true
-	button.add_theme_font_size_override("font_size", 19)
-	var border: Color = Color(0.34, 0.71, 0.63, 0.45)
-	if selected:
-		border = Color(0.76, 0.63, 0.32, 0.86)
-	button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.04, 0.07, 0.065, 0.93), border, 10))
-	button.add_theme_stylebox_override("hover", _make_panel_style(Color(0.06, 0.095, 0.085, 0.96), Color(0.50, 0.82, 0.74, 0.75), 10))
-	button.add_theme_stylebox_override("pressed", _make_panel_style(Color(0.10, 0.12, 0.095, 0.98), Color(0.76, 0.63, 0.32, 0.86), 10))
-	button.pressed.connect(func() -> void:
-		_on_housing_report_selected(report_id)
-	)
-	notification_list.add_child(button)
-
-func _build_housing_report_detail_text(report_id: String) -> String:
-	match report_id:
-		"population_capacity":
-			return _build_housing_population_report_text()
-		"consumption":
-			return _build_housing_consumption_report_text()
-		"building_maintenance":
-			return _build_housing_maintenance_report_text()
-		"spare_capacity":
-			return _build_housing_spare_capacity_report_text()
-		"inactive":
-			return _build_housing_inactive_report_text()
-	return "Select a Housing report from the right-hand panel."
-
-func _build_housing_population_report_text() -> String:
-	var summary: Dictionary = _housing_summary()
-	var text: String = "[b]Population & Capacity[/b]\n"
-	text += "Housing controls how many people are active on the estate. Active population consumes upkeep and can work. Inactive population is not currently supported.\n\n"
-	text += "• Total population: " + str(int(summary.get("total_population", 0))) + "\n"
-	text += "• Active population: " + str(int(summary.get("total_active_population", 0))) + "\n"
-	text += "• Inactive population: " + str(int(summary.get("total_inactive_population", 0))) + "\n"
-	text += "• Active capacity: " + str(int(summary.get("total_active_capacity", 0))) + "\n"
-	text += "• Built capacity: " + str(int(summary.get("total_capacity", 0))) + "\n\n"
-	for tier: Dictionary in summary.get("tiers", []) as Array:
-		text += "• " + String(tier.get("name", "Housing")) + ": active " + str(int(tier.get("active_population", 0))) + " / total " + str(int(tier.get("population", 0))) + "; active capacity " + str(int(tier.get("active_capacity", 0))) + "; " + String(tier.get("status", "Unknown")) + "\n"
-	return text.strip_edges()
-
-func _build_housing_consumption_report_text() -> String:
-	var text: String = "[b]Consumption[/b]\n"
-	text += "Population upkeep is now based on active population, not total population. Mothballed housing can make excess people inactive so they do not consume normal population upkeep.\n\n"
-	text += _resource_dictionary_lines(_population_upkeep_totals(), "No active population upkeep currently required.", 12)
-	return text.strip_edges()
-
-func _build_housing_maintenance_report_text() -> String:
-	var summary: Dictionary = _housing_summary()
-	var text: String = "[b]Building Maintenance[/b]\n"
-	text += "Housing maintenance is paid for all built housing, even when that housing is mothballed. It uses construction/support materials only.\n\n"
-	text += _resource_dictionary_lines(summary.get("maintenance", {}) as Dictionary, "No housing building maintenance currently required.", 12)
-	text += "\n[b]By population tier[/b]\n"
-	for tier: Dictionary in summary.get("tiers", []) as Array:
-		text += "• " + String(tier.get("name", "Housing")) + ": " + _resource_dictionary_inline(tier.get("maintenance", {}) as Dictionary, 4) + "\n"
-	return text.strip_edges()
-
-func _build_housing_spare_capacity_report_text() -> String:
-	var summary: Dictionary = _housing_summary()
-	var text: String = "[b]Overcrowding / Spare Capacity[/b]\n"
-	text += "This reads active housing capacity. Mothballed housing does not provide active space until reactivated.\n\n"
-	for tier: Dictionary in summary.get("tiers", []) as Array:
-		var line: String = "• " + String(tier.get("name", "Housing")) + ": free " + str(int(tier.get("free_capacity", 0)))
-		var over: int = int(tier.get("over_capacity", 0))
-		if over > 0:
-			line += "; over by " + str(over)
-		line += "; " + String(tier.get("status", "Unknown"))
-		text += line + "\n"
-	return text.strip_edges()
-
-func _build_housing_inactive_report_text() -> String:
-	var summary: Dictionary = _housing_summary()
-	var text: String = "[b]Inactive / Mothballed Housing[/b]\n"
-	text += "Use the Mothball tab to choose how many built houses are active. Inactive population cannot work, fight, produce or consume normal population upkeep. Buildings still pay maintenance.\n\n"
-	for tier: Dictionary in summary.get("tiers", []) as Array:
-		text += "• " + String(tier.get("name", "Housing")) + ": inactive people " + str(int(tier.get("inactive_population", 0))) + "; built capacity " + str(int(tier.get("capacity", 0))) + "; active capacity " + str(int(tier.get("active_capacity", 0))) + "\n"
-	return text.strip_edges()
-
-func _housing_summary() -> Dictionary:
-	var state: Node = _state()
-	if state != null and state.has_method("get_housing_summary"):
-		return state.call("get_housing_summary") as Dictionary
-	return {}
-
-func _population_upkeep_totals() -> Dictionary:
-	var state: Node = _state()
-	if state != null and state.has_method("estimate_population_upkeep"):
-		return state.call("estimate_population_upkeep") as Dictionary
-	return {}
-
-func _build_housing_mothball_summary() -> void:
-	var state: Node = _state()
-	if state == null or not state.has_method("get_housing_summary"):
-		_add_notification("Housing mothball data is not connected yet.")
-		return
-	var summary: Dictionary = state.call("get_housing_summary") as Dictionary
-	_add_notification("Use the bars on the left to activate or mothball built housing.")
-	_add_notification("Active population: " + str(int(summary.get("total_active_population", 0))) + " / total " + str(int(summary.get("total_population", 0))) + "; inactive " + str(int(summary.get("total_inactive_population", 0))) + ".")
-	_add_notification("Mothballed housing still pays building maintenance, but inactive people do not pay population upkeep or work.")
-
-func _build_housing_ledger() -> void:
-	var state: Node = _state()
-	if state == null or not state.has_method("get_housing_rows"):
-		_add_notification("Housing data is not connected yet.")
-		return
-	var rows: Array = state.call("get_housing_rows", _current_focus_id()) as Array
-	if rows.is_empty():
-		_add_notification("No housing entries match this focus.")
-		return
-	for row_variant: Variant in rows:
-		var row_data: Dictionary = row_variant as Dictionary
-		var row: Control = HOUSING_LEDGER_ROW_SCENE.instantiate() as Control
-		if row == null:
-			continue
-		if row.has_method("set_housing_data"):
-			row.call("set_housing_data", row_data, String(row_data.get("id", "")) == selected_housing_building_id)
-		if row.has_signal("housing_selected"):
-			row.connect("housing_selected", Callable(self, "_on_housing_selected"))
-		if row.has_signal("build_requested"):
-			row.connect("build_requested", Callable(self, "_on_housing_build_requested"))
-		if row.has_signal("destroy_requested"):
-			row.connect("destroy_requested", Callable(self, "_on_housing_destroy_requested"))
-		notification_list.add_child(row)
-
-func _build_building_ledger(profile: Dictionary) -> void:
-	var buildings_for_view: Array[Dictionary] = _buildings_for_current_screen(profile)
-	if buildings_for_view.is_empty():
-		_add_notification("No buildings match this focus.")
-		return
-	var selected_id: String = String(selected_building_id_by_location.get(current_location_id, ""))
-	for building_variant: Variant in buildings_for_view:
-		var building: Dictionary = building_variant as Dictionary
-		var row: Control = BUILDING_LEDGER_ROW_SCENE.instantiate() as Control
-		if row == null:
-			continue
-		if row.has_method("set_building_data"):
-			row.call("set_building_data", building, String(building.get("id", "")) == selected_id)
-		if row.has_signal("building_selected"):
-			row.connect("building_selected", Callable(self, "_on_building_selected"))
-		if row.has_signal("build_requested"):
-			row.connect("build_requested", Callable(self, "_on_build_requested"))
-		if row.has_signal("destroy_requested"):
-			row.connect("destroy_requested", Callable(self, "_on_destroy_requested"))
-		notification_list.add_child(row)
-
-func _build_report_list(profile: Dictionary) -> void:
-	var reports: Array = profile.get("reports", []) as Array
-	if current_location_id == "estate":
-		var state: Node = _state()
-		if state != null and state.has_method("get_last_report"):
-			reports = state.call("get_last_report") as Array
-	if reports.is_empty():
-		_add_notification("No reports yet.")
-		return
-	for report_variant: Variant in reports:
-		_add_notification(String(report_variant))
-
-func _storehouse_goods() -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	var state: Node = _state()
-	if state != null and state.has_method("get_storehouse_goods"):
-		var raw: Array = state.call("get_storehouse_goods") as Array
-		for item_variant: Variant in raw:
-			output.append(item_variant as Dictionary)
-	return output
-
-func _market_goods() -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	var state: Node = _state()
-	if state != null and state.has_method("get_market_goods"):
-		var raw: Array = state.call("get_market_goods") as Array
-		for item_variant: Variant in raw:
-			var item: Dictionary = item_variant as Dictionary
-			output.append(item.duplicate(true))
-	return output
-
-func _buildings_for_current_screen(profile: Dictionary) -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	var state: Node = _state()
-	if state == null:
-		return output
-
-	if current_location_id == "production":
-		var focus_id: String = _current_focus_id()
-		if focus_id == "labour":
-			if state.has_method("get_productive_labour_rows"):
-				var labour_rows: Array = state.call("get_productive_labour_rows") as Array
-				for item_variant: Variant in labour_rows:
-					output.append(item_variant as Dictionary)
-			return output
-		if state.has_method("get_buildings_for_screen"):
-			if focus_id == "chinampas":
-				var raw_chinampas: Array = state.call("get_buildings_for_screen", "chinampas", "overview") as Array
-				for item_variant: Variant in raw_chinampas:
-					output.append(item_variant as Dictionary)
-				return output
-			if focus_id == "workshops":
-				var raw_workshops: Array = state.call("get_buildings_for_screen", "workshops", "overview") as Array
-				for item_variant: Variant in raw_workshops:
-					output.append(item_variant as Dictionary)
-				return output
-			var raw_all_chinampas: Array = state.call("get_buildings_for_screen", "chinampas", "overview") as Array
-			for item_variant: Variant in raw_all_chinampas:
-				output.append(item_variant as Dictionary)
-			var raw_all_workshops: Array = state.call("get_buildings_for_screen", "workshops", "overview") as Array
-			for item_variant: Variant in raw_all_workshops:
-				output.append(item_variant as Dictionary)
-			if state.has_method("get_productive_labour_rows"):
-				var labour_overview: Array = state.call("get_productive_labour_rows") as Array
-				for item_variant: Variant in labour_overview:
-					output.append(item_variant as Dictionary)
-		return output
-
-	if state.has_method("get_buildings_for_screen"):
-		var screen_id: String = String(profile.get("building_screen", ""))
-		var raw: Array = state.call("get_buildings_for_screen", screen_id, _current_focus_id()) as Array
-		for item_variant: Variant in raw:
-			output.append(item_variant as Dictionary)
-	return output
-
-func _filtered_storehouse_goods(focus_id: String) -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	for good_variant: Variant in _storehouse_goods():
-		var good: Dictionary = good_variant as Dictionary
-		var category: String = String(good.get("category", ""))
-		var include_good: bool = focus_id == "overview" or category == focus_id
-		if include_good:
-			output.append(good)
-	return output
-
-func _filtered_market_goods(focus_id: String) -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	for good_variant: Variant in _market_goods():
-		var good: Dictionary = good_variant as Dictionary
-		var category: String = String(good.get("category", ""))
-		var include_good: bool = false
-		match focus_id:
-			"overview", "goods", "village", "trade", "rivals":
-				include_good = true
-			_:
-				include_good = category == focus_id
-		if include_good:
-			output.append(good)
-	return output
-
-func _on_estate_report_selected(report_id: String) -> void:
-	selected_estate_report_id = report_id
-	_refresh_all()
-
-func _on_estate_report_closed() -> void:
-	selected_estate_report_id = ""
-	_refresh_all()
-
-func _on_production_report_selected(report_id: String) -> void:
-	selected_production_report_id = report_id
-	_refresh_all()
-
-func _on_production_report_closed() -> void:
-	selected_production_report_id = ""
-	_refresh_all()
-
-func _apply_labour_staffing_change(building_id: String, group_id: String, staffed_count: int) -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("set_staffed_building_count_for_group"):
-		state.call("set_staffed_building_count_for_group", building_id, group_id, staffed_count)
-	elif state != null and state.has_method("assign_labour_to_building"):
-		state.call("assign_labour_to_building", building_id, group_id, staffed_count)
-	elif state != null and state.has_method("set_staffed_building_count"):
-		state.call("set_staffed_building_count", building_id, staffed_count)
-
-func _on_labour_staffing_preview_changed(building_id: String, group_id: String, staffed_count: int) -> void:
-	# Live update while dragging. This updates the state, right-hand labour readout
-	# and Storehouse projections, but deliberately does not rebuild the Labour page.
-	_apply_labour_staffing_change(building_id, group_id, staffed_count)
-	_refresh_right_panel()
-
-func _on_labour_staffing_group_changed(building_id: String, group_id: String, staffed_count: int) -> void:
-	_apply_labour_staffing_change(building_id, group_id, staffed_count)
-	var state: Node = _state()
-
-	# Do not call _refresh_all() here: that recreates the Labour screen and
-	# makes the scroll position jump. Instead, update only the open Labour view
-	# with fresh data so unassigned labour totals, slider limits, the right-hand
-	# ledger, and future Storehouse incoming/outgoing all follow the slider.
-	if current_location_id == "production" and _current_focus_id() == "labour" and labour_assignment_view != null:
-		if state != null and state.has_method("get_labour_assignment_data") and labour_assignment_view.has_method("refresh_from_data"):
-			labour_assignment_view.call_deferred("refresh_from_data", state.call("get_labour_assignment_data"))
-	_refresh_right_panel()
-
-func _on_labour_staffing_changed(building_id: String, staffed_count: int) -> void:
-	_on_labour_staffing_group_changed(building_id, "", staffed_count)
-
-func _on_labour_assignment_changed(building_id: String, group_id: String, amount: int) -> void:
-	_on_labour_staffing_group_changed(building_id, group_id, amount)
-
-func _on_housing_report_selected(report_id: String) -> void:
-	selected_housing_report_id = report_id
-	_refresh_all()
-
-func _on_housing_report_closed() -> void:
-	selected_housing_report_id = ""
-	_refresh_all()
-
-func _on_housing_active_count_changed(housing_id: String, active_count: int) -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("set_active_housing_count"):
-		state.call("set_active_housing_count", housing_id, active_count)
-	if current_location_id == "housing" and _current_focus_id() == "mothball" and housing_mothball_view != null:
-		if state != null and state.has_method("get_housing_mothball_data") and housing_mothball_view.has_method("refresh_from_data"):
-			housing_mothball_view.call_deferred("refresh_from_data", state.call("get_housing_mothball_data"))
-	_refresh_right_panel()
-
-func _on_housing_selected(housing_id: String) -> void:
-	if _current_focus_id() == "overview" or _current_focus_id() == "mothball":
-		return
-	selected_housing_building_id = housing_id
-	_refresh_all()
-
-func _on_housing_closed() -> void:
-	selected_housing_building_id = ""
-	if current_location_id == "housing":
-		_refresh_all()
-
-func _on_housing_build_requested(housing_id: String) -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("build_building"):
-		state.call("build_building", housing_id)
-	_refresh_all()
-
-func _on_housing_destroy_requested(housing_id: String) -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("destroy_building"):
-		state.call("destroy_building", housing_id)
-	_refresh_all()
-
-func _on_storehouse_good_selected(good_id: String) -> void:
-	selected_storehouse_good_id = good_id
-	# Detail pop-outs are no longer kept alive while closed. Rebuild the main
-	# content area when a ledger row is selected so the full-size overlay opens.
-	_refresh_main_content()
-	_refresh_right_panel()
-
-func _on_storehouse_good_closed() -> void:
-	selected_storehouse_good_id = ""
-	_refresh_main_content()
-	_refresh_right_panel()
-
-func _on_market_good_selected(good_id: String) -> void:
-	selected_market_good_id = good_id
-	_refresh_main_content()
-	_refresh_right_panel()
-
-func _on_market_good_closed() -> void:
-	selected_market_good_id = ""
-	_refresh_main_content()
-	_refresh_right_panel()
-
-func _on_building_selected(building_id: String) -> void:
-	selected_building_id_by_location[current_location_id] = building_id
-	_refresh_main_content()
-	_refresh_right_panel()
-
-func _on_building_closed() -> void:
-	selected_building_id_by_location[current_location_id] = ""
-	_refresh_main_content()
-	_refresh_right_panel()
-
-func _on_build_requested(building_id: String) -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("build_building"):
-		state.call("build_building", building_id)
-	_refresh_all()
-
-func _on_destroy_requested(building_id: String) -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("destroy_building"):
-		state.call("destroy_building", building_id)
-	_refresh_all()
-
-func _on_advance_turn_pressed() -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("advance_veintena"):
-		state.call("advance_veintena")
-	_refresh_all()
-
-func _on_state_changed() -> void:
-	_refresh_all()
-
-func _art_for_location(location_id: String) -> Texture2D:
-	match location_id:
-		"estate":
-			return estate_art
-		"production":
-			return _art_for_production_focus(_current_focus_id())
-		"storehouse":
-			return storehouse_art
-		"market":
-			return market_art
-		"housing":
-			return _art_for_housing_focus(_current_focus_id())
-		"shrines":
-			return shrines_art
-		"warriors":
-			if barracks_art:
-				return barracks_art
-			return warriors_art
-		"palace":
-			return palace_art
-		"rivals":
-			return rivals_art
-	return null
-
-func _art_for_production_focus(focus_id: String) -> Texture2D:
-	match focus_id:
-		"overview":
-			if production_overview_art:
-				return production_overview_art
-		"chinampas":
-			if production_chinampas_art:
-				return production_chinampas_art
-			if chinampas_art:
-				return chinampas_art
-		"workshops":
-			if production_workshops_art:
-				return production_workshops_art
-			if workshops_art:
-				return workshops_art
-		"labour":
-			if production_labour_art:
-				return production_labour_art
-	if production_art:
-		return production_art
-	if fields_art:
-		return fields_art
-	return estate_art
-
-func _art_for_housing_focus(focus_id: String) -> Texture2D:
-	match focus_id:
-		"overview":
-			if housing_overview_art:
-				return housing_overview_art
-		"field_labour":
-			if housing_field_labour_art:
-				return housing_field_labour_art
-			if housing_commoners_art:
-				return housing_commoners_art
-		"artisans":
-			if housing_artisans_art:
-				return housing_artisans_art
-		"tlacotin":
-			if housing_tlacotin_art:
-				return housing_tlacotin_art
-		"warriors":
-			if housing_warriors_art:
-				return housing_warriors_art
-		"priests":
-			if housing_priests_art:
-				return housing_priests_art
-		"nobles":
-			if housing_nobles_art:
-				return housing_nobles_art
-		"captives":
-			if housing_captives_art:
-				return housing_captives_art
-		"mothball":
-			if housing_mothball_art:
-				return housing_mothball_art
-	if housing_art:
-		return housing_art
-	return estate_art
-
-func _update_button_pressed_state() -> void:
-	var button_map: Dictionary = {
-		"estate": estate_button,
-		"production": production_button,
-		"storehouse": storehouse_button,
-		"market": market_button,
-		"housing": housing_button,
-		"shrines": shrines_button,
-		"warriors": warriors_button,
-		"palace": palace_button,
-		"rivals": rivals_button
-	}
-	for key_variant: Variant in button_map.keys():
-		var key: String = String(key_variant)
-		var button: Button = button_map[key] as Button
-		if button:
-			button.button_pressed = key == current_location_id
-
-func _apply_style() -> void:
-	var panel_nodes: Array[Node] = [
-		get_node_or_null(^"SafeArea/MainVBox/CalendarPanel"),
-		get_node_or_null(^"SafeArea/MainVBox/MiddleRow/MainView"),
-		get_node_or_null(^"SafeArea/MainVBox/MiddleRow/NotificationPanel"),
-		get_node_or_null(^"SafeArea/MainVBox/BottomNav")
-	]
-	for node: Node in panel_nodes:
-		var panel: PanelContainer = node as PanelContainer
-		if panel:
-			panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.035, 0.055, 0.052, 0.90), Color(0.34, 0.71, 0.63, 0.45), 14))
-	if location_title:
-		location_title.add_theme_font_size_override("font_size", 35)
-	if content_text:
-		content_text.add_theme_font_size_override("normal_font_size", 21)
-		content_text.add_theme_font_size_override("bold_font_size", 22)
-		content_text.add_theme_constant_override("line_separation", 5)
-		var content_style: StyleBoxFlat = _make_panel_style(Color(0.0, 0.0, 0.0, 0.55), Color(0.50, 0.82, 0.74, 0.25), 12)
-		content_text.add_theme_stylebox_override("normal", content_style)
-	if notification_title:
-		notification_title.add_theme_font_size_override("font_size", 25)
-	if house_claim_panel:
-		house_claim_panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.58), Color(0.76, 0.63, 0.32, 0.58), 12))
-	if prestige_title_label:
-		prestige_title_label.add_theme_font_size_override("font_size", 22)
-	if prestige_value_label:
-		prestige_value_label.add_theme_font_size_override("font_size", 23)
-	if prestige_standing_label:
-		prestige_standing_label.add_theme_font_size_override("font_size", 18)
-	if prestige_recognition_label:
-		prestige_recognition_label.add_theme_font_size_override("font_size", 18)
-	if prestige_recent_label:
-		prestige_recent_label.add_theme_font_size_override("font_size", 16)
-	if prestige_glyph_label:
-		prestige_glyph_label.add_theme_font_size_override("font_size", 42)
-
-	var buttons: Array = [estate_button, production_button, storehouse_button, market_button, housing_button, shrines_button, warriors_button, palace_button, rivals_button, advance_turn_button]
-	for button_variant: Variant in buttons:
-		var button: Button = button_variant as Button
-		if button:
-			button.custom_minimum_size = Vector2(0, 62)
-			button.add_theme_font_size_override("font_size", 20)
-			if button != advance_turn_button:
-				button.toggle_mode = true
-			else:
-				button.custom_minimum_size = Vector2(250, 62)
-				button.add_theme_font_size_override("font_size", 21)
-
-
-
-func _join_string_items(items: Array, separator: String = ", ", max_items: int = 0) -> String:
-	var parts: Array[String] = []
-	var limit: int = items.size()
-	if max_items > 0:
-		limit = mini(max_items, items.size())
-
-	for i: int in range(limit):
-		parts.append(String(items[i]))
-
-	if max_items > 0 and items.size() > max_items:
-		var remaining: int = items.size() - max_items
-		parts.append("+" + str(remaining) + " more")
-
-	return separator.join(parts)
-
-func _format_float(value: float) -> String:
+func _religion_label(text: String, font_size: int, colour: Color) -> Label:
+	var label: Label = Label.new()
+	label.text = text
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", colour)
+	label.clip_text = true
+	return label
+
+func _religion_wrapped_label(text: String, font_size: int, colour: Color) -> Label:
+	var label: Label = _religion_label(text, font_size, colour)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.clip_text = false
+	return label
+
+func _format_religion_amount(value: float) -> String:
 	if is_equal_approx(value, roundf(value)):
 		return str(int(roundf(value)))
 	return "%.2f" % value
 
-func _add_center_label(parent: VBoxContainer, text: String, font_size: int) -> void:
-	var label: Label = Label.new()
-	label.text = text
-	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	label.clip_text = true
-	label.add_theme_font_size_override("font_size", font_size)
-	parent.add_child(label)
+func _emit_religion_state_changed() -> void:
+	var state: Node = _state()
+	if state != null and state.has_signal("state_changed"):
+		state.emit_signal("state_changed")
 
-func _add_notification(text: String) -> void:
-	if notification_list == null:
+# -----------------------------------------------------------------------------
+# Calendar Pacing v2 — safe gameplay-led order
+# -----------------------------------------------------------------------------
+
+func _build_calendar_row() -> void:
+	_refresh_calendar_advance_button_label()
+	var current_veintena: int = _calendar_current_veintena()
+	var cards_to_show: int = max(1, visible_veintenas)
+	for offset: int in range(cards_to_show):
+		var card_data: Dictionary = _calendar_card_data(current_veintena, offset)
+		var card_button: Button = Button.new()
+		card_button.toggle_mode = false
+		card_button.focus_mode = Control.FOCUS_NONE
+		card_button.custom_minimum_size = Vector2(166, 112)
+		card_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card_button.text = String(card_data.get("button_text", "Calendar"))
+		card_button.tooltip_text = String(card_data.get("tooltip", ""))
+		card_button.add_theme_font_size_override("font_size", 15)
+		card_button.add_theme_stylebox_override("normal", _calendar_card_style(card_data, false))
+		card_button.add_theme_stylebox_override("hover", _calendar_card_style(card_data, true))
+		card_button.add_theme_stylebox_override("pressed", _calendar_card_style(card_data, true))
+		var report_id: String = String(card_data.get("report_id", ""))
+		card_button.pressed.connect(func() -> void:
+			_on_calendar_card_pressed(report_id)
+		)
+		top_row.add_child(card_button)
+
+func _calendar_card_style(card_data: Dictionary, hover: bool) -> StyleBoxFlat:
+	var is_current: bool = bool(card_data.get("current", false))
+	var period: String = String(card_data.get("period", "veintena"))
+	var god: String = String(card_data.get("god", "Minor / No major festival"))
+	var base: Color = Color(0.055, 0.08, 0.075, 0.92)
+	var border: Color = _calendar_colour_for_god(god)
+	if is_current:
+		base = Color(0.09, 0.13, 0.115, 0.98)
+		border = border.lightened(0.20)
+	elif period == "nemontemi":
+		base = Color(0.08, 0.055, 0.09, 0.95)
+		border = Color(0.73, 0.46, 0.82, 0.70)
+	elif god == "Minor / No major festival":
+		base = Color(0.045, 0.065, 0.065, 0.90)
+	if hover:
+		base = base.lightened(0.07)
+		border = border.lightened(0.12)
+	return _make_panel_style(base, border, 10)
+
+func _calendar_colour_for_god(god: String) -> Color:
+	match god:
+		"Tlaloc":
+			return Color(0.22, 0.68, 0.86, 0.72)
+		"Huitzilopochtli":
+			return Color(0.84, 0.35, 0.24, 0.74)
+		"Tezcatlipoca":
+			return Color(0.62, 0.45, 0.84, 0.72)
+		"Quetzalcoatl":
+			return Color(0.37, 0.82, 0.57, 0.72)
+		"Nemontemi":
+			return Color(0.73, 0.46, 0.82, 0.72)
+	return Color(0.56, 0.62, 0.58, 0.58)
+
+func _calendar_card_data(current_veintena: int, offset: int) -> Dictionary:
+	var base_year: int = _ritual_year
+	var position: int = current_veintena + offset
+	if _calendar_period == "nemontemi":
+		position = 19 + offset
+	var year_value: int = base_year
+	while position > 19:
+		position -= 19
+		year_value += 1
+	if position == 19:
+		return _nemontemi_card_data(year_value, offset == 0)
+	var veintena_number: int = clampi(position, 1, 18)
+	var god: String = _calendar_god_for_veintena(veintena_number)
+	var detail: String = _calendar_detail_for_veintena(veintena_number)
+	var name: String = _calendar_veintena_name(veintena_number)
+	var current: bool = offset == 0 and _calendar_period == "veintena"
+	var prefix: String = "Upcoming"
+	if current:
+		prefix = "Current"
+	var god_label: String = god
+	if god == "Minor / No major festival":
+		god_label = "Minor"
+	var report_id: String = "calendar|" + str(year_value) + "|veintena|" + str(veintena_number)
+	return {"period": "veintena", "year": year_value, "veintena": veintena_number, "name": name, "god": god, "detail": detail, "current": current, "report_id": report_id, "button_text": prefix + "\nY" + str(year_value) + " V" + str(veintena_number) + "\n" + god_label + "\n" + detail, "tooltip": "Ritual Year " + str(year_value) + ", Veintena " + str(veintena_number) + " — " + name + ". " + god + ": " + _calendar_tooltip_for_veintena(veintena_number)}
+
+func _nemontemi_card_data(year_value: int, current: bool) -> Dictionary:
+	var prefix: String = "Upcoming"
+	if current:
+		prefix = "Current"
+	var report_id: String = "calendar|" + str(year_value) + "|nemontemi|0"
+	return {"period": "nemontemi", "year": year_value, "veintena": 0, "name": "Nemontemi", "god": "Nemontemi", "detail": "Year review", "current": current, "report_id": report_id, "button_text": prefix + "\nY" + str(year_value) + "\nNemontemi\nUnlucky Days", "tooltip": "Nemontemi — five unlucky days, annual reckoning, restrictions, omens, review and next-year setup."}
+
+func _calendar_current_veintena() -> int:
+	var state: Node = _state()
+	if state != null and state.has_method("get_current_veintena"):
+		return clampi(int(state.call("get_current_veintena")), 1, 18)
+	if state != null:
+		return clampi(int(state.get("current_veintena")), 1, 18)
+	return 1
+
+func _calendar_veintena_name(veintena_number: int) -> String:
+	var index: int = veintena_number - 1
+	if index >= 0 and index < _veintenas.size():
+		var data: Dictionary = _veintenas[index] as Dictionary
+		return String(data.get("name", "Veintena " + str(veintena_number)))
+	return "Veintena " + str(veintena_number)
+
+func _calendar_god_for_veintena(veintena_number: int) -> String:
+	match veintena_number:
+		1:
+			return "Quetzalcoatl"
+		2:
+			return "Tlaloc"
+		3:
+			return "Minor / No major festival"
+		4:
+			return "Tezcatlipoca"
+		5:
+			return "Tlaloc"
+		6:
+			return "Quetzalcoatl"
+		7:
+			return "Huitzilopochtli"
+		8:
+			return "Huitzilopochtli"
+		9:
+			return "Tezcatlipoca"
+		10:
+			return "Tlaloc"
+		11:
+			return "Minor / No major festival"
+		12:
+			return "Tlaloc"
+		13:
+			return "Quetzalcoatl"
+		14:
+			return "Minor / No major festival"
+		15:
+			return "Huitzilopochtli"
+		16:
+			return "Minor / No major festival"
+		17:
+			return "Tezcatlipoca"
+		18:
+			return "Quetzalcoatl"
+	return "Minor / No major festival"
+
+func _calendar_detail_for_veintena(veintena_number: int) -> String:
+	match veintena_number:
+		1:
+			return "Year opening"
+		2:
+			return "Early planting"
+		3:
+			return "Recovery/build"
+		4:
+			return "First omens"
+		5:
+			return "Mid rains"
+		6:
+			return "Trade/diplomacy"
+		7:
+			return "War prep"
+		8:
+			return "Flower Wars"
+		9:
+			return "Rival tension"
+		10:
+			return "Early harvest"
+		11:
+			return "Market reset"
+		12:
+			return "Great harvest"
+		13:
+			return "Legitimacy"
+		14:
+			return "Preparation"
+		15:
+			return "War review"
+		16:
+			return "Recovery"
+		17:
+			return "End-year plots"
+		18:
+			return "Closing rites"
+	return "planning"
+
+func _calendar_tooltip_for_veintena(veintena_number: int) -> String:
+	match veintena_number:
+		1:
+			return "Quetzalcoatl opens the Ritual Year. This is a transition, legitimacy and planning period."
+		2:
+			return "Tlaloc supports early planting, rain, lake fertility and food-security planning."
+		3:
+			return "No major god dominates. Use this as a quieter estate-management, construction, trade or recovery window."
+		4:
+			return "Tezcatlipoca brings first omens, ambition, manipulation and rival-house tension."
+		5:
+			return "Tlaloc returns for mid-season rain and fertility pressure. Drought protection and crop planning matter."
+		6:
+			return "Quetzalcoatl supports trade, diplomacy, legitimacy and civil order during the middle of the year."
+		7:
+			return "Huitzilopochtli begins military prominence. Prepare warriors, weapons and Flower War readiness."
+		8:
+			return "Huitzilopochtli dominates the main Flower Wars season. Later systems should centre captives, loot and martial prestige here."
+		9:
+			return "Tezcatlipoca pressure rises after the war season. Rival plots, omens and political manipulation fit here."
+		10:
+			return "Tlaloc governs early harvest, rain memory, lakes and agricultural return."
+		11:
+			return "No major god dominates. This is a breathing-room window for markets, stores, repairs and economic recovery."
+		12:
+			return "Tlaloc reaches the great harvest moment. Agricultural output, gratitude and food security should be prominent."
+		13:
+			return "Quetzalcoatl supports diplomacy, legitimacy, palace-facing order and civil recognition."
+		14:
+			return "No major god dominates. Use this as preparation before the late-year military and reckoning pressures."
+		15:
+			return "Huitzilopochtli returns for late-year military review, martial prestige and warrior standing."
+		16:
+			return "No major god dominates. This is a recovery and economic repositioning period before the end-year intrigue phase."
+		17:
+			return "Tezcatlipoca governs end-of-year intrigue, omens, hidden pressure and reckoning danger."
+		18:
+			return "Quetzalcoatl closes the ordinary year through transition, order, legitimacy and ceremonial completion."
+	return "Calendar planning pressure."
+
+func _on_calendar_card_pressed(report_id: String) -> void:
+	selected_estate_report_id = report_id
+	show_location("estate")
+
+func _estate_report_title(report_id: String) -> String:
+	if report_id.begins_with("calendar|"):
+		var data: Dictionary = _calendar_report_data_from_id(report_id)
+		if String(data.get("period", "veintena")) == "nemontemi":
+			return "Nemontemi — Unlucky Days"
+		var veintena_number: int = int(data.get("veintena", 1))
+		return "Calendar: V" + str(veintena_number) + " — " + _calendar_god_for_veintena(veintena_number)
+	return super._estate_report_title(report_id)
+
+func _build_estate_report_detail_text(report_id: String) -> String:
+	if report_id.begins_with("calendar|"):
+		return _build_calendar_report_detail_text(report_id)
+	return super._build_estate_report_detail_text(report_id)
+
+func _calendar_report_data_from_id(report_id: String) -> Dictionary:
+	var parts: PackedStringArray = report_id.split("|")
+	var year_value: int = _ritual_year
+	var period: String = "veintena"
+	var veintena_number: int = _calendar_current_veintena()
+	if parts.size() >= 4:
+		year_value = int(parts[1])
+		period = String(parts[2])
+		veintena_number = int(parts[3])
+	return {"year": year_value, "period": period, "veintena": veintena_number}
+
+func _build_calendar_report_detail_text(report_id: String) -> String:
+	var data: Dictionary = _calendar_report_data_from_id(report_id)
+	var year_value: int = int(data.get("year", _ritual_year))
+	var period: String = String(data.get("period", "veintena"))
+	var veintena_number: int = int(data.get("veintena", 1))
+	if period == "nemontemi":
+		return _build_nemontemi_report_text(year_value)
+	var god: String = _calendar_god_for_veintena(veintena_number)
+	var text: String = "[b]Ritual Year " + str(year_value) + ", Veintena " + str(veintena_number) + "[/b]\n"
+	text += "[b]Inspired name:[/b] " + _calendar_veintena_name(veintena_number) + "\n"
+	text += "[b]Festival focus:[/b] " + god + "\n"
+	text += "[b]Gameplay pressure:[/b] " + _calendar_detail_for_veintena(veintena_number) + "\n\n"
+	text += _calendar_tooltip_for_veintena(veintena_number) + "\n\n"
+	text += "[b]Religion hook[/b]\n"
+	if god == "Minor / No major festival":
+		text += "• This is a breathing-room Veintena. No major god receives a festival visibility bonus.\n"
+	elif god == "Tlaloc":
+		text += "• Offerings to Tlaloc are especially visible this Veintena.\n"
+	elif god == "Huitzilopochtli":
+		text += "• Offerings to Huitzilopochtli are especially visible this Veintena.\n"
+	elif god == "Tezcatlipoca":
+		text += "• Offerings to Tezcatlipoca are especially visible this Veintena.\n"
+	elif god == "Quetzalcoatl":
+		text += "• Offerings to Quetzalcoatl are especially visible this Veintena.\n"
+	text += "• Divine favour decays on Advance. Offerings are made through the Shrines screen.\n\n"
+	text += "[b]Prototype turn pipeline[/b]\n"
+	text += "• Omens & Events: hook only for now.\n"
+	text += "• World upkeep: population upkeep and housing maintenance resolve on Advance.\n"
+	text += "• Production: staffed buildings consume inputs and add outputs on Advance.\n"
+	text += "• Religion: divine favour decays; offerings are player actions before Advance.\n"
+	text += "• Market / trade: player barter happens before Advance through the Market Trade Basket.\n"
+	text += "• Rival AI, Flower Wars, palace and prestige are future hooks.\n\n"
+	if veintena_number == 18:
+		text += "[color=#FFC25A][b]Next advance enters Nemontemi.[/b][/color]"
+	else:
+		text += "Next ordinary advance resolves this Veintena and moves to Veintena " + str(veintena_number + 1) + "."
+	return text
+
+func _build_nemontemi_report_text(year_value: int) -> String:
+	var text: String = "[b]Nemontemi — Ritual Year " + str(year_value) + " Unlucky Days[/b]\n"
+	text += "Nemontemi is the five-day end-of-year reckoning phase, not a nineteenth ordinary Veintena.\n\n"
+	text += "[b]Prototype restrictions / hooks[/b]\n"
+	text += "• No Flower Wars.\n"
+	text += "• Construction and productivity can later be restricted or reduced here.\n"
+	text += "• Special omens and unique end-year events belong here.\n"
+	text += "• Divine favour takes a sharper end-year decay when Nemontemi resolves.\n"
+	text += "• Review previous-turn reports, shortages, prestige, rivals, palace pressure, offerings and Flower War results.\n\n"
+	text += "Press [b]Resolve Nemontemi[/b] to begin Ritual Year " + str(year_value + 1) + " at Veintena 1."
+	return text
+
+# -----------------------------------------------------------------------------
+# Turn Resolution Pipeline v1
+# -----------------------------------------------------------------------------
+
+func _on_advance_turn_pressed() -> void:
+	var state: Node = _state()
+	if state == null:
 		return
-
-	var panel: PanelContainer = PanelContainer.new()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.custom_minimum_size = Vector2(0, 72)
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.035, 0.06, 0.055, 0.92), Color(0.34, 0.71, 0.63, 0.35), 10))
-	notification_list.add_child(panel)
-
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_top", 8)
-	margin.add_theme_constant_override("margin_bottom", 8)
-	panel.add_child(margin)
-
-	var label: Label = Label.new()
-	label.text = "• " + text
-	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label.add_theme_font_size_override("font_size", 19)
-	label.add_theme_color_override("font_color", Color(0.90, 0.86, 0.76, 1.0))
-	margin.add_child(label)
-
-func _clear_children(parent: Node) -> void:
-	if parent == null:
+	if _calendar_period == "nemontemi":
+		_resolve_nemontemi(state)
+		_refresh_all()
 		return
-	for child: Node in parent.get_children():
-		child.queue_free()
+	_resolve_ordinary_veintena(state)
+	_refresh_all()
 
-func _make_panel_style(bg: Color, border: Color, radius: int) -> StyleBoxFlat:
-	var style: StyleBoxFlat = StyleBoxFlat.new()
-	style.bg_color = bg
-	style.border_color = border
-	style.set_border_width_all(2)
-	style.set_corner_radius_all(radius)
-	style.shadow_color = Color(0.0, 0.0, 0.0, 0.35)
-	style.shadow_size = 8
-	return style
+func _resolve_ordinary_veintena(state: Node) -> void:
+	if not bool(state.get("initialized")) and state.has_method("new_game"):
+		state.call("new_game")
+	var current_veintena: int = _calendar_current_veintena()
+	state.set("current_veintena", current_veintena)
+	var report: Array = []
+	state.set("last_report", report)
+	report.append("Veintena " + str(current_veintena) + " resolves through the Turn Resolution Pipeline.")
+	report.append("1. Omens & Events: placeholder only; no full event pool connected yet.")
+	report.append("2. Population upkeep resolves.")
+	if state.has_method("_pay_population_upkeep"):
+		state.call("_pay_population_upkeep")
+	report.append("3. Housing upkeep resolves.")
+	if state.has_method("_pay_housing_maintenance"):
+		state.call("_pay_housing_maintenance")
+	report.append("4. Building input consumption and production resolve.")
+	if state.has_method("_operate_buildings"):
+		state.call("_operate_buildings")
+	report.append("5. Market recalculation: market values refresh from current stock, demand and projected pressure after state change.")
+	report.append("6. Calendar and religion: " + _current_festival_text() + ".")
+	_apply_divine_favour_decay(report, RELIGION_NORMAL_DECAY)
+	_reset_religion_veintena_capacity()
+	if state.has_method("set"):
+		state.set("warrior_recruits_used_this_veintena", 0)
+	report.append("7. Rival AI hook: not active yet.")
+	report.append("8. Flower Wars hook: not active yet.")
+	report.append("9. Palace hook: not active yet.")
+	report.append("10. Prestige hook: not active yet.")
+	if current_veintena >= 18:
+		report.append("11. Report summary: final ordinary Veintena complete. Now entering Nemontemi for Ritual Year " + str(_ritual_year) + ".")
+		_calendar_period = "nemontemi"
+		state.set("current_veintena", 18)
+	else:
+		var next_veintena: int = current_veintena + 1
+		report.append("11. Report summary: now entering Veintena " + str(next_veintena) + ".")
+		state.set("current_veintena", next_veintena)
+	state.set("last_report", report)
+	_refresh_calendar_advance_button_label()
+	if state.has_signal("turn_advanced"):
+		state.emit_signal("turn_advanced", report)
+	if state.has_signal("state_changed"):
+		state.emit_signal("state_changed")
+
+func _resolve_nemontemi(state: Node) -> void:
+	var report: Array = []
+	report.append("Nemontemi reckoning resolves for Ritual Year " + str(_ritual_year) + ".")
+	report.append("Nemontemi restrictions hook: no Flower Wars; construction, market activity and productivity restrictions can be connected later.")
+	_apply_divine_favour_decay(report, RELIGION_NEMONTEMI_DECAY)
+	_reset_religion_veintena_capacity()
+	if state.has_method("set"):
+		state.set("warrior_recruits_used_this_veintena", 0)
+	report.append("Annual review hooks: prestige, palace recognition, rival comparison, Flower War results and offering history will be connected later.")
+	_ritual_year += 1
+	_calendar_period = "veintena"
+	state.set("current_veintena", 1)
+	report.append("Ritual Year " + str(_ritual_year) + " begins at Veintena 1.")
+	state.set("last_report", report)
+	_refresh_calendar_advance_button_label()
+	if state.has_signal("turn_advanced"):
+		state.emit_signal("turn_advanced", report)
+	if state.has_signal("state_changed"):
+		state.emit_signal("state_changed")
+
+func _refresh_calendar_advance_button_label() -> void:
+	if advance_turn_button == null:
+		return
+	if _calendar_period == "nemontemi":
+		advance_turn_button.text = "Resolve Nemontemi"
+	else:
+		var current_veintena: int = _calendar_current_veintena()
+		if current_veintena >= 18:
+			advance_turn_button.text = "Enter Nemontemi"
+		else:
+			advance_turn_button.text = "Advance Veintena"
