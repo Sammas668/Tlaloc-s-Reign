@@ -434,7 +434,17 @@ func _patch_join_limited(values: Array[String], max_items: int) -> String:
 # -----------------------------------------------------------------------------
 
 func _ensure_religion_state() -> void:
-	if _religion_initialized:
+	var state: Node = _state()
+	if state != null and state.has_method("get_religion_state"):
+		var religion_state: Dictionary = state.call("get_religion_state") as Dictionary
+		_divine_favour = religion_state.get("divine_favour", {}) as Dictionary
+		_shrine_levels = religion_state.get("shrine_levels", {}) as Dictionary
+		_shrine_upgrades = religion_state.get("shrine_upgrades", {}) as Dictionary
+		_ritual_capacity_used_this_veintena = float(religion_state.get("ritual_capacity_used_this_veintena", 0.0))
+		_last_offering_report.clear()
+		for line_variant: Variant in religion_state.get("recent_ritual_reports", []) as Array:
+			_last_offering_report.append(String(line_variant))
+		_religion_initialized = true
 		return
 	for god_id: String in GOD_IDS:
 		_divine_favour[god_id] = RELIGION_STARTING_FAVOUR
@@ -746,10 +756,20 @@ func _add_ritual_tier_card(parent: VBoxContainer, god_id: String, tier_id: Strin
 		stack.add_child(_religion_wrapped_label("Blocked: " + String(status.get("reason", "")), 15, Color(1.0, 0.74, 0.40, 1.0)))
 
 func _shrine_level(god_id: String) -> int:
+	var state: Node = _state()
+	if state != null and state.has_method("get_shrine_level"):
+		return int(state.call("get_shrine_level", god_id))
 	_ensure_religion_state()
 	return clampi(int(_shrine_levels.get(god_id, 1)), 1, 4)
 
 func _purchased_upgrade_ids(god_id: String) -> Array[String]:
+	var state: Node = _state()
+	if state != null and state.has_method("get_purchased_shrine_upgrades"):
+		var state_upgrades: Array = state.call("get_purchased_shrine_upgrades", god_id) as Array
+		var state_output: Array[String] = []
+		for item: Variant in state_upgrades:
+			state_output.append(String(item))
+		return state_output
 	_ensure_religion_state()
 	var output: Array[String] = []
 	var raw: Array = _shrine_upgrades.get(god_id, []) as Array
@@ -811,6 +831,13 @@ func _can_upgrade_shrine_level(god_id: String) -> Dictionary:
 	return _can_pay_religion_cost(_shrine_level_cost(next_level))
 
 func _upgrade_shrine_level(god_id: String) -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("upgrade_shrine"):
+		state.call("upgrade_shrine", god_id)
+		_religion_initialized = false
+		_ensure_religion_state()
+		_refresh_all()
+		return
 	var status: Dictionary = _can_upgrade_shrine_level(god_id)
 	if not bool(status.get("ok", false)):
 		_last_offering_report.clear()
@@ -890,6 +917,13 @@ func _can_build_shrine_upgrade(god_id: String, upgrade: Dictionary) -> Dictionar
 	return _can_pay_religion_cost(upgrade.get("cost", {}) as Dictionary)
 
 func _build_shrine_upgrade(god_id: String, upgrade_id: String) -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("purchase_shrine_upgrade"):
+		state.call("purchase_shrine_upgrade", god_id, upgrade_id)
+		_religion_initialized = false
+		_ensure_religion_state()
+		_refresh_all()
+		return
 	var upgrade: Dictionary = _upgrade_by_id(god_id, upgrade_id)
 	if upgrade.is_empty():
 		return
@@ -1013,6 +1047,13 @@ func _can_perform_ritual(god_id: String, tier_id: String) -> Dictionary:
 	return _can_pay_religion_cost(data.get("cost", {}) as Dictionary)
 
 func _perform_ritual(god_id: String, tier_id: String) -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("perform_ritual"):
+		state.call("perform_ritual", god_id, tier_id, _current_festival_god_id())
+		_religion_initialized = false
+		_ensure_religion_state()
+		_refresh_all()
+		return
 	var status: Dictionary = _can_perform_ritual(god_id, tier_id)
 	if not bool(status.get("ok", false)):
 		_last_offering_report.clear()
@@ -1029,20 +1070,9 @@ func _perform_ritual(god_id: String, tier_id: String) -> void:
 	var before: float = float(_divine_favour.get(god_id, RELIGION_STARTING_FAVOUR))
 	var after: float = clampf(before + float(gain), 0.0, 100.0)
 	_divine_favour[god_id] = after
-	var report_line: String = String(data.get("title", "Ritual")) + " performed for " + _god_name(god_id) + ". Cost: " + _format_cost(data.get("cost", {}) as Dictionary) + ". Favour roll: +" + str(gain) + " (range +" + str(int(range[0])) + "–+" + str(int(range[1])) + "). Favour " + _format_religion_amount(before) + " → " + _format_religion_amount(after) + "."
-	if _current_festival_god_id() == god_id:
-		report_line += " Festival focus improved the ritual roll."
-	if _ritual_favour_bonus(god_id, tier_id) > 0:
-		report_line += " Shrine level/upgrades contributed to the result."
+	var report_line: String = String(data.get("title", "Ritual")) + " performed for " + _god_name(god_id) + ". Favour roll: +" + str(gain) + ". Favour " + _format_religion_amount(before) + " → " + _format_religion_amount(after) + "."
 	_last_offering_report.clear()
 	_last_offering_report.append(report_line)
-	var state: Node = _state()
-	if state != null:
-		var report_variant: Variant = state.get("last_report")
-		if report_variant is Array:
-			var report: Array = report_variant as Array
-			report.append(report_line)
-			state.set("last_report", report)
 	_emit_religion_state_changed()
 	_refresh_all()
 
@@ -1311,6 +1341,13 @@ func _build_god_boons_placeholder(parent: VBoxContainer, god_id: String) -> void
 		parent.add_child(_religion_wrapped_label("Shrine Level 4 reached. This shrine is ready for future boon implementation.", 18, COLOR_TEAL))
 
 func _apply_divine_favour_decay(report: Array, decay_amount: float = RELIGION_NORMAL_DECAY) -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("apply_divine_favour_decay"):
+		var parts: Array = state.call("apply_divine_favour_decay", decay_amount) as Array
+		report.append("Divine favour decays: " + "; ".join(parts) + ".")
+		_religion_initialized = false
+		_ensure_religion_state()
+		return
 	_ensure_religion_state()
 	var parts: Array[String] = []
 	for god_id: String in GOD_IDS:
@@ -1330,6 +1367,9 @@ func _religion_decay_for_god(god_id: String, base_decay: float) -> float:
 	return maxf(0.0, base_decay - reduction)
 
 func _reset_religion_veintena_capacity() -> void:
+	var state: Node = _state()
+	if state != null and state.has_method("reset_religion_veintena_capacity"):
+		state.call("reset_religion_veintena_capacity")
 	_ritual_capacity_used_this_veintena = 0.0
 
 func _free_stock_for_offering(resource_id: String) -> float:
@@ -1345,10 +1385,16 @@ func _free_stock_for_offering(resource_id: String) -> float:
 	return 0.0
 
 func _religion_priest_conversion_cap() -> float:
+	var state: Node = _state()
+	if state != null and state.has_method("religion_priest_conversion_cap"):
+		return float(state.call("religion_priest_conversion_cap"))
 	var priests: int = _religion_active_priest_count()
 	return 8.0 + float(priests) * 2.0
 
 func _religion_remaining_ritual_capacity() -> float:
+	var state: Node = _state()
+	if state != null and state.has_method("religion_remaining_ritual_capacity"):
+		return float(state.call("religion_remaining_ritual_capacity"))
 	return maxf(0.0, _religion_priest_conversion_cap() - _ritual_capacity_used_this_veintena)
 
 func _religion_active_priest_count() -> int:
