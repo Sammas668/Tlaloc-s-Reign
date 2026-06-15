@@ -1,7 +1,7 @@
 # TRGameState.gd
 # Godot 4.x
 # Suggested autoload name: TRGameState
-# Project path: res://Scripts/Autoload/TRGameState.gd
+# Project path: res://Scripts/autoload/TRGameState.gd
 extends Node
 
 signal state_changed
@@ -10,7 +10,6 @@ signal build_completed(building_id: String)
 signal build_failed(building_id: String, reason: String)
 signal destroy_completed(building_id: String)
 signal destroy_failed(building_id: String, reason: String)
-signal flower_war_resolved(result: Dictionary)
 
 const RESOURCE_DATA_PATH: String = "res://Data/Prototype0/resources.json"
 const BUILDING_DATA_PATH: String = "res://Data/Prototype0/buildings.json"
@@ -31,43 +30,6 @@ var population: Dictionary = {}
 var base_housing_capacity: Dictionary = {}
 var labour_assignments: Dictionary = {}
 var market_economy: Dictionary = {}
-
-const RELIGION_STARTING_FAVOUR: float = 40.0
-const RELIGION_NORMAL_DECAY: float = 2.0
-const RELIGION_NEMONTEMI_DECAY: float = 4.0
-const GOD_IDS: Array[String] = ["tlaloc", "huitzilopochtli", "tezcatlipoca", "quetzalcoatl"]
-
-var divine_favour: Dictionary = {}
-var shrine_levels: Dictionary = {}
-var shrine_upgrades: Dictionary = {}
-var ritual_capacity_used_this_veintena: float = 0.0
-var recent_ritual_reports: Array[String] = []
-
-const FLOWER_WAR_DOCTRINES: Dictionary = {
-	"unspecialised": {"name": "Unspecialised", "offence": 1.0, "defence": 1.0, "role": "General purpose."},
-	"eagle": {"name": "Eagle", "offence": 1.0, "defence": 1.2, "role": "Captive specialists.", "capture_bonus_per_warrior": 0.02},
-	"jaguar": {"name": "Jaguar", "offence": 1.3, "defence": 1.0, "role": "Elite assault warriors.", "prestige_mult": 1.15},
-	"otomi": {"name": "Otomi", "offence": 0.8, "defence": 1.5, "role": "Defensive veterans.", "death_mult": 0.8},
-	"coyote": {"name": "Coyote", "offence": 1.4, "defence": 0.5, "role": "Looting raiders.", "loot_mult": 1.25}
-}
-
-const FLOWER_WAR_SCALES: Dictionary = {
-	"minor": {"name": "Minor Flower War", "recommended": 5, "enemy_warriors": 5, "difficulty": 0.85},
-	"standard": {"name": "Standard Flower War", "recommended": 10, "enemy_warriors": 10, "difficulty": 1.0},
-	"major": {"name": "Major Flower War", "recommended": 20, "enemy_warriors": 20, "difficulty": 1.10}
-}
-
-const FLOWER_WAR_PROVISIONING: Dictionary = {
-	"standard": {"name": "Standard", "cost_mult": 1.0, "combat_mult": 1.0},
-	"well": {"name": "Well-Provisioned", "cost_mult": 2.0, "combat_mult": 1.10},
-	"royal": {"name": "Royal", "cost_mult": 4.0, "combat_mult": 1.25}
-}
-
-var warrior_recruits_used_this_veintena: int = 0
-var warrior_xp: float = 0.0
-var player_prestige: float = 0.0
-var last_flower_war_report: Array[String] = []
-var flower_war_history: Array[Dictionary] = []
 
 var current_veintena: int = 1
 var last_report: Array[String] = []
@@ -105,7 +67,8 @@ func _load_json_dictionary(path: String) -> Dictionary:
 	if file == null:
 		push_warning("Could not open data file: " + path)
 		return {}
-	var parsed: Variant = JSON.parse_string(file.get_as_text())
+	var raw_text: String = file.get_as_text()
+	var parsed: Variant = JSON.parse_string(raw_text)
 	if parsed is Dictionary:
 		return parsed as Dictionary
 	push_warning("Data file did not parse as Dictionary: " + path)
@@ -114,7 +77,8 @@ func _load_json_dictionary(path: String) -> Dictionary:
 func _load_resource_definitions() -> void:
 	resources.clear()
 	resource_order.clear()
-	var rows: Array = (_load_json_dictionary(RESOURCE_DATA_PATH).get("resources", []) as Array)
+	var data: Dictionary = _load_json_dictionary(RESOURCE_DATA_PATH)
+	var rows: Array = data.get("resources", []) as Array
 	for row_variant: Variant in rows:
 		var row: Dictionary = row_variant as Dictionary
 		var resource_id: String = String(row.get("id", ""))
@@ -126,7 +90,8 @@ func _load_resource_definitions() -> void:
 func _load_building_definitions() -> void:
 	buildings.clear()
 	building_order.clear()
-	var rows: Array = (_load_json_dictionary(BUILDING_DATA_PATH).get("buildings", []) as Array)
+	var data: Dictionary = _load_json_dictionary(BUILDING_DATA_PATH)
+	var rows: Array = data.get("buildings", []) as Array
 	for row_variant: Variant in rows:
 		var row: Dictionary = row_variant as Dictionary
 		var building_id: String = String(row.get("id", ""))
@@ -135,12 +100,17 @@ func _load_building_definitions() -> void:
 		buildings[building_id] = row
 		building_order.append(building_id)
 	building_order.sort_custom(func(a: String, b: String) -> bool:
-		return int((buildings[a] as Dictionary).get("priority", 999)) < int((buildings[b] as Dictionary).get("priority", 999))
+		var a_data: Dictionary = buildings[a] as Dictionary
+		var b_data: Dictionary = buildings[b] as Dictionary
+		return int(a_data.get("priority", 999)) < int(b_data.get("priority", 999))
 	)
 
 func _load_market_economy_definitions() -> void:
 	market_economy.clear()
-	market_economy = _load_json_dictionary(MARKET_ECONOMY_DATA_PATH)
+	var data: Dictionary = _load_json_dictionary(MARKET_ECONOMY_DATA_PATH)
+	if data.is_empty():
+		return
+	market_economy = data
 
 func _load_start_state() -> void:
 	var data: Dictionary = _load_json_dictionary(START_STATE_PATH)
@@ -157,19 +127,24 @@ func _load_start_state() -> void:
 	_ensure_all_building_keys()
 	_ensure_base_housing_capacity()
 	_ensure_active_housing_counts()
+	# New-game start states should not begin with productive buildings idle just
+	# because a previous patch or save file left empty labour assignment entries.
+	# Default setup staffs production automatically in priority order, with maize
+	# protected first, then other production buildings until population runs out.
 	_auto_staff_all_productive_buildings()
-	_ensure_religion_state()
 
 func _float_dictionary(source: Dictionary) -> Dictionary:
 	var output: Dictionary = {}
 	for key_variant: Variant in source.keys():
-		output[String(key_variant)] = float(source[key_variant])
+		var key: String = String(key_variant)
+		output[key] = float(source[key])
 	return output
 
 func _int_dictionary(source: Dictionary) -> Dictionary:
 	var output: Dictionary = {}
 	for key_variant: Variant in source.keys():
-		output[String(key_variant)] = int(source[key_variant])
+		var key: String = String(key_variant)
+		output[key] = int(source[key])
 	return output
 
 func _nested_int_dictionary(source: Dictionary) -> Dictionary:
@@ -183,28 +158,37 @@ func _nested_int_dictionary(source: Dictionary) -> Dictionary:
 
 func _ensure_all_resource_keys() -> void:
 	for resource_id: String in resource_order:
-		if not estate_stockpiles.has(resource_id): estate_stockpiles[resource_id] = 0.0
-		if not market_stockpiles.has(resource_id): market_stockpiles[resource_id] = 0.0
-		if not market_demand.has(resource_id): market_demand[resource_id] = 0.0
+		if not estate_stockpiles.has(resource_id):
+			estate_stockpiles[resource_id] = 0.0
+		if not market_stockpiles.has(resource_id):
+			market_stockpiles[resource_id] = 0.0
+		if not market_demand.has(resource_id):
+			market_demand[resource_id] = 0.0
 
 func _ensure_all_building_keys() -> void:
 	for building_id: String in building_order:
-		if not estate_buildings.has(building_id): estate_buildings[building_id] = 0
+		if not estate_buildings.has(building_id):
+			estate_buildings[building_id] = 0
 
 func get_current_veintena() -> int:
 	return current_veintena
 
 func get_last_report() -> Array[String]:
-	return _string_array(last_report)
+	var output: Array[String] = []
+	for line_variant: Variant in last_report:
+		output.append(String(line_variant))
+	return output
 
 func get_resource_name(resource_id: String) -> String:
 	if resources.has(resource_id):
-		return String((resources[resource_id] as Dictionary).get("name", resource_id.capitalize()))
+		var data: Dictionary = resources[resource_id] as Dictionary
+		return String(data.get("name", resource_id.capitalize()))
 	return resource_id.capitalize()
 
 func get_building_name(building_id: String) -> String:
 	if buildings.has(building_id):
-		return String((buildings[building_id] as Dictionary).get("name", building_id.capitalize()))
+		var data: Dictionary = buildings[building_id] as Dictionary
+		return String(data.get("name", building_id.capitalize()))
 	return building_id.capitalize()
 
 func get_storehouse_goods() -> Array[Dictionary]:
@@ -221,18 +205,36 @@ func get_storehouse_goods() -> Array[Dictionary]:
 		var input_value: float = float(building_inputs.get(resource_id, 0.0))
 		var housing_value: float = float(housing_maintenance.get(resource_id, 0.0))
 		var outgoing: float = upkeep_value + input_value + housing_value
-		output.append({"id": resource_id, "name": String(resource_data.get("name", resource_id.capitalize())), "category": String(resource_data.get("category", "raw")), "stored": stored, "incoming": in_value, "outgoing": outgoing, "reserved": outgoing, "free": maxf(0.0, stored - outgoing), "net": in_value - outgoing, "pressure": _pressure_label(stored, outgoing), "uses": resource_data.get("uses", []) as Array, "reserved_breakdown": _reserve_breakdown(resource_id, upkeep_value, input_value, housing_value)})
+		var reserved: float = outgoing
+		var free_value: float = maxf(0.0, stored - reserved)
+		var good: Dictionary = {
+			"id": resource_id,
+			"name": String(resource_data.get("name", resource_id.capitalize())),
+			"category": String(resource_data.get("category", "raw")),
+			"stored": stored,
+			"incoming": in_value,
+			"outgoing": outgoing,
+			"reserved": reserved,
+			"free": free_value,
+			"net": in_value - outgoing,
+			"pressure": _pressure_label(stored, outgoing),
+			"uses": resource_data.get("uses", []) as Array,
+			"reserved_breakdown": _reserve_breakdown(resource_id, upkeep_value, input_value, housing_value)
+		}
+		output.append(good)
 	return output
 
 func get_market_goods() -> Array[Dictionary]:
 	var raw_goods: Array = estimate_market_resolution().get("goods", []) as Array
 	var output: Array[Dictionary] = []
 	for item_variant: Variant in raw_goods:
-		output.append((item_variant as Dictionary).duplicate(true))
+		var item: Dictionary = item_variant as Dictionary
+		output.append(item.duplicate(true))
 	return output
 
 func estimate_market_resolution() -> Dictionary:
-	var resolved_goods: Array[Dictionary] = _apply_market_economy_to_goods(_base_market_goods())
+	var base_goods: Array[Dictionary] = _base_market_goods()
+	var resolved_goods: Array[Dictionary] = _apply_market_economy_to_goods(base_goods)
 	var total_output: float = 0.0
 	var total_demand: float = 0.0
 	var net_value: float = 0.0
@@ -245,10 +247,24 @@ func estimate_market_resolution() -> Dictionary:
 		net_value += float(good.get("village_net_change", 0.0))
 		var label: String = String(good.get("label", ""))
 		var name: String = String(good.get("name", good.get("id", "Good")))
-		if label == "Crisis": crisis_goods.append(name)
-		elif label == "Shortage": shortage_goods.append(name)
-		elif label == "Abundant": surplus_goods.append(name)
-	return {"goods": resolved_goods, "source_of_truth": String(market_economy.get("source_of_truth", "start_state market stock/demand")), "total_output": total_output, "total_demand": total_demand, "net_change": net_value, "crisis_goods": crisis_goods, "shortage_goods": shortage_goods, "surplus_goods": surplus_goods, "village_population": (market_economy.get("village_population", {}) as Dictionary).duplicate(true), "schema_version": String(market_economy.get("schema_version", ""))}
+		if label == "Crisis":
+			crisis_goods.append(name)
+		elif label == "Shortage":
+			shortage_goods.append(name)
+		elif label == "Abundant":
+			surplus_goods.append(name)
+	return {
+		"goods": resolved_goods,
+		"source_of_truth": String(market_economy.get("source_of_truth", "start_state market stock/demand")),
+		"total_output": total_output,
+		"total_demand": total_demand,
+		"net_change": net_value,
+		"crisis_goods": crisis_goods,
+		"shortage_goods": shortage_goods,
+		"surplus_goods": surplus_goods,
+		"village_population": (market_economy.get("village_population", {}) as Dictionary).duplicate(true),
+		"schema_version": String(market_economy.get("schema_version", ""))
+	}
 
 func get_market_economy_summary() -> Dictionary:
 	return estimate_market_resolution()
@@ -258,808 +274,1080 @@ func get_village_economy_rows() -> Array[Dictionary]:
 	var goods: Array = estimate_market_resolution().get("goods", []) as Array
 	for good_variant: Variant in goods:
 		var good: Dictionary = good_variant as Dictionary
-		rows.append({"id": String(good.get("id", "")), "name": String(good.get("name", "Good")), "natural_production": float(good.get("village_natural_production", 0.0)), "building_output": float(good.get("village_building_output", 0.0)), "estate_output": float(good.get("market_estate_output_supply", 0.0)), "total_production": float(good.get("village_total_production", 0.0)), "population_consumption": float(good.get("village_population_consumption", 0.0)), "building_input_demand": float(good.get("village_building_input_demand", 0.0)), "construction_demand": float(good.get("market_construction_demand", 0.0)), "estate_input_demand": float(good.get("market_estate_input_demand", 0.0)), "total_demand": float(good.get("village_total_demand", 0.0)), "net_change": float(good.get("village_net_change", 0.0)), "projected_market_stock": float(good.get("projected_market_stock", 0.0)), "label": String(good.get("label", "Unknown"))})
+		rows.append({
+			"id": String(good.get("id", "")),
+			"name": String(good.get("name", "Good")),
+			"natural_production": float(good.get("village_natural_production", 0.0)),
+			"building_output": float(good.get("village_building_output", 0.0)),
+			"estate_output": float(good.get("market_estate_output_supply", 0.0)),
+			"total_production": float(good.get("village_total_production", 0.0)),
+			"population_consumption": float(good.get("village_population_consumption", 0.0)),
+			"building_input_demand": float(good.get("village_building_input_demand", 0.0)),
+			"construction_demand": float(good.get("market_construction_demand", 0.0)),
+			"estate_input_demand": float(good.get("market_estate_input_demand", 0.0)),
+			"total_demand": float(good.get("village_total_demand", 0.0)),
+			"net_change": float(good.get("village_net_change", 0.0)),
+			"projected_market_stock": float(good.get("projected_market_stock", 0.0)),
+			"label": String(good.get("label", "Unknown")),
+			"trend": String(good.get("trend", "Stable")),
+			"note": String(good.get("village_note", ""))
+		})
 	return rows
-
-func apply_trade_basket(trade_plan: Dictionary) -> Dictionary:
-	var sold_value: float = 0.0
-	var bought_value: float = 0.0
-	var applied: Array[String] = []
-	var goods: Dictionary = {}
-	for good: Dictionary in get_market_goods():
-		goods[String(good.get("id", ""))] = good
-	for resource_variant: Variant in trade_plan.keys():
-		var resource_id: String = String(resource_variant)
-		var amount: float = float(trade_plan[resource_variant])
-		if absf(amount) < 0.001 or not goods.has(resource_id): continue
-		var good: Dictionary = goods[resource_id] as Dictionary
-		var unit_value: float = float(good.get("current_value", good.get("projected_value", 1.0)))
-		if amount < 0.0:
-			var sell_amount: float = minf(-amount, free_stock_after_reserves(resource_id))
-			if sell_amount <= 0.0: continue
-			_add_stock(resource_id, -sell_amount)
-			market_stockpiles[resource_id] = float(market_stockpiles.get(resource_id, 0.0)) + sell_amount
-			sold_value += sell_amount * unit_value
-			applied.append("Sold " + _format_amount(sell_amount) + " " + get_resource_name(resource_id) + ".")
-		else:
-			var buy_amount: float = minf(amount, float(market_stockpiles.get(resource_id, 0.0)))
-			if buy_amount <= 0.0: continue
-			_add_stock(resource_id, buy_amount)
-			market_stockpiles[resource_id] = float(market_stockpiles.get(resource_id, 0.0)) - buy_amount
-			bought_value += buy_amount * unit_value
-			applied.append("Bought " + _format_amount(buy_amount) + " " + get_resource_name(resource_id) + ".")
-	var balance: float = sold_value - bought_value
-	if balance < -0.01:
-		return {"accepted": false, "reason": "Trade rejected: bought value exceeds sold value.", "sold_value": sold_value, "bought_value": bought_value, "balance": balance, "applied": []}
-	last_report.append("Barter trade accepted. Sold value " + _format_amount(sold_value) + ", bought value " + _format_amount(bought_value) + ". Surplus value is lost, not stored.")
-	for line: String in applied: last_report.append(line)
-	emit_signal("state_changed")
-	return {"accepted": true, "reason": "Trade accepted.", "sold_value": sold_value, "bought_value": bought_value, "balance": balance, "applied": applied}
 
 func _base_market_goods() -> Array[Dictionary]:
 	var output: Array[Dictionary] = []
 	for resource_id: String in resource_order:
 		var resource_data: Dictionary = resources[resource_id] as Dictionary
+		var stock_value: float = float(market_stockpiles.get(resource_id, 0.0))
+		var demand_value: float = maxf(0.0, float(market_demand.get(resource_id, 0.0)))
+		var coverage: float = 0.0
+		if demand_value > 0.0:
+			coverage = stock_value / demand_value
+		var multiplier: float = _scarcity_multiplier(coverage, demand_value)
 		var base_value: float = float(resource_data.get("base_value", 1.0))
-		var stock: float = float(market_stockpiles.get(resource_id, 0.0))
-		var demand: float = float(market_demand.get(resource_id, 0.0))
-		var coverage: float = 999.0 if demand <= 0.0 else stock / maxf(1.0, demand)
-		var multiplier: float = _scarcity_multiplier(coverage)
-		var value: float = base_value * multiplier
-		output.append({"id": resource_id, "name": String(resource_data.get("name", resource_id.capitalize())), "category": String(resource_data.get("category", "raw")), "base_value": base_value, "market_stock": stock, "demand": demand, "coverage": coverage, "current_value": value, "projected_value": value, "projected_market_stock": stock, "label": _market_label(coverage), "trend": "Stable", "village_net_change": 0.0, "rival_note": "No rival signal recorded yet."})
+		var current_value: float = base_value * multiplier
+		var good: Dictionary = {
+			"id": resource_id,
+			"name": String(resource_data.get("name", resource_id.capitalize())),
+			"category": String(resource_data.get("category", "raw")),
+			"market_stock": stock_value,
+			"demand": demand_value,
+			"base_value": base_value,
+			"current_value": current_value,
+			"coverage": coverage,
+			"label": _market_label(coverage, demand_value),
+			"trend": _market_trend(coverage, demand_value),
+			"buy_note": "Buy when estate free stock is low or a build needs this good.",
+			"sell_note": "Sell only true surplus after upkeep, input and build reserves are protected.",
+			"rival_note": _rival_market_note(resource_id)
+		}
+		output.append(good)
 	return output
 
-func _apply_market_economy_to_goods(goods: Array[Dictionary]) -> Array[Dictionary]:
-	var configured_goods: Dictionary = market_economy.get("goods", {}) as Dictionary
-	for good: Dictionary in goods:
-		var resource_id: String = String(good.get("id", ""))
-		var config: Dictionary = configured_goods.get(resource_id, {}) as Dictionary
-		var natural: float = float(config.get("natural_production", 0.0))
-		var building_output: float = float(config.get("building_output", 0.0))
-		var estate_supply: float = float(config.get("estate_output_supply", 0.0))
-		var pop_consumption: float = float(config.get("population_consumption", 0.0))
-		var building_demand: float = float(config.get("building_input_demand", 0.0))
-		var construction: float = float(config.get("construction_demand", 0.0))
-		var estate_demand: float = float(config.get("estate_input_demand", 0.0))
-		var total_production: float = natural + building_output + estate_supply
-		var total_demand: float = pop_consumption + building_demand + construction + estate_demand
-		var net: float = total_production - total_demand
-		var projected_stock: float = maxf(0.0, float(good.get("market_stock", 0.0)) + net)
-		var demand: float = float(good.get("demand", 0.0))
-		var coverage: float = 999.0 if demand <= 0.0 else projected_stock / maxf(1.0, demand)
-		var value: float = float(good.get("base_value", 1.0)) * _scarcity_multiplier(coverage)
-		good["village_natural_production"] = natural
-		good["village_building_output"] = building_output
-		good["market_estate_output_supply"] = estate_supply
-		good["village_total_production"] = total_production
-		good["village_population_consumption"] = pop_consumption
-		good["village_building_input_demand"] = building_demand
-		good["market_construction_demand"] = construction
-		good["market_estate_input_demand"] = estate_demand
-		good["village_total_demand"] = total_demand
-		good["village_net_change"] = net
-		good["projected_market_stock"] = projected_stock
-		good["coverage"] = coverage
-		good["projected_value"] = value
-		good["current_value"] = value
-		good["label"] = _market_label(coverage)
-		good["trend"] = "Rising" if net > 0.01 else ("Falling" if net < -0.01 else "Stable")
-	return goods
+func get_buildings_for_screen(screen_id: String, focus_id: String = "overview") -> Array[Dictionary]:
+	var output: Array[Dictionary] = []
+	for building_id: String in building_order:
+		var definition: Dictionary = buildings[building_id] as Dictionary
+		if String(definition.get("screen", "")) != screen_id:
+			continue
+		if not _building_matches_focus(definition, focus_id):
+			continue
+		output.append(_building_view_data(building_id))
+	return output
 
-func _scarcity_multiplier(coverage: float) -> float:
-	if coverage <= 0.0: return 3.0
-	return clampf(3.0 / coverage, 0.50, 3.0)
 
-func _market_label(coverage: float) -> String:
-	if coverage < 0.75: return "Crisis"
-	if coverage < 1.25: return "Shortage"
-	if coverage < 2.5: return "Tight"
-	if coverage > 5.0: return "Abundant"
-	return "Stable"
+func get_housing_summary() -> Dictionary:
+	var tiers: Array[Dictionary] = []
+	var total_population: int = 0
+	var total_active_population: int = 0
+	var total_inactive_population: int = 0
+	var total_capacity: int = 0
+	var total_active_capacity: int = 0
+	var total_over: int = 0
+	var total_free: int = 0
+	var built_capacity_by_group: Dictionary = housing_capacity_by_group({}, false)
+	var active_capacity_by_group: Dictionary = housing_capacity_by_group({}, true)
+	var maintenance: Dictionary = estimate_housing_maintenance()
+	for category_id: String in _housing_category_order():
+		var tier: Dictionary = _housing_category_summary(category_id, built_capacity_by_group, active_capacity_by_group)
+		tiers.append(tier)
+		total_population += int(tier.get("population", 0))
+		total_active_population += int(tier.get("active_population", 0))
+		total_inactive_population += int(tier.get("inactive_population", 0))
+		total_capacity += int(tier.get("capacity", 0))
+		total_active_capacity += int(tier.get("active_capacity", 0))
+		total_over += int(tier.get("over_capacity", 0))
+		total_free += int(tier.get("free_capacity", 0))
+	return {
+		"tiers": tiers,
+		"capacity_by_group": active_capacity_by_group,
+		"built_capacity_by_group": built_capacity_by_group,
+		"maintenance": maintenance,
+		"total_population": total_population,
+		"total_active_population": total_active_population,
+		"total_inactive_population": total_inactive_population,
+		"total_capacity": total_capacity,
+		"total_active_capacity": total_active_capacity,
+		"total_over_capacity": total_over,
+		"total_free_capacity": total_free,
+		"status_text": _housing_status_text(total_active_population, total_active_capacity)
+	}
 
-func _reserve_breakdown(resource_id: String, upkeep: float, input_value: float, housing: float) -> Array[String]:
+func get_housing_rows(focus_id: String = "overview") -> Array[Dictionary]:
+	var output: Array[Dictionary] = []
+	var built_capacity_by_group: Dictionary = housing_capacity_by_group({}, false)
+	var active_capacity_by_group: Dictionary = housing_capacity_by_group({}, true)
+	if focus_id == "" or focus_id == "overview":
+		for category_id: String in _housing_category_order():
+			var tier: Dictionary = _housing_category_summary(category_id, built_capacity_by_group, active_capacity_by_group)
+			tier["is_summary"] = true
+			output.append(tier)
+		return output
+	if focus_id == "mothball":
+		return get_housing_mothball_rows()
+
+	for building_id: String in building_order:
+		if not buildings.has(building_id):
+			continue
+		var definition: Dictionary = buildings[building_id] as Dictionary
+		if String(definition.get("screen", "")) != "housing":
+			continue
+		if String(definition.get("category", "")) != focus_id:
+			continue
+		output.append(_housing_building_view_data(building_id))
+	return output
+
+func housing_capacity_by_group(overrides: Dictionary = {}, active_only: bool = true) -> Dictionary:
+	_ensure_active_housing_counts()
+	var result: Dictionary = {}
+	for group_variant: Variant in base_housing_capacity.keys():
+		var group_id: String = String(group_variant)
+		result[group_id] = int(base_housing_capacity[group_id])
+	for group_variant: Variant in population.keys():
+		var group_id: String = String(group_variant)
+		if not result.has(group_id):
+			result[group_id] = 0
+	for building_id: String in building_order:
+		if not _is_housing_building_id(building_id):
+			continue
+		var built_count: int = int(estate_buildings.get(building_id, 0))
+		var count: int = built_count
+		if active_only:
+			count = int(active_housing_counts.get(building_id, built_count))
+		if overrides.has(building_id):
+			count = int(overrides[building_id])
+		count = clampi(count, 0, built_count)
+		if count <= 0:
+			continue
+		var definition: Dictionary = buildings[building_id] as Dictionary
+		var capacity: Dictionary = definition.get("housing_capacity", {}) as Dictionary
+		for group_variant: Variant in capacity.keys():
+			var group_id: String = String(group_variant)
+			result[group_id] = int(result.get(group_id, 0)) + int(capacity[group_variant]) * count
+	return result
+
+func active_population_by_group() -> Dictionary:
+	var result: Dictionary = {}
+	var active_capacity: Dictionary = housing_capacity_by_group({}, true)
+	for group_variant: Variant in population.keys():
+		var group_id: String = String(group_variant)
+		var total: int = int(population.get(group_id, 0))
+		var active_cap: int = int(active_capacity.get(group_id, total))
+		result[group_id] = mini(total, max(0, active_cap))
+	return result
+
+func inactive_population_by_group() -> Dictionary:
+	var result: Dictionary = {}
+	var active: Dictionary = active_population_by_group()
+	for group_variant: Variant in population.keys():
+		var group_id: String = String(group_variant)
+		result[group_id] = max(0, int(population.get(group_id, 0)) - int(active.get(group_id, 0)))
+	return result
+
+func _active_population_for_group(group_id: String) -> int:
+	return int(active_population_by_group().get(group_id, 0))
+
+func estimate_housing_maintenance() -> Dictionary:
+	# Mothballing does not avoid building maintenance. Maintenance is paid for all
+	# built housing, active or inactive.
+	var result: Dictionary = {}
+	for building_id: String in building_order:
+		if not _is_housing_building_id(building_id):
+			continue
+		var count: int = int(estate_buildings.get(building_id, 0))
+		if count <= 0:
+			continue
+		var definition: Dictionary = buildings[building_id] as Dictionary
+		var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
+		for resource_variant: Variant in maintenance.keys():
+			var resource_id: String = String(resource_variant)
+			result[resource_id] = float(result.get(resource_id, 0.0)) + float(maintenance[resource_variant]) * float(count)
+	return result
+
+func _housing_building_view_data(building_id: String) -> Dictionary:
+	_ensure_active_housing_counts()
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	var count: int = int(estate_buildings.get(building_id, 0))
+	var active_count: int = int(active_housing_counts.get(building_id, count))
+	var mothballed_count: int = max(0, count - active_count)
+	var capacity: Dictionary = definition.get("housing_capacity", {}) as Dictionary
+	var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
+	var category_id: String = String(definition.get("category", ""))
+	var category_summary: Dictionary = _housing_category_summary(category_id, housing_capacity_by_group({}, false), housing_capacity_by_group({}, true))
+	return {
+		"id": building_id,
+		"name": String(definition.get("name", building_id.capitalize())),
+		"screen": "housing",
+		"category": category_id,
+		"tier": String(definition.get("tier", "")),
+		"description": String(definition.get("description", "")),
+		"count": count,
+		"active_count": active_count,
+		"mothballed_count": mothballed_count,
+		"operating": active_count,
+		"blocked": mothballed_count,
+		"build_cost": definition.get("build_cost", {}) as Dictionary,
+		"housing_capacity": capacity,
+		"housing_maintenance": maintenance,
+		"inputs": maintenance,
+		"outputs": capacity,
+		"capacity_total": _multiply_dictionary(capacity, count),
+		"active_capacity_total": _multiply_dictionary(capacity, active_count),
+		"maintenance_total": _multiply_dictionary(maintenance, count),
+		"capacity_after_build": _multiply_dictionary(capacity, count + 1),
+		"maintenance_after_build": _multiply_dictionary(maintenance, count + 1),
+		"capacity_after_destroy": _multiply_dictionary(capacity, max(0, count - 1)),
+		"maintenance_after_destroy": _multiply_dictionary(maintenance, max(0, count - 1)),
+		"category_summary": category_summary,
+		"efficiency_text": _housing_efficiency_text(capacity, maintenance),
+		"can_build": can_build(building_id),
+		"build_status": build_status_text(building_id),
+		"can_destroy": can_destroy(building_id),
+		"destroy_status": destroy_status_text(building_id),
+		"status_text": _housing_building_status_text(building_id)
+	}
+
+func _housing_category_summary(category_id: String, built_capacity_by_group: Dictionary, active_capacity_by_group: Dictionary) -> Dictionary:
+	var group_ids: Array[String] = _housing_group_ids_for_category(category_id)
+	var population_total: int = 0
+	var active_population_total: int = 0
+	var inactive_population_total: int = 0
+	var built_capacity_total: int = 0
+	var active_capacity_total: int = 0
+	var member_rows: Array[Dictionary] = []
+	for group_id: String in group_ids:
+		var pop_count: int = int(population.get(group_id, 0))
+		var active_pop: int = _active_population_for_group(group_id)
+		var inactive_pop: int = max(0, pop_count - active_pop)
+		var built_capacity_count: int = int(built_capacity_by_group.get(group_id, 0))
+		var active_capacity_count: int = int(active_capacity_by_group.get(group_id, 0))
+		population_total += pop_count
+		active_population_total += active_pop
+		inactive_population_total += inactive_pop
+		built_capacity_total += built_capacity_count
+		active_capacity_total += active_capacity_count
+		member_rows.append({
+			"id": group_id,
+			"name": _labour_group_name(group_id),
+			"population": pop_count,
+			"active_population": active_pop,
+			"inactive_population": inactive_pop,
+			"capacity": built_capacity_count,
+			"active_capacity": active_capacity_count,
+			"free_capacity": max(0, active_capacity_count - active_pop),
+			"over_capacity": max(0, active_pop - active_capacity_count),
+			"status": _housing_status_text(active_pop, active_capacity_count)
+		})
+	var building_options: Array[Dictionary] = []
+	for building_id: String in building_order:
+		if not _is_housing_building_id(building_id):
+			continue
+		var definition: Dictionary = buildings[building_id] as Dictionary
+		if String(definition.get("category", "")) != category_id:
+			continue
+		building_options.append({
+			"id": building_id,
+			"name": String(definition.get("name", building_id.capitalize())),
+			"tier": String(definition.get("tier", "")),
+			"count": int(estate_buildings.get(building_id, 0)),
+			"active_count": int(active_housing_counts.get(building_id, int(estate_buildings.get(building_id, 0)))),
+			"build_cost": definition.get("build_cost", {}) as Dictionary,
+			"housing_capacity": definition.get("housing_capacity", {}) as Dictionary,
+			"housing_maintenance": definition.get("housing_maintenance", {}) as Dictionary,
+			"efficiency_text": _housing_efficiency_text(definition.get("housing_capacity", {}) as Dictionary, definition.get("housing_maintenance", {}) as Dictionary)
+		})
+	return {
+		"id": category_id,
+		"name": _housing_category_name(category_id),
+		"population": population_total,
+		"active_population": active_population_total,
+		"inactive_population": inactive_population_total,
+		"capacity": built_capacity_total,
+		"active_capacity": active_capacity_total,
+		"free_capacity": max(0, active_capacity_total - active_population_total),
+		"over_capacity": max(0, active_population_total - active_capacity_total),
+		"status": _housing_status_text(active_population_total, active_capacity_total),
+		"members": member_rows,
+		"building_options": building_options,
+		"maintenance": _housing_maintenance_for_category(category_id)
+	}
+
+func _housing_category_order() -> Array[String]:
+	return ["field_labour", "artisans", "tlacotin", "warriors", "priests", "nobles", "captives"]
+
+func _housing_category_name(category_id: String) -> String:
+	match category_id:
+		"field_labour":
+			return "Field Labour"
+		"artisans":
+			return "Artisans"
+		"tlacotin":
+			return "Tlacotin"
+		"warriors":
+			return "Warriors"
+		"priests":
+			return "Priests"
+		"nobles":
+			return "Nobles"
+		"captives":
+			return "Captives"
+	return category_id.capitalize()
+
+func _housing_group_ids_for_category(category_id: String) -> Array[String]:
+	match category_id:
+		"field_labour":
+			return ["macehualtin"]
+		"artisans":
+			return ["tolteca"]
+		"tlacotin":
+			return ["tlacotin"]
+		"warriors":
+			return ["yaotequihuaqueh"]
+		"priests":
+			return ["tlamacazqueh"]
+		"nobles":
+			return ["pipiltin"]
+		"captives":
+			return ["malli"]
+	return []
+
+func _housing_maintenance_for_category(category_id: String) -> Dictionary:
+	var result: Dictionary = {}
+	for building_id: String in building_order:
+		if not _is_housing_building_id(building_id):
+			continue
+		var definition: Dictionary = buildings[building_id] as Dictionary
+		if String(definition.get("category", "")) != category_id:
+			continue
+		var count: int = int(estate_buildings.get(building_id, 0))
+		if count <= 0:
+			continue
+		var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
+		for resource_variant: Variant in maintenance.keys():
+			var resource_id: String = String(resource_variant)
+			result[resource_id] = float(result.get(resource_id, 0.0)) + float(maintenance[resource_variant]) * float(count)
+	return result
+
+func _housing_status_text(population_count: int, capacity_count: int) -> String:
+	if capacity_count <= 0:
+		if population_count <= 0:
+			return "No population"
+		return "No active capacity"
+	if population_count > capacity_count:
+		return "Inactive overflow"
+	if population_count == capacity_count:
+		return "Full"
+	var use_ratio: float = float(population_count) / float(capacity_count)
+	if use_ratio >= 0.9:
+		return "Strained"
+	if use_ratio >= 0.7:
+		return "Tight"
+	return "Comfortable"
+
+func _housing_building_status_text(building_id: String) -> String:
+	if not buildings.has(building_id):
+		return "Unknown building."
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	var count: int = int(estate_buildings.get(building_id, 0))
+	var active_count: int = int(active_housing_counts.get(building_id, count))
+	var capacity: Dictionary = definition.get("housing_capacity", {}) as Dictionary
+	var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
+	var text: String = "Built " + str(count) + "; active " + str(active_count) + "; mothballed " + str(max(0, count - active_count)) + ". Adds " + _dictionary_to_named_string(capacity, "capacity") + " each."
+	if not maintenance.is_empty():
+		text += " Building upkeep each: " + _dictionary_to_named_string(maintenance, "") + "."
+	return text
+
+func _housing_efficiency_text(capacity: Dictionary, maintenance: Dictionary) -> String:
+	if maintenance.is_empty():
+		return "No building upkeep"
+	return "Larger housing tiers have lower upkeep per capacity."
+
+func _would_destroy_overcrowd(building_id: String) -> Dictionary:
+	# Destroying removes the building entirely. It is blocked if that would make
+	# currently active people inactive. Mothballing is the safe way to deactivate.
+	var result: Dictionary = {"blocked": false, "lines": []}
+	if not _is_housing_building_id(building_id):
+		return result
+	var current_count: int = int(estate_buildings.get(building_id, 0))
+	if current_count <= 0:
+		return result
+	var active_count: int = int(active_housing_counts.get(building_id, current_count))
+	var active_after: int = mini(active_count, max(0, current_count - 1))
+	var overrides: Dictionary = {building_id: active_after}
+	var after_capacity: Dictionary = housing_capacity_by_group(overrides, true)
 	var lines: Array[String] = []
-	if upkeep > 0.0: lines.append("Population upkeep " + _format_amount(upkeep))
-	if input_value > 0.0: lines.append("Building inputs " + _format_amount(input_value))
-	if housing > 0.0: lines.append("Housing maintenance " + _format_amount(housing))
-	return lines
+	for group_variant: Variant in population.keys():
+		var group_id: String = String(group_variant)
+		var active_pop: int = _active_population_for_group(group_id)
+		var capacity_count: int = int(after_capacity.get(group_id, 0))
+		if active_pop > capacity_count:
+			lines.append(_labour_group_name(group_id) + " by " + str(active_pop - capacity_count))
+	if not lines.is_empty():
+		result["blocked"] = true
+		result["lines"] = lines
+	return result
+
+func _is_housing_building_id(building_id: String) -> bool:
+	if not buildings.has(building_id):
+		return false
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	return String(definition.get("screen", "")) == "housing" and (definition.has("housing_capacity") or definition.has("housing_maintenance"))
+
+func _ensure_base_housing_capacity() -> void:
+	for group_variant: Variant in population.keys():
+		var group_id: String = String(group_variant)
+		if not base_housing_capacity.has(group_id):
+			# Missing base capacity should not silently house the population.
+			# Starting housing now comes from start_state estate_buildings +
+			# active_housing_counts, so future/new groups default to 0 unless
+			# the start data explicitly grants inherited base capacity.
+			base_housing_capacity[group_id] = 0
+
+func _ensure_active_housing_counts() -> void:
+	for building_id: String in building_order:
+		if not _is_housing_building_id(building_id):
+			if active_housing_counts.has(building_id):
+				active_housing_counts.erase(building_id)
+			continue
+		var built_count: int = int(estate_buildings.get(building_id, 0))
+		if built_count <= 0:
+			active_housing_counts[building_id] = 0
+			continue
+		if not active_housing_counts.has(building_id):
+			active_housing_counts[building_id] = built_count
+		else:
+			active_housing_counts[building_id] = clampi(int(active_housing_counts[building_id]), 0, built_count)
+
+func set_active_housing_count(building_id: String, active_count: int) -> bool:
+	if not _is_housing_building_id(building_id):
+		return false
+	_ensure_active_housing_counts()
+	var built_count: int = int(estate_buildings.get(building_id, 0))
+	active_housing_counts[building_id] = clampi(active_count, 0, built_count)
+	_ensure_labour_assignments()
+	emit_signal("state_changed")
+	return true
+
+func get_housing_mothball_rows() -> Array[Dictionary]:
+	_ensure_active_housing_counts()
+	var rows: Array[Dictionary] = []
+	for building_id: String in building_order:
+		if not _is_housing_building_id(building_id):
+			continue
+		var count: int = int(estate_buildings.get(building_id, 0))
+		if count <= 0:
+			continue
+		rows.append(_housing_building_view_data(building_id))
+	return rows
+
+func get_housing_mothball_data() -> Dictionary:
+	return {"summary": get_housing_summary(), "rows": get_housing_mothball_rows()}
+
+func get_productive_labour_rows() -> Array[Dictionary]:
+	_ensure_labour_assignments()
+	var required: Dictionary = _productive_labour_required()
+	var assigned_by_group: Dictionary = _assigned_labour_by_group()
+	var rows: Array[Dictionary] = []
+	for group_id: String in _productive_labour_group_ids():
+		var total: int = _active_population_for_group(group_id)
+		var assigned_value: int = int(assigned_by_group.get(group_id, 0))
+		var required_value: int = int(required.get(group_id, assigned_value))
+		var free: int = max(0, total - assigned_value)
+		var short: int = max(0, assigned_value - total)
+		var pressure: String = "Available"
+		if total <= 0:
+			pressure = "Absent"
+		elif assigned_value > total:
+			pressure = "Overstretched"
+		elif free == 0 and total > 0:
+			pressure = "Fully assigned"
+		elif assigned_value >= int(total * 0.75):
+			pressure = "Tight"
+		rows.append({
+			"id": "labour_" + group_id,
+			"name": _labour_group_name(group_id),
+			"screen": "production",
+			"category": "labour",
+			"is_labour": true,
+			"description": _labour_group_description(group_id),
+			"count": total,
+			"staff": {
+				"total_population": total,
+				"required_by_staffed_production": required_value,
+				"assigned_to_production": assigned_value,
+				"free_or_background_labour": free,
+				"shortfall": short
+			},
+			"inputs": {},
+			"outputs": {},
+			"build_cost": {},
+			"can_build": false,
+			"build_status": "Use the Labour tab to choose which built productive buildings are staffed.",
+			"operating": assigned_value,
+			"blocked": short,
+			"status_text": pressure + ": assigned " + str(assigned_value) + " / total " + str(total) + "; unassigned " + str(free) + "."
+		})
+	return rows
+
+func get_labour_assignment_data() -> Dictionary:
+	_ensure_labour_assignments()
+	var assigned_by_group: Dictionary = _assigned_labour_by_group()
+	var required_by_group: Dictionary = _productive_labour_required()
+	var groups: Array[Dictionary] = []
+
+	# Player-facing labour buttons are deliberately simpler than the underlying
+	# population groups. Macehualtin and Tlacotin both staff the same productive
+	# field/chinampa buildings, so the UI presents them as one Field Labour pool
+	# while still showing the two population groups underneath. Tolteca remain
+	# separate because they operate workshops.
+	groups.append(_combined_labour_assignment_group_data(
+		"field_labour",
+		"Field Labour",
+		"Macehualtin and Tlacotin can both staff chinampas and raw production buildings. The slider assigns staffed building copies from their combined pool.",
+		_field_labour_group_ids(),
+		assigned_by_group,
+		required_by_group
+	))
+	groups.append(_single_labour_assignment_group_data("tolteca", assigned_by_group, required_by_group))
+
+	var building_rows: Array[Dictionary] = []
+	for building_id: String in building_order:
+		if not _is_productive_building_id(building_id):
+			continue
+		var count: int = int(estate_buildings.get(building_id, 0))
+		if count <= 0:
+			continue
+		var definition: Dictionary = buildings[building_id] as Dictionary
+		var staff_by_group: Dictionary = _production_staff_for_building(building_id)
+		if staff_by_group.is_empty():
+			continue
+		var assignments: Dictionary = _staff_assignments_for_building(building_id)
+		var max_by_group: Dictionary = {}
+		for group_variant: Variant in staff_by_group.keys():
+			var group_id: String = String(group_variant)
+			max_by_group[group_id] = _max_staffable_count_for_building_group(building_id, group_id)
+		if _building_can_use_field_labour(building_id):
+			max_by_group["field_labour"] = _max_staffable_count_for_field_labour(building_id)
+		var staffed_count: int = _staffed_count_for_building(building_id)
+		var status: Dictionary = _estimate_building_status(building_id)
+		var operating: int = int(status.get("operating", 0))
+		building_rows.append({
+			"id": building_id,
+			"name": String(definition.get("name", building_id.capitalize())),
+			"count": count,
+			"staffed_count": staffed_count,
+			"staff_assignments": assignments,
+			"allowed_worker_groups": _allowed_worker_groups_for_building(building_id),
+			"staff_per_instance_by_group": staff_by_group,
+			"max_staffable_by_group": max_by_group,
+			"max_staffable": _max_staffable_count_for_building(building_id),
+			"staff_population_by_group": _staff_population_by_building(building_id),
+			"operating": operating,
+			"blocked": int(status.get("blocked", 0)),
+			"unstaffed": int(status.get("unstaffed", 0)),
+			"status_text": String(status.get("status_text", "")),
+			"staff_per_instance": staff_by_group,
+			"staff_at_staffed": _assigned_staff_for_building(building_id),
+			"inputs_per_instance": definition.get("inputs", {}) as Dictionary,
+			"outputs_per_instance": definition.get("outputs", {}) as Dictionary,
+			"inputs_at_staffed": _multiply_dictionary(definition.get("inputs", {}) as Dictionary, staffed_count),
+			"outputs_at_staffed": _multiply_dictionary(definition.get("outputs", {}) as Dictionary, staffed_count),
+			"inputs_at_operating": _multiply_dictionary(definition.get("inputs", {}) as Dictionary, operating),
+			"outputs_at_operating": _multiply_dictionary(definition.get("outputs", {}) as Dictionary, operating)
+		})
+
+	return {"groups": groups, "buildings": building_rows}
+
+func _single_labour_assignment_group_data(group_id: String, assigned_by_group: Dictionary, required_by_group: Dictionary) -> Dictionary:
+	var total: int = _active_population_for_group(group_id)
+	var assigned: int = int(assigned_by_group.get(group_id, 0))
+	var required: int = int(required_by_group.get(group_id, assigned))
+	return {
+		"id": group_id,
+		"name": _labour_group_name(group_id),
+		"description": _labour_group_description(group_id),
+		"total": total,
+		"assigned": assigned,
+		"required": required,
+		"unassigned": max(0, total - assigned),
+		"shortfall": max(0, assigned - total),
+		"members": [{
+			"id": group_id,
+			"name": _labour_group_name(group_id),
+			"total": total,
+			"assigned": assigned,
+			"required": required,
+			"unassigned": max(0, total - assigned),
+			"shortfall": max(0, assigned - total)
+		}]
+	}
+
+func _combined_labour_assignment_group_data(group_id: String, display_name: String, description: String, member_ids: Array[String], assigned_by_group: Dictionary, required_by_group: Dictionary) -> Dictionary:
+	var total: int = 0
+	var assigned: int = 0
+	var required: int = 0
+	var shortfall: int = 0
+	var members: Array[Dictionary] = []
+	for member_id: String in member_ids:
+		var member_total: int = _active_population_for_group(member_id)
+		var member_assigned: int = int(assigned_by_group.get(member_id, 0))
+		var member_required: int = int(required_by_group.get(member_id, member_assigned))
+		var member_shortfall: int = max(0, member_assigned - member_total)
+		total += member_total
+		assigned += member_assigned
+		required += member_required
+		shortfall += member_shortfall
+		members.append({
+			"id": member_id,
+			"name": _labour_group_name(member_id),
+			"total": member_total,
+			"assigned": member_assigned,
+			"required": member_required,
+			"unassigned": max(0, member_total - member_assigned),
+			"shortfall": member_shortfall
+		})
+	return {
+		"id": group_id,
+		"name": display_name,
+		"description": description,
+		"total": total,
+		"assigned": assigned,
+		"required": required,
+		"unassigned": max(0, total - assigned),
+		"shortfall": shortfall,
+		"members": members
+	}
+
+func assign_labour_to_building(building_id: String, group_id: String, amount: int) -> bool:
+	# Labour is assigned by staffing built building copies. If a group is supplied,
+	# only that worker type changes; otherwise this falls back to the old total-count behaviour.
+	if group_id != "":
+		return set_staffed_building_count_for_group(building_id, group_id, amount)
+	return set_staffed_building_count(building_id, amount)
+
+func set_staffed_building_count(building_id: String, requested_count: int) -> bool:
+	# Backwards-compatible total-staffing setter. It fills the building using the
+	# first available productive worker types in order.
+	_ensure_labour_assignments()
+	if not buildings.has(building_id):
+		return false
+	if not _is_productive_building_id(building_id):
+		return false
+	var count: int = int(estate_buildings.get(building_id, 0))
+	if count <= 0:
+		return false
+	var wanted: int = clampi(requested_count, 0, count)
+	var requested: Dictionary = {}
+	var remaining: int = wanted
+	for group_id: String in _allowed_worker_groups_for_building(building_id):
+		if remaining <= 0:
+			break
+		var max_for_group: int = _max_staffable_count_for_building_group(building_id, group_id, requested)
+		var amount: int = mini(remaining, max_for_group)
+		requested[group_id] = amount
+		remaining -= amount
+	labour_assignments[building_id] = requested
+	_ensure_labour_assignments()
+	return _staffed_count_for_building(building_id) == wanted
+
+func set_staffed_building_count_for_group(building_id: String, group_id: String, requested_count: int) -> bool:
+	if group_id == "field_labour":
+		return set_staffed_building_count_for_field_labour(building_id, requested_count)
+	_ensure_labour_assignments()
+	if not buildings.has(building_id):
+		return false
+	if not _is_productive_building_id(building_id):
+		return false
+	var allowed: Array[String] = _allowed_worker_groups_for_building(building_id)
+	if not allowed.has(group_id):
+		return false
+	var count: int = int(estate_buildings.get(building_id, 0))
+	if count <= 0:
+		return false
+	var current: Dictionary = _staff_assignments_for_building(building_id)
+	var final_count: int = _clamp_staffed_count_for_building_group(building_id, group_id, requested_count)
+	current[group_id] = final_count
+
+	# If the selected worker type now claims too many building slots, displace
+	# other worker types on this same building. This lets the player select
+	# Tlacotin, drag the bar up, and have those copies replace Macehualtin rather
+	# than first having to reduce the Macehualtin bar manually.
+	var used_slots: int = 0
+	for key_variant: Variant in current.keys():
+		used_slots += int(current[key_variant])
+	if used_slots > count:
+		var excess: int = used_slots - count
+		for other_group: String in allowed:
+			if other_group == group_id:
+				continue
+			if excess <= 0:
+				break
+			var other_value: int = int(current.get(other_group, 0))
+			var reduction: int = mini(other_value, excess)
+			current[other_group] = other_value - reduction
+			excess -= reduction
+
+	for key_variant: Variant in current.keys().duplicate():
+		if int(current[key_variant]) <= 0:
+			current.erase(key_variant)
+
+	labour_assignments[building_id] = current
+	_ensure_labour_assignments()
+	return int((_staff_assignments_for_building(building_id)).get(group_id, 0)) == requested_count
+
+func set_staffed_building_count_for_field_labour(building_id: String, requested_count: int) -> bool:
+	_ensure_labour_assignments()
+	if not buildings.has(building_id):
+		return false
+	if not _is_productive_building_id(building_id):
+		return false
+	if not _building_can_use_field_labour(building_id):
+		return false
+	var count: int = int(estate_buildings.get(building_id, 0))
+	if count <= 0:
+		return false
+	var max_allowed: int = _max_staffable_count_for_field_labour(building_id)
+	var wanted: int = clampi(requested_count, 0, mini(count, max_allowed))
+	var current: Dictionary = _staff_assignments_for_building(building_id)
+
+	# Replace any old per-member field assignments with one combined pool value.
+	for member_id: String in _field_labour_group_ids():
+		current.erase(member_id)
+	current.erase("field_labour")
+	if wanted > 0:
+		current["field_labour"] = wanted
+
+	# Do not overfill building slots if future data allows mixed specialist and
+	# field-labour staffing on the same building.
+	var used_slots: int = 0
+	for key_variant: Variant in current.keys():
+		used_slots += int(current[key_variant])
+	if used_slots > count:
+		current["field_labour"] = max(0, int(current.get("field_labour", 0)) - (used_slots - count))
+
+	for key_variant: Variant in current.keys().duplicate():
+		if int(current[key_variant]) <= 0:
+			current.erase(key_variant)
+
+	labour_assignments[building_id] = current
+	_ensure_labour_assignments()
+	return _field_labour_staffed_count_for_building(building_id) == wanted
+
+func _productive_labour_required() -> Dictionary:
+	# In the current prototype, "required" means the population committed to the
+	# currently staffed production buildings. Storehouse input/output estimates use
+	# the same staffed building counts.
+	return _assigned_labour_by_group()
+
+func _productive_labour_group_ids() -> Array[String]:
+	# Warriors are deliberately excluded here. They belong to Barracks and Flower
+	# Wars. Production labour is commoner/bonded labour and skilled artisans.
+	return ["macehualtin", "tlacotin", "tolteca"]
+
+
+func _max_staffable_count_for_field_labour_with_used(building_id: String, used_by_group: Dictionary) -> int:
+	if not buildings.has(building_id):
+		return 0
+	if not _building_can_use_field_labour(building_id):
+		return 0
+	var count: int = int(estate_buildings.get(building_id, 0))
+	var needed_per: int = _field_labour_fallback_staff_required(building_id)
+	if needed_per <= 0:
+		return 0
+	var available_total: int = 0
+	for member_id: String in _field_labour_group_ids():
+		var total_pop: int = _active_population_for_group(member_id)
+		var already: int = int(used_by_group.get(member_id, 0))
+		available_total += max(0, total_pop - already)
+	return mini(count, int(floor(float(available_total) / float(needed_per))))
+
+func _field_labour_population_split_for_building(building_id: String, staffed_copies: int, used_by_group: Dictionary = {}) -> Dictionary:
+	var result: Dictionary = {}
+	var needed_per: int = _field_labour_fallback_staff_required(building_id)
+	if needed_per <= 0 or staffed_copies <= 0:
+		return result
+	var remaining_people: int = staffed_copies * needed_per
+	for member_id: String in _field_labour_group_ids():
+		if remaining_people <= 0:
+			break
+		var total_pop: int = _active_population_for_group(member_id)
+		var already: int = int(used_by_group.get(member_id, 0))
+		var available_pop: int = max(0, total_pop - already)
+		var use_pop: int = mini(remaining_people, available_pop)
+		if use_pop > 0:
+			result[member_id] = use_pop
+			remaining_people -= use_pop
+	return result
+
+func _field_labour_distribution_for_building(target_building_id: String, target_copies: int) -> Dictionary:
+	# Work through buildings in a stable order so the displayed Macehualtin/Tlacotin
+	# split is deterministic and does not double-count the same population.
+	var used_by_group: Dictionary = {}
+	for building_id: String in building_order:
+		if not _is_productive_building_id(building_id):
+			continue
+		var assignments: Dictionary = _staff_assignments_for_building(building_id)
+		var copies: int = int(assignments.get("field_labour", 0))
+		if building_id == target_building_id:
+			copies = target_copies
+		if copies <= 0:
+			if building_id == target_building_id:
+				return {}
+			continue
+		var split: Dictionary = _field_labour_population_split_for_building(building_id, copies, used_by_group)
+		if building_id == target_building_id:
+			return split
+		for member_variant: Variant in split.keys():
+			var member_id: String = String(member_variant)
+			used_by_group[member_id] = int(used_by_group.get(member_id, 0)) + int(split[member_id])
+	return {}
+
+func _field_labour_fallback_staff_required(building_id: String) -> int:
+	# If old building data only lists one field-labour member, use that same
+	# per-building requirement for the combined pool. The shipped buildings.json in
+	# this patch lists both Macehualtin and Tlacotin for chinampas, but this keeps
+	# older local data from breaking the combined pool.
+	for member_id: String in _field_labour_group_ids():
+		var amount: int = _staff_required_per_copy_for_group(building_id, member_id)
+		if amount > 0:
+			return amount
+	return 0
+
+func _field_labour_group_ids() -> Array[String]:
+	return ["macehualtin", "tlacotin"]
+
+func _production_staff_for_building(building_id: String) -> Dictionary:
+	if not buildings.has(building_id):
+		return {}
+	var output: Dictionary = {}
+	for group_id: String in _allowed_worker_groups_for_building(building_id):
+		var required: int = _staff_required_per_copy_for_group(building_id, group_id)
+		if required > 0:
+			output[group_id] = required
+	return output
+
+func _labour_group_name(group_id: String) -> String:
+	match group_id:
+		"macehualtin":
+			return "Macehualtin Labourers"
+		"tlacotin":
+			return "Tlacotin Labourers"
+		"tolteca":
+			return "Tolteca Artisans"
+		"yaotequihuaqueh":
+			return "Yaotequihuaqueh Warriors"
+	return group_id.capitalize()
+
+func _labour_group_description(group_id: String) -> String:
+	match group_id:
+		"macehualtin":
+			return "Commoner labourers are the main productive base for chinampas and estate work."
+		"tlacotin":
+			return "Bonded or enslaved labour can support productive work where the estate has capacity and control."
+		"tolteca":
+			return "Skilled artisans operate workshops and convert raw goods into processed or luxury goods."
+		"yaotequihuaqueh":
+			return "Warriors mostly belong to Barracks and Flower Wars, but some production chains such as weapon yards can require martial staff."
+	return "Productive labour group."
+
+func _building_matches_focus(definition: Dictionary, focus_id: String) -> bool:
+	if focus_id == "" or focus_id == "overview" or focus_id == "build":
+		return true
+	var category: String = String(definition.get("category", ""))
+	if focus_id == category:
+		return true
+	if focus_id == "maize" and String(definition.get("id", "")) == "maize_chinampa":
+		return true
+	if focus_id == "cacao" and String(definition.get("id", "")) == "cacao_garden":
+		return true
+	if focus_id == "cotton" and String(definition.get("id", "")) == "cotton_chinampa":
+		return true
+	return false
+
+func _building_view_data(building_id: String) -> Dictionary:
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	var count: int = int(estate_buildings.get(building_id, 0))
+	var status: Dictionary = _estimate_building_status(building_id)
+	var staff: Dictionary = definition.get("staff", {}) as Dictionary
+	if _is_productive_building_id(building_id):
+		staff = _production_staff_for_building(building_id)
+	var inputs: Dictionary = definition.get("inputs", {}) as Dictionary
+	var outputs: Dictionary = definition.get("outputs", {}) as Dictionary
+	var build_time: int = int(definition.get("build_time_veintenas", definition.get("build_time", 0)))
+	return {
+		"id": building_id,
+		"name": String(definition.get("name", building_id.capitalize())),
+		"screen": String(definition.get("screen", "")),
+		"category": String(definition.get("category", "")),
+		"description": String(definition.get("description", "")),
+		"count": count,
+		"staff": staff,
+		"inputs": inputs,
+		"outputs": outputs,
+		"staff_total": _multiply_dictionary(staff, count),
+		"staff_assigned": _assigned_staff_for_building(building_id),
+		"inputs_total": _multiply_dictionary(inputs, int(status.get("operating", 0))),
+		"outputs_total": _multiply_dictionary(outputs, int(status.get("operating", 0))),
+		"staff_after_build": _multiply_dictionary(staff, count + 1),
+		"inputs_after_build": _multiply_dictionary(inputs, count + 1),
+		"outputs_after_build": _multiply_dictionary(outputs, count + 1),
+		"staff_after_destroy": _multiply_dictionary(staff, max(0, count - 1)),
+		"inputs_after_destroy": _multiply_dictionary(inputs, max(0, count - 1)),
+		"outputs_after_destroy": _multiply_dictionary(outputs, max(0, count - 1)),
+		"build_cost": definition.get("build_cost", {}) as Dictionary,
+		"build_time_veintenas": build_time,
+		"can_build": can_build(building_id),
+		"build_status": build_status_text(building_id),
+		"can_destroy": can_destroy(building_id),
+		"destroy_status": destroy_status_text(building_id),
+		"operating": int(status.get("operating", 0)),
+		"blocked": int(status.get("blocked", 0)),
+		"status_text": String(status.get("status_text", ""))
+	}
 
 func reserved_resources_for_current_turn() -> Dictionary:
+	# Goods spoken for before construction spending: population upkeep, housing
+	# maintenance, and current production input demand. This matches the Storehouse
+	# Reserved / Free to spend logic.
 	var reserved: Dictionary = {}
-	_add_dictionary_amounts(reserved, estimate_population_upkeep())
-	_add_dictionary_amounts(reserved, estimate_housing_maintenance())
-	_add_dictionary_amounts(reserved, estimate_building_inputs())
+	var upkeep: Dictionary = estimate_population_upkeep()
+	var maintenance: Dictionary = estimate_housing_maintenance()
+	var inputs: Dictionary = estimate_building_inputs()
+	for resource_variant: Variant in upkeep.keys():
+		var resource_id: String = String(resource_variant)
+		reserved[resource_id] = float(reserved.get(resource_id, 0.0)) + float(upkeep[resource_id])
+	for resource_variant: Variant in maintenance.keys():
+		var resource_id: String = String(resource_variant)
+		reserved[resource_id] = float(reserved.get(resource_id, 0.0)) + float(maintenance[resource_id])
+	for resource_variant: Variant in inputs.keys():
+		var resource_id: String = String(resource_variant)
+		reserved[resource_id] = float(reserved.get(resource_id, 0.0)) + float(inputs[resource_id])
 	return reserved
 
 func free_stock_after_reserves(resource_id: String) -> float:
-	return maxf(0.0, _stock(resource_id) - float(reserved_resources_for_current_turn().get(resource_id, 0.0)))
+	var reserved: Dictionary = reserved_resources_for_current_turn()
+	return maxf(0.0, _stock(resource_id) - float(reserved.get(resource_id, 0.0)))
 
 func can_build(building_id: String) -> bool:
-	if not buildings.has(building_id): return false
-	var cost: Dictionary = (buildings[building_id] as Dictionary).get("build_cost", {}) as Dictionary
+	if not buildings.has(building_id):
+		return false
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	var cost: Dictionary = definition.get("build_cost", {}) as Dictionary
 	var reserved: Dictionary = reserved_resources_for_current_turn()
 	for resource_variant: Variant in cost.keys():
 		var resource_id: String = String(resource_variant)
-		if maxf(0.0, _stock(resource_id) - float(reserved.get(resource_id, 0.0))) < float(cost[resource_id]): return false
+		var free_after_reserves: float = maxf(0.0, _stock(resource_id) - float(reserved.get(resource_id, 0.0)))
+		if free_after_reserves < float(cost[resource_id]):
+			return false
 	return true
 
 func build_status_text(building_id: String) -> String:
-	if not buildings.has(building_id): return "Unknown building."
-	if can_build(building_id): return "Buildable now using free stock after reserves."
-	return "Missing required free stock after reserves."
+	if not buildings.has(building_id):
+		return "Unknown building."
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	var cost: Dictionary = definition.get("build_cost", {}) as Dictionary
+	var reserved: Dictionary = reserved_resources_for_current_turn()
+	var missing: Array[String] = []
+	for resource_variant: Variant in cost.keys():
+		var resource_id: String = String(resource_variant)
+		var needed: float = float(cost[resource_id])
+		var stored: float = _stock(resource_id)
+		var reserved_amount: float = float(reserved.get(resource_id, 0.0))
+		var free_after_reserves: float = maxf(0.0, stored - reserved_amount)
+		if free_after_reserves < needed:
+			var shortfall: float = needed - free_after_reserves
+			var part: String = get_resource_name(resource_id) + " " + _format_amount(shortfall)
+			if reserved_amount > 0.0:
+				part += " after reserves"
+			missing.append(part)
+	if missing.is_empty():
+		return "Buildable now using free stock after reserves."
+	return "Missing: " + ", ".join(missing)
 
 func build_building(building_id: String) -> bool:
+	if not buildings.has(building_id):
+		emit_signal("build_failed", building_id, "Unknown building.")
+		return false
 	if not can_build(building_id):
 		var reason: String = build_status_text(building_id)
 		last_report.append(get_building_name(building_id) + " not built. " + reason)
 		emit_signal("build_failed", building_id, reason)
 		emit_signal("state_changed")
 		return false
-	var cost: Dictionary = (buildings[building_id] as Dictionary).get("build_cost", {}) as Dictionary
-	for resource_variant: Variant in cost.keys(): _add_stock(String(resource_variant), -float(cost[resource_variant]))
-	estate_buildings[building_id] = int(estate_buildings.get(building_id, 0)) + 1
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	var cost: Dictionary = definition.get("build_cost", {}) as Dictionary
+	for resource_variant: Variant in cost.keys():
+		var resource_id: String = String(resource_variant)
+		_add_stock(resource_id, -float(cost[resource_id]))
+	var previous_count: int = int(estate_buildings.get(building_id, 0))
+	var previous_staffed: int = _staffed_count_for_building(building_id)
+	estate_buildings[building_id] = previous_count + 1
 	if _is_housing_building_id(building_id):
 		_ensure_active_housing_counts()
-		active_housing_counts[building_id] = clampi(int(active_housing_counts.get(building_id, 0)) + 1, 0, int(estate_buildings.get(building_id, 0)))
-	_ensure_labour_assignments()
-	last_report.append("Built " + get_building_name(building_id) + ".")
+		active_housing_counts[building_id] = int(active_housing_counts.get(building_id, previous_count)) + 1
+		active_housing_counts[building_id] = clampi(int(active_housing_counts[building_id]), 0, int(estate_buildings.get(building_id, 0)))
+	# If this building type was previously fully staffed, try to staff the new
+	# copy automatically. If the player had deliberately left copies unstaffed,
+	# keep that manual choice instead of silently overriding it.
+	if _is_productive_building_id(building_id) and previous_staffed >= previous_count:
+		_auto_staff_single_building_to_max(building_id)
+	else:
+		_ensure_labour_assignments()
+	var message: String = "Built " + get_building_name(building_id) + "."
+	last_report.append(message)
 	emit_signal("build_completed", building_id)
 	emit_signal("state_changed")
 	return true
 
 func can_destroy(building_id: String) -> bool:
-	return buildings.has(building_id) and int(estate_buildings.get(building_id, 0)) > 0
+	if not buildings.has(building_id):
+		return false
+	if int(estate_buildings.get(building_id, 0)) <= 0:
+		return false
+	if _is_housing_building_id(building_id):
+		var overcrowd: Dictionary = _would_destroy_overcrowd(building_id)
+		return not bool(overcrowd.get("blocked", false))
+	return true
 
 func destroy_status_text(building_id: String) -> String:
-	return "Can destroy one. No refund in this prototype." if can_destroy(building_id) else "None built."
+	if not buildings.has(building_id):
+		return "Unknown building."
+	if int(estate_buildings.get(building_id, 0)) <= 0:
+		return "None built."
+	if _is_housing_building_id(building_id):
+		var overcrowd: Dictionary = _would_destroy_overcrowd(building_id)
+		if bool(overcrowd.get("blocked", false)):
+			var lines: Array = overcrowd.get("lines", []) as Array
+			return "Cannot destroy: would overcrowd " + ", ".join(lines) + "."
+		return "Can destroy one. No refund in this prototype."
+	if can_destroy(building_id):
+		return "Can destroy one. No refund in this prototype."
+	return "None built."
 
 func destroy_building(building_id: String) -> bool:
-	if not can_destroy(building_id):
-		emit_signal("destroy_failed", building_id, destroy_status_text(building_id))
+	if not buildings.has(building_id):
+		emit_signal("destroy_failed", building_id, "Unknown building.")
 		return false
-	estate_buildings[building_id] = max(0, int(estate_buildings.get(building_id, 0)) - 1)
-	_ensure_active_housing_counts()
+	if not can_destroy(building_id):
+		var reason: String = destroy_status_text(building_id)
+		last_report.append(get_building_name(building_id) + " not destroyed. " + reason)
+		emit_signal("destroy_failed", building_id, reason)
+		emit_signal("state_changed")
+		return false
+	var before_destroy_count: int = int(estate_buildings.get(building_id, 0))
+	estate_buildings[building_id] = max(0, before_destroy_count - 1)
+	if _is_housing_building_id(building_id):
+		_ensure_active_housing_counts()
+		active_housing_counts[building_id] = mini(int(active_housing_counts.get(building_id, 0)), int(estate_buildings.get(building_id, 0)))
 	_ensure_labour_assignments()
 	last_report.append("Destroyed one " + get_building_name(building_id) + ". No refund given.")
 	emit_signal("destroy_completed", building_id)
 	emit_signal("state_changed")
 	return true
 
-
-# -----------------------------------------------------------------------------
-# Religion / Shrine state
-# -----------------------------------------------------------------------------
-
-func _ensure_religion_state() -> void:
-	for god_id: String in GOD_IDS:
-		if not divine_favour.has(god_id):
-			divine_favour[god_id] = RELIGION_STARTING_FAVOUR
-		if not shrine_levels.has(god_id):
-			shrine_levels[god_id] = 1
-		if not shrine_upgrades.has(god_id):
-			shrine_upgrades[god_id] = []
-
-func get_religion_state() -> Dictionary:
-	_ensure_religion_state()
-	return {
-		"divine_favour": divine_favour.duplicate(true),
-		"shrine_levels": shrine_levels.duplicate(true),
-		"shrine_upgrades": shrine_upgrades.duplicate(true),
-		"ritual_capacity_used_this_veintena": ritual_capacity_used_this_veintena,
-		"recent_ritual_reports": recent_ritual_reports.duplicate(),
-		"active_priests": religion_active_priest_count(),
-		"priest_capacity": religion_priest_conversion_cap(),
-		"remaining_capacity": religion_remaining_ritual_capacity()
-	}
-
-func religion_active_priest_count() -> int:
-	return int(population.get("tlamacazqueh", 0))
-
-func religion_priest_conversion_cap() -> float:
-	return 8.0 + float(religion_active_priest_count()) * 2.0
-
-func religion_remaining_ritual_capacity() -> float:
-	return maxf(0.0, religion_priest_conversion_cap() - ritual_capacity_used_this_veintena)
-
-func get_divine_favour(god_id: String) -> float:
-	_ensure_religion_state()
-	return clampf(float(divine_favour.get(god_id, RELIGION_STARTING_FAVOUR)), 0.0, 100.0)
-
-func get_shrine_level(god_id: String) -> int:
-	_ensure_religion_state()
-	return clampi(int(shrine_levels.get(god_id, 1)), 1, 4)
-
-func get_purchased_shrine_upgrades(god_id: String) -> Array[String]:
-	_ensure_religion_state()
-	var output: Array[String] = []
-	var raw: Array = shrine_upgrades.get(god_id, []) as Array
-	for item: Variant in raw:
-		output.append(String(item))
-	return output
-
-func has_shrine_upgrade(god_id: String, upgrade_id: String) -> bool:
-	return get_purchased_shrine_upgrades(god_id).has(upgrade_id)
-
-func can_pay_religion_cost(cost: Dictionary) -> Dictionary:
-	for resource_variant: Variant in cost.keys():
-		var resource_id: String = String(resource_variant)
-		var needed: float = float(cost[resource_variant])
-		if free_stock_after_reserves(resource_id) + 0.001 < needed:
-			return {"ok": false, "reason": "Need " + _format_amount(needed) + " free " + get_resource_name(resource_id) + " after reserves."}
-	return {"ok": true, "reason": "Ready."}
-
-func pay_religion_cost(cost: Dictionary) -> void:
-	for resource_variant: Variant in cost.keys():
-		var resource_id: String = String(resource_variant)
-		_add_stock(resource_id, -float(cost[resource_variant]))
-
-func shrine_level_cost(next_level: int) -> Dictionary:
-	match next_level:
-		2:
-			return {"wood": 20.0, "cloth": 6.0, "ritual_goods": 1.0}
-		3:
-			return {"wood": 50.0, "cloth": 15.0, "ritual_goods": 4.0, "cacao": 2.0}
-		4:
-			return {"wood": 100.0, "cloth": 30.0, "ritual_goods": 8.0, "cacao": 4.0, "fine_textiles": 1.0}
-	return {}
-
-func shrine_level_priest_requirement(next_level: int) -> int:
-	match next_level:
-		2:
-			return 2
-		3:
-			return 5
-		4:
-			return 8
-	return 0
-
-func can_upgrade_shrine(god_id: String) -> Dictionary:
-	var level: int = get_shrine_level(god_id)
-	if level >= 4:
-		return {"ok": false, "reason": "Shrine is already Level 4."}
-	var next_level: int = level + 1
-	var priest_req: int = shrine_level_priest_requirement(next_level)
-	if religion_active_priest_count() < priest_req:
-		return {"ok": false, "reason": "Requires " + str(priest_req) + " active priests."}
-	return can_pay_religion_cost(shrine_level_cost(next_level))
-
-func upgrade_shrine(god_id: String) -> Dictionary:
-	_ensure_religion_state()
-	var status: Dictionary = can_upgrade_shrine(god_id)
-	if not bool(status.get("ok", false)):
-		_record_religion_report("Shrine upgrade failed: " + String(status.get("reason", "")))
-		return status
-	var next_level: int = get_shrine_level(god_id) + 1
-	pay_religion_cost(shrine_level_cost(next_level))
-	shrine_levels[god_id] = next_level
-	var message: String = god_name(god_id) + " Shrine upgraded to Level " + str(next_level) + "."
-	_record_religion_report(message)
-	emit_signal("state_changed")
-	return {"ok": true, "reason": message, "level": next_level}
-
-func god_upgrade_definitions(god_id: String) -> Array[Dictionary]:
-	match god_id:
-		"tlaloc":
-			return [
-				{"id": "rain_basin", "title": "Rain Basin", "level": 1, "priests": 1, "cost": {"wood": 8.0, "ritual_goods": 1.0}, "description": "A basin for reading water, clouds and lake signs.", "favour_bonus": 1, "decay_reduction": 0.0},
-				{"id": "canal_offering_steps", "title": "Canal Offering Steps", "level": 2, "priests": 2, "cost": {"wood": 20.0, "cloth": 5.0, "ritual_goods": 2.0}, "description": "Ritual steps linking shrine offerings to fields, canals and chinampas.", "favour_bonus": 2, "decay_reduction": 0.25},
-				{"id": "harvest_idol", "title": "Harvest Idol", "level": 3, "priests": 4, "cost": {"wood": 35.0, "cacao": 1.0, "ritual_goods": 4.0}, "description": "A major idol for harvest gratitude and drought protection hooks.", "favour_bonus": 3, "decay_reduction": 0.35},
-				{"id": "storm_court", "title": "Storm Court", "level": 4, "priests": 6, "cost": {"wood": 70.0, "cloth": 15.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, "description": "A full court for future rain boons, drought softening and agricultural rites.", "favour_bonus": 5, "decay_reduction": 0.50}
-			]
-		"huitzilopochtli":
-			return [
-				{"id": "war_banners", "title": "War Banners", "level": 1, "priests": 1, "cost": {"wood": 8.0, "ritual_goods": 1.0}, "description": "Battle banners sanctify warrior musters and small martial rites.", "favour_bonus": 1, "decay_reduction": 0.0},
-				{"id": "captive_stone", "title": "Captive Stone", "level": 2, "priests": 2, "cost": {"wood": 18.0, "cacao": 1.0, "ritual_goods": 2.0}, "description": "A ritual stone for future captive sacrifice and Flower War payoff.", "favour_bonus": 2, "decay_reduction": 0.20},
-				{"id": "eagle_arsenal_altar", "title": "Eagle Arsenal Altar", "level": 3, "priests": 4, "cost": {"wood": 35.0, "cloth": 8.0, "ritual_goods": 4.0}, "description": "An altar binding weapon preparation to martial prestige.", "favour_bonus": 3, "decay_reduction": 0.30},
-				{"id": "sun_war_court", "title": "Sun-War Court", "level": 4, "priests": 6, "cost": {"wood": 70.0, "cloth": 15.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, "description": "A full war court for future Flower War boons, captive yield and martial recognition.", "favour_bonus": 5, "decay_reduction": 0.45}
-			]
-		"tezcatlipoca":
-			return [
-				{"id": "obsidian_mirror", "title": "Obsidian Mirror", "level": 1, "priests": 1, "cost": {"wood": 8.0, "ritual_goods": 1.0}, "description": "A mirror for reading first omens and hidden danger.", "favour_bonus": 1, "decay_reduction": 0.0},
-				{"id": "smoke_vestry", "title": "Smoke Vestry", "level": 2, "priests": 2, "cost": {"wood": 18.0, "cacao": 1.0, "ritual_goods": 2.0}, "description": "A chamber for controlled smoke rites, future warnings and rival pressure hooks.", "favour_bonus": 2, "decay_reduction": 0.25},
-				{"id": "jaguar_shadow_wall", "title": "Jaguar Shadow Wall", "level": 3, "priests": 4, "cost": {"wood": 35.0, "cloth": 8.0, "ritual_goods": 4.0}, "description": "A symbolic barrier against plots, scandals and sabotage.", "favour_bonus": 3, "decay_reduction": 0.35},
-				{"id": "night_court", "title": "Night Court", "level": 4, "priests": 6, "cost": {"wood": 70.0, "cloth": 15.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, "description": "A court for future intrigue boons, counter-plots and hidden information.", "favour_bonus": 5, "decay_reduction": 0.50}
-			]
-		"quetzalcoatl":
-			return [
-				{"id": "feathered_brazier", "title": "Feathered Brazier", "level": 1, "priests": 1, "cost": {"wood": 8.0, "ritual_goods": 1.0}, "description": "A civilising fire for transition rites and household legitimacy.", "favour_bonus": 1, "decay_reduction": 0.0},
-				{"id": "scribe_mat", "title": "Scribe Mat", "level": 2, "priests": 2, "cost": {"wood": 18.0, "cacao": 1.0, "ritual_goods": 2.0}, "description": "A ritual space for record, order, tribute promises and palace-facing legitimacy.", "favour_bonus": 2, "decay_reduction": 0.25},
-				{"id": "market_wind_gate", "title": "Market Wind Gate", "level": 3, "priests": 4, "cost": {"wood": 35.0, "cloth": 8.0, "ritual_goods": 4.0}, "description": "A ceremonial gate linking trade, diplomacy and public order.", "favour_bonus": 3, "decay_reduction": 0.35},
-				{"id": "feathered_court", "title": "Feathered Court", "level": 4, "priests": 6, "cost": {"wood": 70.0, "cloth": 15.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, "description": "A full court for future recognition boons, ruler interactions and legitimacy protection.", "favour_bonus": 5, "decay_reduction": 0.50}
-			]
-	return []
-
-func upgrade_by_id(god_id: String, upgrade_id: String) -> Dictionary:
-	for data: Dictionary in god_upgrade_definitions(god_id):
-		if String(data.get("id", "")) == upgrade_id:
-			return data
-	return {}
-
-func upgrade_is_active(upgrade: Dictionary) -> bool:
-	return religion_active_priest_count() >= int(upgrade.get("priests", 0))
-
-func can_purchase_shrine_upgrade(god_id: String, upgrade_id: String) -> Dictionary:
-	var upgrade: Dictionary = upgrade_by_id(god_id, upgrade_id)
-	if upgrade.is_empty():
-		return {"ok": false, "reason": "Unknown shrine upgrade."}
-	if has_shrine_upgrade(god_id, upgrade_id):
-		return {"ok": false, "reason": "Already built."}
-	var req_level: int = int(upgrade.get("level", 1))
-	if get_shrine_level(god_id) < req_level:
-		return {"ok": false, "reason": "Requires Shrine Level " + str(req_level) + "."}
-	var req_priests: int = int(upgrade.get("priests", 0))
-	if religion_active_priest_count() < req_priests:
-		return {"ok": false, "reason": "Requires " + str(req_priests) + " active priests."}
-	return can_pay_religion_cost(upgrade.get("cost", {}) as Dictionary)
-
-func purchase_shrine_upgrade(god_id: String, upgrade_id: String) -> Dictionary:
-	_ensure_religion_state()
-	var upgrade: Dictionary = upgrade_by_id(god_id, upgrade_id)
-	var status: Dictionary = can_purchase_shrine_upgrade(god_id, upgrade_id)
-	if not bool(status.get("ok", false)):
-		_record_religion_report("Shrine upgrade failed: " + String(status.get("reason", "")))
-		return status
-	pay_religion_cost(upgrade.get("cost", {}) as Dictionary)
-	var upgrades: Array[String] = get_purchased_shrine_upgrades(god_id)
-	upgrades.append(upgrade_id)
-	shrine_upgrades[god_id] = upgrades
-	var message: String = "Built " + String(upgrade.get("title", "upgrade")) + " for " + god_name(god_id) + "."
-	_record_religion_report(message)
-	emit_signal("state_changed")
-	return {"ok": true, "reason": message}
-
-func ritual_data(god_id: String, tier_id: String) -> Dictionary:
-	var title_prefix: String = "Ritual"
-	match tier_id:
-		"minor":
-			title_prefix = "Minor Rite"
-		"medium":
-			title_prefix = "Medium Ceremony"
-		"large":
-			title_prefix = "Large Festival"
-	var data: Dictionary = {"tier": tier_id, "title": title_prefix, "level": 1, "capacity": 4.0, "min": 3, "max": 7, "cost": {}, "description": ""}
-	match tier_id:
-		"minor":
-			data["level"] = 1
-			data["capacity"] = 4.0
-			data["min"] = 3
-			data["max"] = 7
-		"medium":
-			data["level"] = 2
-			data["capacity"] = 10.0
-			data["min"] = 8
-			data["max"] = 16
-		"large":
-			data["level"] = 3
-			data["capacity"] = 18.0
-			data["min"] = 18
-			data["max"] = 32
-	match god_id:
-		"tlaloc":
-			if tier_id == "minor":
-				data["cost"] = {"maize": 10.0}
-				data["description"] = "A small food and water rite to maintain rain favour."
-			elif tier_id == "medium":
-				data["cost"] = {"maize": 25.0, "cacao": 1.0, "ritual_goods": 1.0}
-				data["description"] = "A serious agricultural ceremony for rain, canals and fertility."
-			else:
-				data["cost"] = {"maize": 60.0, "cacao": 2.0, "ritual_goods": 3.0, "fine_textiles": 1.0}
-				data["description"] = "A public harvest and rain festival with major future drought-protection hooks."
-		"huitzilopochtli":
-			if tier_id == "minor":
-				data["cost"] = {"maize": 8.0, "ritual_goods": 1.0}
-				data["description"] = "A small martial rite for warrior courage and public discipline."
-			elif tier_id == "medium":
-				data["cost"] = {"maize": 15.0, "cacao": 1.0, "ritual_goods": 2.0}
-				data["description"] = "A warrior ceremony preparing the house for Flower Wars and sacrifice."
-			else:
-				data["cost"] = {"cacao": 2.0, "ritual_goods": 4.0, "fine_textiles": 1.0, "captives": 2.0}
-				data["description"] = "A great war festival using captives for major future martial-prestige hooks."
-		"tezcatlipoca":
-			if tier_id == "minor":
-				data["cost"] = {"cacao": 1.0}
-				data["description"] = "A small omen rite using elite goods to read hidden pressure."
-			elif tier_id == "medium":
-				data["cost"] = {"cacao": 2.0, "ritual_goods": 2.0}
-				data["description"] = "A smoke and mirror ceremony for intrigue, ambition and rival danger."
-			else:
-				data["cost"] = {"cacao": 4.0, "ritual_goods": 4.0, "fine_textiles": 1.0, "captives": 1.0}
-				data["description"] = "A dangerous night festival for future sabotage, counter-plot and scandal hooks."
-		"quetzalcoatl":
-			if tier_id == "minor":
-				data["cost"] = {"maize": 5.0, "cacao": 1.0}
-				data["description"] = "A small legitimacy rite for order, wisdom and transition."
-			elif tier_id == "medium":
-				data["cost"] = {"cacao": 2.0, "ritual_goods": 1.0}
-				data["description"] = "A civil ceremony for trade, diplomacy and palace-facing legitimacy."
-			else:
-				data["cost"] = {"cacao": 3.0, "ritual_goods": 3.0, "fine_textiles": 2.0}
-				data["description"] = "A great ceremonial festival for future recognition and ruler-interaction hooks."
-	return data
-
-func ritual_favour_bonus(god_id: String, tier_id: String, festival_god_id: String = "") -> int:
-	var bonus: int = max(0, get_shrine_level(god_id) - 1)
-	if festival_god_id == god_id:
-		match tier_id:
-			"minor":
-				bonus += 1
-			"medium":
-				bonus += 2
-			"large":
-				bonus += 4
-	for upgrade_id: String in get_purchased_shrine_upgrades(god_id):
-		var upgrade: Dictionary = upgrade_by_id(god_id, upgrade_id)
-		if not upgrade.is_empty() and upgrade_is_active(upgrade):
-			bonus += int(upgrade.get("favour_bonus", 0))
-	return bonus
-
-func ritual_favour_range(god_id: String, tier_id: String, festival_god_id: String = "") -> Array:
-	var data: Dictionary = ritual_data(god_id, tier_id)
-	var bonus: int = ritual_favour_bonus(god_id, tier_id, festival_god_id)
-	return [int(data.get("min", 0)) + bonus, int(data.get("max", 0)) + bonus]
-
-func can_perform_ritual(god_id: String, tier_id: String) -> Dictionary:
-	var data: Dictionary = ritual_data(god_id, tier_id)
-	var req_level: int = int(data.get("level", 1))
-	if get_shrine_level(god_id) < req_level:
-		return {"ok": false, "reason": "Requires Shrine Level " + str(req_level) + "."}
-	var capacity_cost: float = float(data.get("capacity", 0.0))
-	if religion_remaining_ritual_capacity() + 0.001 < capacity_cost:
-		return {"ok": false, "reason": "Not enough remaining priest ritual capacity this Veintena."}
-	return can_pay_religion_cost(data.get("cost", {}) as Dictionary)
-
-func perform_ritual(god_id: String, tier_id: String, festival_god_id: String = "") -> Dictionary:
-	_ensure_religion_state()
-	var status: Dictionary = can_perform_ritual(god_id, tier_id)
-	if not bool(status.get("ok", false)):
-		_record_religion_report("Ritual failed: " + String(status.get("reason", "")))
-		return status
-	var data: Dictionary = ritual_data(god_id, tier_id)
-	pay_religion_cost(data.get("cost", {}) as Dictionary)
-	ritual_capacity_used_this_veintena += float(data.get("capacity", 0.0))
-	var range: Array = ritual_favour_range(god_id, tier_id, festival_god_id)
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
-	rng.randomize()
-	var gain: int = rng.randi_range(int(range[0]), int(range[1]))
-	var before: float = get_divine_favour(god_id)
-	var after: float = clampf(before + float(gain), 0.0, 100.0)
-	divine_favour[god_id] = after
-	var message: String = String(data.get("title", "Ritual")) + " performed for " + god_name(god_id) + ". Favour roll: +" + str(gain) + ". Favour " + _format_amount(before) + " → " + _format_amount(after) + "."
-	_record_religion_report(message)
-	emit_signal("state_changed")
-	return {"ok": true, "reason": message, "gain": gain, "before": before, "after": after}
-
-func apply_divine_favour_decay(decay_amount: float = RELIGION_NORMAL_DECAY) -> Array[String]:
-	_ensure_religion_state()
-	var parts: Array[String] = []
-	for god_id: String in GOD_IDS:
-		var before: float = get_divine_favour(god_id)
-		var actual_decay: float = religion_decay_for_god(god_id, decay_amount)
-		var after: float = clampf(before - actual_decay, 0.0, 100.0)
-		divine_favour[god_id] = after
-		parts.append(god_name(god_id) + " " + _format_amount(before) + "→" + _format_amount(after))
-	_record_religion_report("Divine favour decays: " + "; ".join(parts) + ".")
-	return parts
-
-func religion_decay_for_god(god_id: String, base_decay: float) -> float:
-	var reduction: float = 0.0
-	for upgrade_id: String in get_purchased_shrine_upgrades(god_id):
-		var upgrade: Dictionary = upgrade_by_id(god_id, upgrade_id)
-		if not upgrade.is_empty() and upgrade_is_active(upgrade):
-			reduction += float(upgrade.get("decay_reduction", 0.0))
-	return maxf(0.0, base_decay - reduction)
-
-func reset_religion_veintena_capacity() -> void:
-	ritual_capacity_used_this_veintena = 0.0
-
-func get_recent_ritual_reports() -> Array[String]:
-	var output: Array[String] = []
-	for line: String in recent_ritual_reports:
-		output.append(line)
-	return output
-
-func _record_religion_report(message: String) -> void:
-	recent_ritual_reports.clear()
-	recent_ritual_reports.append(message)
-	last_report.append(message)
-
-func god_name(god_id: String) -> String:
-	match god_id:
-		"tlaloc":
-			return "Tlaloc"
-		"huitzilopochtli":
-			return "Huitzilopochtli"
-		"tezcatlipoca":
-			return "Tezcatlipoca"
-		"quetzalcoatl":
-			return "Quetzalcoatl"
-	return "Unknown God"
-
-
-
-# -----------------------------------------------------------------------------
-# Barracks / Flower Wars v1
-# -----------------------------------------------------------------------------
-
-func get_warrior_house_count() -> int:
-	var total: int = 0
-	for id: String in ["warrior_house", "warrior_housing", "barracks"]:
-		total += int(estate_buildings.get(id, 0))
-	return total
-
-func get_warrior_capacity() -> int:
-	return get_warrior_house_count() * 10
-
-func get_warrior_count() -> int:
-	return int(population.get("yaotequihuaqueh", 0))
-
-func get_player_prestige() -> float:
-	return player_prestige
-
-func get_prestige_summary() -> Dictionary:
-	return {"prestige": player_prestige, "standing": "Standing: local claim forming", "recognition": "Recognition: unproven", "recent": "Last change: " + (last_flower_war_report[0] if not last_flower_war_report.is_empty() else "none")}
-
-func _warrior_recruitment_cost(amount: int) -> Dictionary:
-	return {"weapons": float(amount), "maize": float(amount), "cloth": float(amount) * 0.5}
-
-func _can_pay_free_stock(cost: Dictionary) -> Dictionary:
-	for resource_variant: Variant in cost.keys():
-		var resource_id: String = String(resource_variant)
-		var needed: float = float(cost[resource_variant])
-		if free_stock_after_reserves(resource_id) + 0.001 < needed:
-			return {"ok": false, "reason": "Need " + _format_amount(needed) + " free " + get_resource_name(resource_id) + " after reserves."}
-	return {"ok": true, "reason": "Ready."}
-
-func _pay_cost(cost: Dictionary) -> void:
-	for resource_variant: Variant in cost.keys():
-		_add_stock(String(resource_variant), -float(cost[resource_variant]))
-
-func can_recruit_warriors(amount: int) -> Dictionary:
-	if amount <= 0:
-		return {"ok": false, "reason": "Choose at least 1 warrior."}
-	var remaining_turn_recruits: int = max(0, 2 - warrior_recruits_used_this_veintena)
-	if remaining_turn_recruits <= 0:
-		return {"ok": false, "reason": "Warrior recruitment limit reached this Veintena."}
-	if amount > remaining_turn_recruits:
-		return {"ok": false, "reason": "Can recruit only " + str(remaining_turn_recruits) + " more warrior(s) this Veintena."}
-	var free_capacity: int = get_warrior_capacity() - get_warrior_count()
-	if free_capacity <= 0:
-		return {"ok": false, "reason": "No free Warrior House capacity."}
-	if amount > free_capacity:
-		return {"ok": false, "reason": "Only " + str(free_capacity) + " free warrior capacity."}
-	return _can_pay_free_stock(_warrior_recruitment_cost(amount))
-
-func recruit_warriors(amount: int) -> Dictionary:
-	var status: Dictionary = can_recruit_warriors(amount)
-	if not bool(status.get("ok", false)):
-		last_report.append("Warrior recruitment failed: " + String(status.get("reason", "")))
-		emit_signal("state_changed")
-		return status
-	_pay_cost(_warrior_recruitment_cost(amount))
-	population["yaotequihuaqueh"] = get_warrior_count() + amount
-	warrior_recruits_used_this_veintena += amount
-	var message: String = "Recruited " + str(amount) + " warrior(s)."
-	last_report.append(message)
-	emit_signal("state_changed")
-	return {"ok": true, "reason": message, "recruited": amount}
-
-func get_flower_war_options() -> Dictionary:
-	return {"doctrines": FLOWER_WAR_DOCTRINES.duplicate(true), "scales": FLOWER_WAR_SCALES.duplicate(true), "provisioning": FLOWER_WAR_PROVISIONING.duplicate(true)}
-
-func _provisioning_cost(committed_warriors: int, provisioning_id: String) -> Dictionary:
-	var provisioning: Dictionary = FLOWER_WAR_PROVISIONING.get(provisioning_id, FLOWER_WAR_PROVISIONING["standard"]) as Dictionary
-	var mult: float = float(provisioning.get("cost_mult", 1.0))
-	return {"maize": float(committed_warriors) * 1.0 * mult, "cacao": float(committed_warriors) * 0.05 * mult, "cloth": float(committed_warriors) * 0.1 * mult}
-
-func _flower_war_weapon_commitment(committed_warriors: int) -> Dictionary:
-	return {"weapons": float(committed_warriors)}
-
-func _combined_flower_war_cost(committed_warriors: int, provisioning_id: String) -> Dictionary:
-	var cost: Dictionary = _provisioning_cost(committed_warriors, provisioning_id)
-	_add_dictionary_amounts(cost, _flower_war_weapon_commitment(committed_warriors))
-	return cost
-
-func can_launch_flower_war(scale_id: String, doctrine_id: String, provisioning_id: String, committed_warriors: int) -> Dictionary:
-	if not FLOWER_WAR_SCALES.has(scale_id):
-		return {"ok": false, "reason": "Unknown Flower War scale."}
-	if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
-		return {"ok": false, "reason": "Unknown doctrine."}
-	if not FLOWER_WAR_PROVISIONING.has(provisioning_id):
-		return {"ok": false, "reason": "Unknown provisioning."}
-	if committed_warriors <= 0:
-		return {"ok": false, "reason": "Commit at least 1 warrior."}
-	if committed_warriors > get_warrior_count():
-		return {"ok": false, "reason": "Not enough warriors."}
-	return _can_pay_free_stock(_combined_flower_war_cost(committed_warriors, provisioning_id))
-
-func get_flower_war_preview(scale_id: String, doctrine_id: String, provisioning_id: String, committed_warriors: int) -> Dictionary:
-	var scale: Dictionary = FLOWER_WAR_SCALES.get(scale_id, FLOWER_WAR_SCALES["minor"]) as Dictionary
-	var status: Dictionary = can_launch_flower_war(scale_id, doctrine_id, provisioning_id, committed_warriors)
-	var recommended: int = int(scale.get("recommended", 5))
-	var risk: String = "Good match"
-	if committed_warriors < recommended:
-		risk = "Understrength"
-	elif committed_warriors >= recommended * 2:
-		risk = "Overwhelming commitment"
-	return {"ok": bool(status.get("ok", false)), "reason": String(status.get("reason", "")), "cost": _combined_flower_war_cost(committed_warriors, provisioning_id), "recommended": recommended, "risk": risk, "scale": scale.duplicate(true)}
-
-func launch_flower_war(scale_id: String, doctrine_id: String, provisioning_id: String, committed_warriors: int) -> Dictionary:
-	var status: Dictionary = can_launch_flower_war(scale_id, doctrine_id, provisioning_id, committed_warriors)
-	if not bool(status.get("ok", false)):
-		last_flower_war_report = ["Flower War could not be launched: " + String(status.get("reason", ""))]
-		emit_signal("state_changed")
-		return status
-	_pay_cost(_combined_flower_war_cost(committed_warriors, provisioning_id))
-	var result: Dictionary = _resolve_flower_war(scale_id, doctrine_id, provisioning_id, committed_warriors)
-	_apply_flower_war_result(result)
-	last_flower_war_report = _flower_war_report_lines(result)
-	flower_war_history.append(result.duplicate(true))
-	last_report.clear()
-	for line: String in last_flower_war_report:
-		last_report.append(line)
-	emit_signal("flower_war_resolved", result)
-	emit_signal("state_changed")
-	return result
-
-func _resolve_flower_war(scale_id: String, doctrine_id: String, provisioning_id: String, committed_warriors: int) -> Dictionary:
-	var scale: Dictionary = FLOWER_WAR_SCALES[scale_id] as Dictionary
-	var doctrine: Dictionary = FLOWER_WAR_DOCTRINES[doctrine_id] as Dictionary
-	var provisioning: Dictionary = FLOWER_WAR_PROVISIONING[provisioning_id] as Dictionary
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
-	rng.randomize()
-	var enemy_count: int = int(scale.get("enemy_warriors", 5))
-	var difficulty: float = float(scale.get("difficulty", 1.0))
-	var h_favour: float = get_divine_favour("huitzilopochtli")
-	var favour_mult: float = 1.0
-	if h_favour >= 80.0:
-		favour_mult = 1.10
-	elif h_favour >= 60.0:
-		favour_mult = 1.05
-	elif h_favour < 25.0:
-		favour_mult = 0.95
-	var attacker_offence: float = float(committed_warriors) * float(doctrine.get("offence", 1.0)) * float(provisioning.get("combat_mult", 1.0)) * favour_mult * rng.randf_range(0.92, 1.08)
-	var attacker_defence: float = float(committed_warriors) * float(doctrine.get("defence", 1.0)) * rng.randf_range(0.92, 1.08)
-	var defender_offence: float = float(enemy_count) * difficulty
-	var defender_defence: float = float(enemy_count) * difficulty
-	var defender_damage_ratio: float = attacker_offence / maxf(1.0, defender_defence)
-	var defender_casualty_rate: float = clampf((defender_damage_ratio - 0.55) * 0.35, 0.05, 0.65)
-	var defender_casualties: int = clampi(int(round(float(enemy_count) * defender_casualty_rate)), 0, enemy_count)
-	var remaining_defenders: int = max(0, enemy_count - defender_casualties)
-	var counterattack_strength: float = float(remaining_defenders) * difficulty
-	var attacker_damage_ratio: float = counterattack_strength / maxf(1.0, attacker_defence)
-	var attacker_casualty_rate: float = clampf((attacker_damage_ratio - 0.45) * 0.35, 0.03, 0.75)
-	var attacker_casualties: int = clampi(int(round(float(committed_warriors) * attacker_casualty_rate)), 0, committed_warriors)
-	var net_per_warrior: float = float(defender_casualties - attacker_casualties) / maxf(1.0, float(committed_warriors))
-	var result_label: String = "Stalemate"
-	if net_per_warrior >= 0.45:
-		result_label = "Crushing Victory"
-	elif net_per_warrior >= 0.15:
-		result_label = "Victory"
-	elif net_per_warrior > -0.15:
-		result_label = "Stalemate"
-	elif net_per_warrior > -0.45:
-		result_label = "Defeat"
-	else:
-		result_label = "Crushing Loss"
-	var death_share: float = _flower_war_death_share(result_label) * float(doctrine.get("death_mult", 1.0))
-	var deaths: int = clampi(int(round(float(attacker_casualties) * death_share)), 0, attacker_casualties)
-	var injuries: int = max(0, attacker_casualties - deaths)
-	var captives: int = _flower_war_captives(result_label, defender_casualties, committed_warriors, doctrine_id)
-	var loot_value: float = _flower_war_loot_value(result_label, committed_warriors, doctrine_id)
-	var loot: Dictionary = _flower_war_loot_goods(loot_value)
-	var prestige_gain: float = _flower_war_prestige(result_label, captives, defender_casualties, loot_value, doctrine_id)
-	var weapon_loss_rate: float = 0.20
-	match result_label:
-		"Crushing Victory", "Victory": weapon_loss_rate = 0.10
-		"Stalemate": weapon_loss_rate = 0.20
-		"Defeat": weapon_loss_rate = 0.35
-		"Crushing Loss": weapon_loss_rate = 0.45
-	var weapons_lost: int = clampi(int(ceil(float(committed_warriors) * weapon_loss_rate + float(deaths) * 0.5)), 0, committed_warriors)
-	return {"ok": true, "scale_id": scale_id, "scale_name": String(scale.get("name", scale_id)), "doctrine_id": doctrine_id, "doctrine_name": String(doctrine.get("name", doctrine_id)), "provisioning_id": provisioning_id, "provisioning_name": String(provisioning.get("name", provisioning_id)), "committed_warriors": committed_warriors, "enemy_warriors": enemy_count, "result": result_label, "attacker_casualties": attacker_casualties, "defender_casualties": defender_casualties, "deaths": deaths, "injuries": injuries, "captives": captives, "loot_value": loot_value, "loot": loot, "prestige": prestige_gain, "weapons_lost": weapons_lost}
-
-func _flower_war_death_share(result_label: String) -> float:
-	match result_label:
-		"Crushing Victory": return 0.10
-		"Victory": return 0.20
-		"Stalemate": return 0.30
-		"Defeat": return 0.45
-		"Crushing Loss": return 0.65
-	return 0.30
-
-func _flower_war_captives(result_label: String, defender_casualties: int, committed_warriors: int, doctrine_id: String) -> int:
-	if result_label != "Victory" and result_label != "Crushing Victory":
-		return 0
-	var rate: float = 0.30
-	if result_label == "Crushing Victory":
-		rate = 0.45
-	if doctrine_id == "eagle":
-		rate = minf(0.75, rate + float(committed_warriors) * 0.02)
-	var raw: float = float(defender_casualties) * rate
-	var captives: int = int(floor(raw))
-	if defender_casualties >= 1 and raw > 0.0 and captives < 1:
-		captives = 1
-	return clampi(captives, 0, defender_casualties)
-
-func _flower_war_loot_value(result_label: String, committed_warriors: int, doctrine_id: String) -> float:
-	var value: float = 0.0
-	match result_label:
-		"Crushing Victory": value = float(committed_warriors) * 4.0
-		"Victory": value = float(committed_warriors) * 2.5
-		"Stalemate": value = float(committed_warriors) * 1.2
-		_: value = 0.0
-	if doctrine_id == "coyote":
-		value *= 1.25
-	return value
-
-func _flower_war_loot_goods(loot_value: float) -> Dictionary:
-	var loot: Dictionary = {}
-	if loot_value <= 0.001:
-		return loot
-	var weights: Dictionary = {"maize": 0.35, "wood": 0.20, "cotton": 0.15, "cloth": 0.10, "tools": 0.08, "obsidian": 0.06, "cacao": 0.04, "ritual_goods": 0.02}
-	for resource_variant: Variant in weights.keys():
-		var resource_id: String = String(resource_variant)
-		var value_share: float = loot_value * float(weights[resource_variant])
-		var unit_value: float = 1.0
-		if resources.has(resource_id):
-			unit_value = maxf(0.1, float((resources[resource_id] as Dictionary).get("base_value", 1.0)))
-		var amount: float = snappedf(value_share / unit_value, 0.01)
-		if amount > 0.001:
-			loot[resource_id] = amount
-	return loot
-
-func _flower_war_prestige(result_label: String, captives: int, defender_casualties: int, loot_value: float, doctrine_id: String) -> float:
-	var prestige: float = 0.0
-	match result_label:
-		"Crushing Victory": prestige += 12.0
-		"Victory": prestige += 6.0
-		"Stalemate": prestige += 1.0
-		"Crushing Loss": prestige -= 3.0
-	prestige += float(captives) * 3.0
-	prestige += float(defender_casualties) * 0.5
-	prestige += loot_value * 0.05
-	if doctrine_id == "jaguar" and prestige > 0.0:
-		prestige *= 1.15
-	return snappedf(prestige, 0.01)
-
-func _apply_flower_war_result(result: Dictionary) -> void:
-	population["yaotequihuaqueh"] = max(0, get_warrior_count() - int(result.get("deaths", 0)))
-	_add_stock("weapons", -float(result.get("weapons_lost", 0)))
-	_add_stock("captives", float(result.get("captives", 0)))
-	var loot: Dictionary = result.get("loot", {}) as Dictionary
-	for resource_variant: Variant in loot.keys():
-		_add_stock(String(resource_variant), float(loot[resource_variant]))
-	player_prestige += float(result.get("prestige", 0.0))
-	warrior_xp += maxf(0.0, float(result.get("defender_casualties", 0)))
-
-func _flower_war_report_lines(result: Dictionary) -> Array[String]:
-	var lines: Array[String] = []
-	lines.append(String(result.get("scale_name", "Flower War")) + " resolved: " + String(result.get("result", "Result")) + ".")
-	lines.append("Committed " + str(int(result.get("committed_warriors", 0))) + " " + String(result.get("doctrine_name", "warriors")) + " warriors with " + String(result.get("provisioning_name", "Standard")) + " provisioning.")
-	lines.append("Casualties: " + str(int(result.get("attacker_casualties", 0))) + " affected; " + str(int(result.get("deaths", 0))) + " dead, " + str(int(result.get("injuries", 0))) + " injured and returned.")
-	lines.append("Enemy casualties: " + str(int(result.get("defender_casualties", 0))) + "; captives gained: " + str(int(result.get("captives", 0))) + ".")
-	lines.append("Loot value: " + _format_amount(float(result.get("loot_value", 0.0))) + "; prestige change: " + _format_amount(float(result.get("prestige", 0.0))) + "; weapons lost: " + str(int(result.get("weapons_lost", 0))) + ".")
-	var loot: Dictionary = result.get("loot", {}) as Dictionary
-	if not loot.is_empty():
-		var parts: Array[String] = []
-		for resource_variant: Variant in loot.keys():
-			parts.append(get_resource_name(String(resource_variant)) + " " + _format_amount(float(loot[resource_variant])))
-		lines.append("Looted goods: " + ", ".join(parts) + ".")
-	return lines
-
-func get_last_flower_war_report() -> Array[String]:
-	var output: Array[String] = []
-	for line: String in last_flower_war_report:
-		output.append(line)
-	return output
-
-func get_barracks_summary() -> Dictionary:
-	var warriors: int = get_warrior_count()
-	var capacity: int = get_warrior_capacity()
-	var weapons: float = _stock("weapons")
-	return {"warriors": warriors, "capacity": capacity, "free_capacity": max(0, capacity - warriors), "weapons": weapons, "minor_ready": warriors >= 5 and weapons >= 5.0, "standard_ready": warriors >= 10 and weapons >= 10.0, "major_ready": warriors >= 20 and weapons >= 20.0, "recruits_remaining": max(0, 2 - warrior_recruits_used_this_veintena), "prestige": player_prestige, "warrior_xp": warrior_xp, "last_report": get_last_flower_war_report()}
-
 func advance_veintena() -> void:
-	if not initialized: new_game()
+	if not initialized:
+		new_game()
 	last_report.clear()
 	last_report.append("Veintena " + str(current_veintena) + " resolves.")
 	_pay_population_upkeep()
@@ -1069,7 +1357,6 @@ func advance_veintena() -> void:
 	if current_veintena > 18:
 		current_veintena = 1
 		last_report.append("Nemontemi reckoning placeholder: the next Ritual Year begins.")
-	warrior_recruits_used_this_veintena = 0
 	last_report.append("Now entering Veintena " + str(current_veintena) + ".")
 	emit_signal("turn_advanced", last_report)
 	emit_signal("state_changed")
@@ -1082,28 +1369,34 @@ func estimate_population_upkeep() -> Dictionary:
 		var rates: Dictionary = population_upkeep_rates.get(group_id, {}) as Dictionary
 		for resource_variant: Variant in rates.keys():
 			var resource_id: String = String(resource_variant)
-			result[resource_id] = float(result.get(resource_id, 0.0)) + float(rates[resource_id]) * float(count) / 5.0
-	return result
-
-func estimate_housing_maintenance() -> Dictionary:
-	var result: Dictionary = {}
-	_ensure_active_housing_counts()
-	for building_id: String in active_housing_counts.keys():
-		if not buildings.has(building_id): continue
-		var count: int = int(active_housing_counts.get(building_id, 0))
-		var maintenance: Dictionary = (buildings[building_id] as Dictionary).get("housing_maintenance", {}) as Dictionary
-		for resource_variant: Variant in maintenance.keys():
-			var resource_id: String = String(resource_variant)
-			result[resource_id] = float(result.get(resource_id, 0.0)) + float(maintenance[resource_id]) * count
+			var amount: float = float(rates[resource_id]) * float(count) / 5.0
+			result[resource_id] = float(result.get(resource_id, 0.0)) + amount
 	return result
 
 func estimate_building_inputs() -> Dictionary:
-	return (estimate_production_resolution().get("inputs", {}) as Dictionary).duplicate(true)
+	# Single source of truth for Storehouse / Production / Labour previews.
+	# This now uses the same dry-run resolver as the rest of the UI, so input
+	# demand reflects staffed buildings, population upkeep paid first, and shared
+	# input goods being consumed by earlier buildings in building_order.
+	var resolution: Dictionary = estimate_production_resolution()
+	return (resolution.get("inputs", {}) as Dictionary).duplicate(true)
 
 func estimate_building_outputs() -> Dictionary:
-	return (estimate_production_resolution().get("outputs", {}) as Dictionary).duplicate(true)
+	# Single source of truth for Storehouse / Production / Labour previews.
+	# This now uses the same dry-run resolver as the rest of the UI, so output
+	# only comes from buildings that are both staffed and supplied in the shared
+	# temporary stockpile.
+	var resolution: Dictionary = estimate_production_resolution()
+	return (resolution.get("outputs", {}) as Dictionary).duplicate(true)
 
 func estimate_production_resolution() -> Dictionary:
+	# Authoritative production preview. This mirrors Advance Veintena order:
+	# 1. copy current stockpiles
+	# 2. pay population upkeep and housing building upkeep from the copied stockpile
+	# 3. process staffed production buildings in building_order
+	# 4. consume inputs from the copied stockpile
+	# 5. add outputs to the copied stockpile
+	# 6. record exactly what would operate, block, or sit unstaffed
 	_ensure_labour_assignments()
 	var temp_stockpile: Dictionary = _copy_stockpile_dictionary(estate_stockpiles)
 	var upkeep_needed: Dictionary = estimate_population_upkeep()
@@ -1112,31 +1405,58 @@ func estimate_production_resolution() -> Dictionary:
 	var upkeep_shortfalls: Dictionary = {}
 	var maintenance_paid: Dictionary = {}
 	var maintenance_shortfalls: Dictionary = {}
+
 	for resource_variant: Variant in upkeep_needed.keys():
 		var resource_id: String = String(resource_variant)
-		var paid: float = minf(float(temp_stockpile.get(resource_id, 0.0)), float(upkeep_needed[resource_variant]))
-		temp_stockpile[resource_id] = float(temp_stockpile.get(resource_id, 0.0)) - paid
+		var needed: float = float(upkeep_needed[resource_variant])
+		var available: float = float(temp_stockpile.get(resource_id, 0.0))
+		var paid: float = minf(available, needed)
+		temp_stockpile[resource_id] = available - paid
 		upkeep_paid[resource_id] = paid
-		if paid < float(upkeep_needed[resource_variant]): upkeep_shortfalls[resource_id] = float(upkeep_needed[resource_variant]) - paid
+		if paid < needed:
+			upkeep_shortfalls[resource_id] = needed - paid
+
 	for resource_variant: Variant in maintenance_needed.keys():
 		var resource_id: String = String(resource_variant)
-		var paid: float = minf(float(temp_stockpile.get(resource_id, 0.0)), float(maintenance_needed[resource_variant]))
-		temp_stockpile[resource_id] = float(temp_stockpile.get(resource_id, 0.0)) - paid
+		var needed: float = float(maintenance_needed[resource_variant])
+		var available: float = float(temp_stockpile.get(resource_id, 0.0))
+		var paid: float = minf(available, needed)
+		temp_stockpile[resource_id] = available - paid
 		maintenance_paid[resource_id] = paid
-		if paid < float(maintenance_needed[resource_variant]): maintenance_shortfalls[resource_id] = float(maintenance_needed[resource_variant]) - paid
+		if paid < needed:
+			maintenance_shortfalls[resource_id] = needed - paid
+
 	var total_inputs: Dictionary = {}
 	var total_outputs: Dictionary = {}
 	var building_statuses: Dictionary = {}
 	var report_lines: Array[String] = []
+
 	for building_id: String in building_order:
-		if not buildings.has(building_id): continue
+		if not buildings.has(building_id):
+			continue
 		var definition: Dictionary = buildings[building_id] as Dictionary
 		var count: int = int(estate_buildings.get(building_id, 0))
-		var staffed_count: int = count if not _is_productive_building_id(building_id) else _staffed_count_for_building(building_id)
+		if count <= 0:
+			building_statuses[building_id] = {
+				"operating": 0,
+				"blocked": 0,
+				"staffed_count": 0,
+				"unstaffed": 0,
+				"input_blocked": 0,
+				"status_text": "Not built.",
+				"input_shortages": []
+			}
+			continue
+
+		var staffed_count: int = count
+		if _is_productive_building_id(building_id):
+			staffed_count = _staffed_count_for_building(building_id)
 		staffed_count = clampi(staffed_count, 0, count)
+
 		var operated: int = 0
 		var input_blocked: int = 0
 		var input_shortages: Array[String] = []
+
 		for index: int in range(staffed_count):
 			var reason: String = _can_operate_instance_with_stockpile(definition, temp_stockpile)
 			if reason == "":
@@ -1149,32 +1469,75 @@ func estimate_production_resolution() -> Dictionary:
 				operated += 1
 			else:
 				input_blocked += 1
-				input_shortages.append(reason)
+				if not input_shortages.has(reason):
+					input_shortages.append(reason)
+
 		var unstaffed: int = max(0, count - staffed_count)
-		var status_text: String = "Operating x" + str(operated)
-		if unstaffed > 0: status_text += "; unstaffed x" + str(unstaffed)
-		if input_blocked > 0: status_text += "; input blocked " + str(input_blocked)
-		building_statuses[building_id] = {"operating": operated, "blocked": input_blocked + unstaffed, "staffed_count": staffed_count, "unstaffed": unstaffed, "input_blocked": input_blocked, "status_text": status_text, "input_shortages": input_shortages.duplicate()}
-		if operated > 0: report_lines.append(String(definition.get("name", building_id)) + " would operate x" + str(operated) + ".")
-	return {"inputs": total_inputs, "outputs": total_outputs, "building_statuses": building_statuses, "stockpile_after_upkeep_and_production": temp_stockpile, "upkeep_needed": upkeep_needed, "upkeep_paid": upkeep_paid, "upkeep_shortfalls": upkeep_shortfalls, "housing_maintenance_needed": maintenance_needed, "housing_maintenance_paid": maintenance_paid, "housing_maintenance_shortfalls": maintenance_shortfalls, "reports": report_lines}
+		var blocked: int = input_blocked + unstaffed
+		var status_text: String = "Staffed " + str(staffed_count) + " / " + str(count) + "; operating " + str(operated) + " / " + str(staffed_count) + " staffed"
+		if unstaffed > 0:
+			status_text += "; unstaffed " + str(unstaffed)
+		if input_blocked > 0:
+			status_text += "; input blocked " + str(input_blocked)
+		if not input_shortages.is_empty():
+			status_text += "; " + "; ".join(input_shortages)
+
+		building_statuses[building_id] = {
+			"operating": operated,
+			"blocked": blocked,
+			"staffed_count": staffed_count,
+			"unstaffed": unstaffed,
+			"input_blocked": input_blocked,
+			"status_text": status_text,
+			"input_shortages": input_shortages.duplicate()
+		}
+
+		if operated > 0:
+			report_lines.append(String(definition.get("name", building_id)) + " would operate x" + str(operated) + ".")
+		if input_blocked > 0:
+			report_lines.append(String(definition.get("name", building_id)) + " would be input-blocked x" + str(input_blocked) + ".")
+		if _is_productive_building_id(building_id) and unstaffed > 0:
+			report_lines.append(String(definition.get("name", building_id)) + " would be unstaffed x" + str(unstaffed) + ".")
+
+	return {
+		"inputs": total_inputs,
+		"outputs": total_outputs,
+		"building_statuses": building_statuses,
+		"stockpile_after_upkeep_and_production": temp_stockpile,
+		"upkeep_needed": upkeep_needed,
+		"upkeep_paid": upkeep_paid,
+		"upkeep_shortfalls": upkeep_shortfalls,
+		"housing_maintenance_needed": maintenance_needed,
+		"housing_maintenance_paid": maintenance_paid,
+		"housing_maintenance_shortfalls": maintenance_shortfalls,
+		"reports": report_lines
+	}
 
 func _copy_stockpile_dictionary(source: Dictionary) -> Dictionary:
 	var output: Dictionary = {}
-	for key_variant: Variant in source.keys(): output[String(key_variant)] = float(source[key_variant])
+	for key_variant: Variant in source.keys():
+		var key: String = String(key_variant)
+		output[key] = float(source[key_variant])
 	return output
 
 func _can_operate_instance_with_stockpile(definition: Dictionary, temp_stockpile: Dictionary) -> String:
 	var inputs: Dictionary = definition.get("inputs", {}) as Dictionary
 	for resource_variant: Variant in inputs.keys():
 		var resource_id: String = String(resource_variant)
-		if float(temp_stockpile.get(resource_id, 0.0)) < float(inputs[resource_variant]): return "not enough " + get_resource_name(resource_id) + " input"
+		var needed: float = float(inputs[resource_variant])
+		if float(temp_stockpile.get(resource_id, 0.0)) < needed:
+			return "not enough " + get_resource_name(resource_id) + " input"
 	return ""
 
 func _consume_inputs_from_stockpile(inputs: Dictionary, temp_stockpile: Dictionary) -> void:
-	for resource_variant: Variant in inputs.keys(): temp_stockpile[String(resource_variant)] = float(temp_stockpile.get(String(resource_variant), 0.0)) - float(inputs[resource_variant])
+	for resource_variant: Variant in inputs.keys():
+		var resource_id: String = String(resource_variant)
+		temp_stockpile[resource_id] = float(temp_stockpile.get(resource_id, 0.0)) - float(inputs[resource_variant])
 
 func _add_outputs_to_stockpile(outputs: Dictionary, temp_stockpile: Dictionary) -> void:
-	for resource_variant: Variant in outputs.keys(): temp_stockpile[String(resource_variant)] = float(temp_stockpile.get(String(resource_variant), 0.0)) + float(outputs[resource_variant])
+	for resource_variant: Variant in outputs.keys():
+		var resource_id: String = String(resource_variant)
+		temp_stockpile[resource_id] = float(temp_stockpile.get(resource_id, 0.0)) + float(outputs[resource_variant])
 
 func _add_dictionary_amounts(target: Dictionary, amounts: Dictionary) -> void:
 	for resource_variant: Variant in amounts.keys():
@@ -1182,29 +1545,41 @@ func _add_dictionary_amounts(target: Dictionary, amounts: Dictionary) -> void:
 		target[resource_id] = float(target.get(resource_id, 0.0)) + float(amounts[resource_variant])
 
 func _pay_population_upkeep() -> void:
-	for resource_variant: Variant in estimate_population_upkeep().keys():
+	var upkeep: Dictionary = estimate_population_upkeep()
+	for resource_variant: Variant in upkeep.keys():
 		var resource_id: String = String(resource_variant)
-		var needed: float = float(estimate_population_upkeep()[resource_id])
-		var paid: float = minf(_stock(resource_id), needed)
+		var needed: float = float(upkeep[resource_id])
+		var available: float = _stock(resource_id)
+		var paid: float = minf(available, needed)
 		_add_stock(resource_id, -paid)
-		last_report.append(("Paid population upkeep: " if paid >= needed else "Shortage: paid population upkeep ") + _format_amount(paid) + " / " + _format_amount(needed) + " " + get_resource_name(resource_id) + ".")
+		if paid >= needed:
+			last_report.append("Paid population upkeep: " + _format_amount(needed) + " " + get_resource_name(resource_id) + ".")
+		else:
+			last_report.append("Shortage: paid only " + _format_amount(paid) + " / " + _format_amount(needed) + " " + get_resource_name(resource_id) + " for population upkeep.")
 
 func _pay_housing_maintenance() -> void:
-	for resource_variant: Variant in estimate_housing_maintenance().keys():
+	var maintenance: Dictionary = estimate_housing_maintenance()
+	for resource_variant: Variant in maintenance.keys():
 		var resource_id: String = String(resource_variant)
-		var needed: float = float(estimate_housing_maintenance()[resource_id])
-		var paid: float = minf(_stock(resource_id), needed)
+		var needed: float = float(maintenance[resource_id])
+		var available: float = _stock(resource_id)
+		var paid: float = minf(available, needed)
 		_add_stock(resource_id, -paid)
-		last_report.append(("Paid housing building upkeep: " if paid >= needed else "Housing building upkeep shortage: ") + _format_amount(paid) + " / " + _format_amount(needed) + " " + get_resource_name(resource_id) + ".")
+		if paid >= needed:
+			last_report.append("Paid housing building upkeep: " + _format_amount(needed) + " " + get_resource_name(resource_id) + ".")
+		else:
+			last_report.append("Housing building upkeep shortage: paid only " + _format_amount(paid) + " / " + _format_amount(needed) + " " + get_resource_name(resource_id) + ".")
 
 func _operate_buildings() -> void:
 	_ensure_labour_assignments()
 	for building_id: String in building_order:
-		if not buildings.has(building_id): continue
-		var definition: Dictionary = buildings[building_id] as Dictionary
 		var count: int = int(estate_buildings.get(building_id, 0))
-		if count <= 0: continue
-		var target_count: int = count if not _is_productive_building_id(building_id) else _staffed_count_for_building(building_id)
+		if count <= 0:
+			continue
+		var definition: Dictionary = buildings[building_id] as Dictionary
+		var target_count: int = count
+		if _is_productive_building_id(building_id):
+			target_count = _staffed_count_for_building(building_id)
 		var operated: int = 0
 		var blocked: int = 0
 		for index: int in range(target_count):
@@ -1216,249 +1591,708 @@ func _operate_buildings() -> void:
 			else:
 				blocked += 1
 				last_report.append(String(definition.get("name", building_id)) + " blocked: " + reason)
-		if operated > 0: last_report.append(String(definition.get("name", building_id)) + " operated x" + str(operated) + ".")
-		if _is_productive_building_id(building_id) and target_count < count: last_report.append(String(definition.get("name", building_id)) + " unstaffed x" + str(count - target_count) + ".")
+		if operated > 0:
+			last_report.append(String(definition.get("name", building_id)) + " operated x" + str(operated) + ".")
+		if _is_productive_building_id(building_id) and target_count < count:
+			last_report.append(String(definition.get("name", building_id)) + " unstaffed x" + str(count - target_count) + ".")
 
 func _can_operate_instance(definition: Dictionary) -> String:
 	var inputs: Dictionary = definition.get("inputs", {}) as Dictionary
 	for resource_variant: Variant in inputs.keys():
 		var resource_id: String = String(resource_variant)
-		if _stock(resource_id) < float(inputs[resource_variant]): return "not enough " + get_resource_name(resource_id) + " input"
+		if _stock(resource_id) < float(inputs[resource_id]):
+			return "not enough " + get_resource_name(resource_id) + " input"
 	return ""
 
+func _reserve_staff(staff: Dictionary, available_staff: Dictionary) -> void:
+	# Legacy helper retained for older patches. Production staffing is now handled
+	# by staffed building counts rather than per-population sliders.
+	for group_variant: Variant in staff.keys():
+		var group_id: String = String(group_variant)
+		available_staff[group_id] = int(available_staff.get(group_id, 0)) - int(staff[group_id])
+
 func _consume_inputs(inputs: Dictionary) -> void:
-	for resource_variant: Variant in inputs.keys(): _add_stock(String(resource_variant), -float(inputs[resource_variant]))
+	for resource_variant: Variant in inputs.keys():
+		var resource_id: String = String(resource_variant)
+		_add_stock(resource_id, -float(inputs[resource_id]))
 
 func _add_outputs(outputs: Dictionary) -> void:
-	for resource_variant: Variant in outputs.keys(): _add_stock(String(resource_variant), float(outputs[resource_variant]))
+	for resource_variant: Variant in outputs.keys():
+		var resource_id: String = String(resource_variant)
+		_add_stock(resource_id, float(outputs[resource_id]))
 
 func _estimate_building_status(building_id: String) -> Dictionary:
-	var statuses: Dictionary = estimate_production_resolution().get("building_statuses", {}) as Dictionary
-	if statuses.has(building_id): return (statuses[building_id] as Dictionary).duplicate(true)
+	if not buildings.has(building_id):
+		return {"operating": 0, "blocked": 0, "staffed_count": 0, "unstaffed": 0, "input_blocked": 0, "status_text": "Unknown building.", "input_shortages": []}
+	var resolution: Dictionary = estimate_production_resolution()
+	var statuses: Dictionary = resolution.get("building_statuses", {}) as Dictionary
+	if statuses.has(building_id):
+		return (statuses[building_id] as Dictionary).duplicate(true)
 	return {"operating": 0, "blocked": 0, "staffed_count": 0, "unstaffed": 0, "input_blocked": 0, "status_text": "Not built.", "input_shortages": []}
 
 func _estimated_operating_count_for_building(building_id: String) -> int:
+	if not buildings.has(building_id):
+		return 0
 	return int(_estimate_building_status(building_id).get("operating", 0))
 
 func _is_productive_building_id(building_id: String) -> bool:
-	if not buildings.has(building_id): return false
-	var screen_id: String = String((buildings[building_id] as Dictionary).get("screen", ""))
+	if not buildings.has(building_id):
+		return false
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	var screen_id: String = String(definition.get("screen", ""))
 	return screen_id == "chinampas" or screen_id == "workshops"
 
-func _is_housing_building_id(building_id: String) -> bool:
-	return buildings.has(building_id) and (buildings[building_id] as Dictionary).has("housing_capacity")
-
 func _auto_staff_all_productive_buildings() -> void:
+	# Force a clean automatic staffing pass. Used for new-game setup so built
+	# production starts staffed when the estate has the people for it.
 	labour_assignments.clear()
 	var running_by_group: Dictionary = {}
 	for building_id: String in _production_auto_staff_order():
 		var count: int = int(estate_buildings.get(building_id, 0))
-		if count <= 0: continue
-		labour_assignments[building_id] = _default_assignment_for_building(building_id, count, running_by_group)
+		if count <= 0:
+			continue
+		var assignment: Dictionary = _default_assignment_for_building(building_id, count, running_by_group)
+		labour_assignments[building_id] = assignment
 	_ensure_labour_assignments()
 
 func _auto_staff_single_building_to_max(building_id: String) -> void:
-	if not _is_productive_building_id(building_id): return
-	labour_assignments[building_id] = _default_assignment_for_building(building_id, int(estate_buildings.get(building_id, 0)), {})
+	# Try to staff as many copies of one building as possible without rewriting
+	# all other manual assignments. This is mainly used after constructing one
+	# extra productive building.
+	if not _is_productive_building_id(building_id):
+		return
+	var count: int = int(estate_buildings.get(building_id, 0))
+	if count <= 0:
+		return
+	var running_by_group: Dictionary = _assigned_labour_by_group_excluding(building_id)
+	var assignment: Dictionary = _default_assignment_for_building(building_id, count, running_by_group)
+	labour_assignments[building_id] = assignment
 	_ensure_labour_assignments()
 
 func _production_auto_staff_order() -> Array[String]:
+	# Maize is the protected food base and should be staffed before every other
+	# productive building. After maize, use normal building priority/order so the
+	# fewest possible lower-priority buildings are left idle when labour is short.
 	var maize_ids: Array[String] = []
 	var other_ids: Array[String] = []
 	for building_id: String in building_order:
-		if not _is_productive_building_id(building_id): continue
-		if _is_maize_production_building(building_id): maize_ids.append(building_id)
-		else: other_ids.append(building_id)
+		if not _is_productive_building_id(building_id):
+			continue
+		if _is_maize_production_building(building_id):
+			maize_ids.append(building_id)
+		else:
+			other_ids.append(building_id)
 	maize_ids.append_array(other_ids)
 	return maize_ids
 
 func _is_maize_production_building(building_id: String) -> bool:
-	if building_id.find("maize") >= 0: return true
-	return buildings.has(building_id) and ((buildings[building_id] as Dictionary).get("outputs", {}) as Dictionary).has("maize")
+	if not buildings.has(building_id):
+		return false
+	if building_id.find("maize") >= 0:
+		return true
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	var outputs: Dictionary = definition.get("outputs", {}) as Dictionary
+	return outputs.has("maize")
 
 func _ensure_labour_assignments() -> void:
+	# Labour assignment is stored as: building_id -> {worker_group_id: staffed_building_count}.
+	# For the combined Field Labour UI, raw/chinampa buildings store
+	# {"field_labour": count}. That count means "this many building copies are
+	# staffed from the combined Macehualtin + Tlacotin pool". The population split
+	# is calculated separately so the two populations can combine to staff one
+	# building copy.
 	var running_by_group: Dictionary = {}
+
+	for building_key_variant: Variant in labour_assignments.keys().duplicate():
+		var existing_id: String = String(building_key_variant)
+		if not _is_productive_building_id(existing_id) or int(estate_buildings.get(existing_id, 0)) <= 0:
+			labour_assignments.erase(existing_id)
+
 	for building_id: String in building_order:
-		if not _is_productive_building_id(building_id): continue
+		if not _is_productive_building_id(building_id):
+			continue
 		var count: int = int(estate_buildings.get(building_id, 0))
 		if count <= 0:
 			labour_assignments.erase(building_id)
 			continue
-		var requested: Dictionary = labour_assignments.get(building_id, {}) as Dictionary
-		if requested.is_empty(): requested = _default_assignment_for_building(building_id, count, running_by_group)
+		var allowed: Array[String] = _allowed_worker_groups_for_building(building_id)
+		if allowed.is_empty() and not _building_can_use_field_labour(building_id):
+			labour_assignments.erase(building_id)
+			continue
+
+		var requested: Dictionary = {}
+		if labour_assignments.has(building_id):
+			requested = _coerce_staff_assignments_for_building(building_id, labour_assignments[building_id])
+		else:
+			requested = _default_assignment_for_building(building_id, count, running_by_group)
+
 		var final_assignments: Dictionary = {}
 		var remaining_slots: int = count
+
+		# Combined Field Labour is handled before the individual worker loop because
+		# one staffed building can be supplied by a mixture of Macehualtin and Tlacotin.
 		if _building_can_use_field_labour(building_id):
-			var field_wanted: int = clampi(int(requested.get("field_labour", count)), 0, remaining_slots)
-			var field_possible: int = _max_staffable_count_for_field_labour_with_used(building_id, running_by_group)
-			var field_count: int = mini(field_wanted, field_possible)
-			if field_count > 0:
-				final_assignments["field_labour"] = field_count
-				var split: Dictionary = _field_labour_population_split_for_building(building_id, field_count, running_by_group)
-				for member_variant: Variant in split.keys(): running_by_group[String(member_variant)] = int(running_by_group.get(String(member_variant), 0)) + int(split[member_variant])
-				remaining_slots -= field_count
-		for group_id: String in _allowed_worker_groups_for_building(building_id):
-			if remaining_slots <= 0: break
-			if _building_can_use_field_labour(building_id) and (group_id == "macehualtin" or group_id == "tlacotin"): continue
-			var wanted: int = clampi(int(requested.get(group_id, remaining_slots)), 0, remaining_slots)
+			var field_wanted: int = clampi(int(requested.get("field_labour", 0)), 0, remaining_slots)
+			if field_wanted > 0:
+				var field_possible: int = _max_staffable_count_for_field_labour_with_used(building_id, running_by_group)
+				var field_count: int = mini(field_wanted, field_possible)
+				if field_count > 0:
+					final_assignments["field_labour"] = field_count
+					var split: Dictionary = _field_labour_population_split_for_building(building_id, field_count, running_by_group)
+					for member_variant: Variant in split.keys():
+						var member_id: String = String(member_variant)
+						running_by_group[member_id] = int(running_by_group.get(member_id, 0)) + int(split[member_id])
+					remaining_slots -= field_count
+
+		# Specialist / non-field groups are still handled individually.
+		for group_id: String in allowed:
+			if group_id == "macehualtin" or group_id == "tlacotin":
+				# These are represented by the combined field_labour entry for chinampas.
+				if _building_can_use_field_labour(building_id):
+					continue
+			if remaining_slots <= 0:
+				break
+			var wanted: int = clampi(int(requested.get(group_id, 0)), 0, remaining_slots)
 			var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)
-			var available_pop: int = max(0, _active_population_for_group(group_id) - int(running_by_group.get(group_id, 0)))
-			var final_count: int = mini(wanted, int(floor(float(available_pop) / float(max(1, needed_per)))))
+			var total: int = _active_population_for_group(group_id)
+			var already: int = int(running_by_group.get(group_id, 0))
+			var available_pop: int = max(0, total - already)
+			var max_by_pop: int = 0
+			if needed_per > 0:
+				max_by_pop = int(floor(float(available_pop) / float(needed_per)))
+			var final_count: int = mini(wanted, max_by_pop)
 			if final_count > 0:
 				final_assignments[group_id] = final_count
-				running_by_group[group_id] = int(running_by_group.get(group_id, 0)) + final_count * needed_per
+				running_by_group[group_id] = already + final_count * needed_per
 				remaining_slots -= final_count
+
 		labour_assignments[building_id] = final_assignments
 
 func _default_assignment_for_building(building_id: String, count: int, running_by_group: Dictionary) -> Dictionary:
 	var requested: Dictionary = {}
+	var remaining: int = count
 	if _building_can_use_field_labour(building_id):
-		var use_field: int = mini(count, _max_staffable_count_for_field_labour_with_used(building_id, running_by_group))
+		var possible_field: int = _max_staffable_count_for_field_labour_with_used(building_id, running_by_group)
+		var use_field: int = mini(remaining, possible_field)
 		if use_field > 0:
 			requested["field_labour"] = use_field
+			var split: Dictionary = _field_labour_population_split_for_building(building_id, use_field, running_by_group)
+			for member_variant: Variant in split.keys():
+				var member_id: String = String(member_variant)
+				running_by_group[member_id] = int(running_by_group.get(member_id, 0)) + int(split[member_id])
+			remaining -= use_field
+		if remaining <= 0:
 			return requested
+
 	for group_id: String in _allowed_worker_groups_for_building(building_id):
+		if group_id == "macehualtin" or group_id == "tlacotin":
+			if _building_can_use_field_labour(building_id):
+				continue
+		if remaining <= 0:
+			break
 		var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)
-		var available_pop: int = max(0, _active_population_for_group(group_id) - int(running_by_group.get(group_id, 0)))
-		var possible: int = int(floor(float(available_pop) / float(max(1, needed_per))))
-		var use_count: int = mini(count, possible)
+		var total: int = _active_population_for_group(group_id)
+		var already: int = int(running_by_group.get(group_id, 0))
+		var available_pop: int = max(0, total - already)
+		var possible: int = 0
+		if needed_per > 0:
+			possible = int(floor(float(available_pop) / float(needed_per)))
+		var use_count: int = mini(remaining, possible)
 		if use_count > 0:
 			requested[group_id] = use_count
-			return requested
+			running_by_group[group_id] = already + use_count * needed_per
+			remaining -= use_count
 	return requested
 
 func _allowed_worker_groups_for_building(building_id: String) -> Array[String]:
 	var output: Array[String] = []
-	if not buildings.has(building_id): return output
-	var staff: Dictionary = (buildings[building_id] as Dictionary).get("staff", {}) as Dictionary
-	for group_variant: Variant in staff.keys(): output.append(String(group_variant))
+	if not buildings.has(building_id):
+		return output
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	var staff: Dictionary = definition.get("staff", {}) as Dictionary
+	var screen_id: String = String(definition.get("screen", ""))
+	# Chinampa/raw field labour can be staffed by free Macehualtin or Tlacotin.
+	# Workshops remain Tolteca/artisan-led unless the building data explicitly says otherwise.
+	if screen_id == "chinampas" and staff.has("macehualtin"):
+		output.append("macehualtin")
+		output.append("tlacotin")
+	else:
+		for group_variant: Variant in staff.keys():
+			var group_id: String = String(group_variant)
+			if _productive_labour_group_ids().has(group_id):
+				output.append(group_id)
 	return output
-
-func _building_can_use_field_labour(building_id: String) -> bool:
-	var allowed: Array[String] = _allowed_worker_groups_for_building(building_id)
-	return allowed.has("macehualtin") or allowed.has("tlacotin")
-
-func _max_staffable_count_for_field_labour_with_used(building_id: String, running_by_group: Dictionary) -> int:
-	var needed: int = _staff_required_per_copy_for_group(building_id, "macehualtin")
-	var available: int = max(0, _active_population_for_group("macehualtin") + _active_population_for_group("tlacotin") - int(running_by_group.get("macehualtin", 0)) - int(running_by_group.get("tlacotin", 0)))
-	return int(floor(float(available) / float(max(1, needed))))
-
-func _field_labour_population_split_for_building(building_id: String, count: int, running_by_group: Dictionary) -> Dictionary:
-	var needed_total: int = _staff_required_per_copy_for_group(building_id, "macehualtin") * count
-	var mace_available: int = max(0, _active_population_for_group("macehualtin") - int(running_by_group.get("macehualtin", 0)))
-	var use_mace: int = mini(mace_available, needed_total)
-	var use_tlacotin: int = max(0, needed_total - use_mace)
-	var split: Dictionary = {}
-	if use_mace > 0: split["macehualtin"] = use_mace
-	if use_tlacotin > 0: split["tlacotin"] = use_tlacotin
-	return split
 
 func _staff_required_per_copy_for_group(building_id: String, group_id: String) -> int:
-	if not buildings.has(building_id): return 0
-	return int(((buildings[building_id] as Dictionary).get("staff", {}) as Dictionary).get(group_id, 0))
+	if not buildings.has(building_id):
+		return 0
+	if group_id == "field_labour":
+		return _field_labour_fallback_staff_required(building_id)
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	var staff: Dictionary = definition.get("staff", {}) as Dictionary
+	if staff.has(group_id):
+		return int(staff[group_id])
+	# Tlacotin can substitute for Macehualtin on chinampa/raw production buildings.
+	if group_id == "tlacotin" and String(definition.get("screen", "")) == "chinampas" and staff.has("macehualtin"):
+		return int(staff["macehualtin"])
+	return 0
+
+func _coerce_staff_assignments_for_building(building_id: String, value: Variant) -> Dictionary:
+	var output: Dictionary = {}
+	var allowed: Array[String] = _allowed_worker_groups_for_building(building_id)
+	if allowed.is_empty() and not _building_can_use_field_labour(building_id):
+		return output
+	var count: int = int(estate_buildings.get(building_id, 0))
+	if value is int or value is float:
+		var amount: int = clampi(int(value), 0, count)
+		if amount <= 0:
+			return output
+		if _building_can_use_field_labour(building_id):
+			output["field_labour"] = amount
+		elif not allowed.is_empty():
+			output[allowed[0]] = amount
+		return output
+	if not (value is Dictionary):
+		return output
+	var assignment: Dictionary = value as Dictionary
+
+	if _building_can_use_field_labour(building_id):
+		var field_amount: int = int(assignment.get("field_labour", 0))
+		# Older patches stored Macehualtin/Tlacotin copy counts separately. Merge
+		# them into the combined Field Labour pool so the two populations can staff
+		# one building together.
+		for member_id: String in _field_labour_group_ids():
+			field_amount += int(assignment.get(member_id, 0))
+		if field_amount > 0:
+			output["field_labour"] = clampi(field_amount, 0, count)
+
+	for group_id: String in allowed:
+		if _field_labour_group_ids().has(group_id) and _building_can_use_field_labour(building_id):
+			continue
+		var raw_amount: int = int(assignment.get(group_id, 0))
+		if raw_amount <= 0:
+			continue
+		var needed_per: int = max(1, _staff_required_per_copy_for_group(building_id, group_id))
+		if raw_amount > count:
+			output[group_id] = int(floor(float(raw_amount) / float(needed_per)))
+		else:
+			output[group_id] = raw_amount
+	return output
+
+func _staff_assignments_for_building(building_id: String) -> Dictionary:
+	if not labour_assignments.has(building_id):
+		return {}
+	return _coerce_staff_assignments_for_building(building_id, labour_assignments[building_id])
+
+func _assigned_staff_for_building(building_id: String) -> Dictionary:
+	_ensure_labour_assignments()
+	return _staff_population_by_building(building_id)
+
+func _staff_population_by_building(building_id: String) -> Dictionary:
+	var result: Dictionary = {}
+	var assignments: Dictionary = _staff_assignments_for_building(building_id)
+	if assignments.has("field_labour"):
+		var copies: int = int(assignments.get("field_labour", 0))
+		var split: Dictionary = _field_labour_distribution_for_building(building_id, copies)
+		for member_variant: Variant in split.keys():
+			var member_id: String = String(member_variant)
+			result[member_id] = int(result.get(member_id, 0)) + int(split[member_id])
+	for group_variant: Variant in assignments.keys():
+		var group_id: String = String(group_variant)
+		if group_id == "field_labour":
+			continue
+		var copies: int = int(assignments[group_id])
+		var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)
+		if copies > 0 and needed_per > 0:
+			result[group_id] = int(result.get(group_id, 0)) + copies * needed_per
+	return result
 
 func _staffed_count_for_building(building_id: String) -> int:
-	_ensure_labour_assignments()
-	var assignment: Dictionary = labour_assignments.get(building_id, {}) as Dictionary
 	var total: int = 0
-	for key: Variant in assignment.keys(): total += int(assignment[key])
+	var assignments: Dictionary = _staff_assignments_for_building(building_id)
+	for group_variant: Variant in assignments.keys():
+		total += int(assignments[group_variant])
 	return clampi(total, 0, int(estate_buildings.get(building_id, 0)))
 
-func _active_population_for_group(group_id: String) -> int:
-	return int(population.get(group_id, 0))
+func _staffed_count_for_group(building_id: String, group_id: String) -> int:
+	if group_id == "field_labour":
+		return _field_labour_staffed_count_for_building(building_id)
+	return int(_staff_assignments_for_building(building_id).get(group_id, 0))
 
-func _ensure_base_housing_capacity() -> void:
-	for group_id: String in population.keys():
-		if not base_housing_capacity.has(group_id): base_housing_capacity[group_id] = 0
+func _coerce_staffed_count_from_assignment(building_id: String, value: Variant) -> int:
+	if value is int or value is float:
+		return int(value)
+	var assignments: Dictionary = _coerce_staff_assignments_for_building(building_id, value)
+	var total: int = 0
+	for group_variant: Variant in assignments.keys():
+		total += int(assignments[group_variant])
+	return total
 
-func _ensure_active_housing_counts() -> void:
-	for building_id: String in building_order:
-		if not _is_housing_building_id(building_id): continue
-		active_housing_counts[building_id] = clampi(int(active_housing_counts.get(building_id, 0)), 0, int(estate_buildings.get(building_id, 0)))
+func _clamp_staffed_count_for_building(building_id: String, requested_count: int) -> int:
+	var count: int = int(estate_buildings.get(building_id, 0))
+	var wanted: int = clampi(requested_count, 0, count)
+	if _building_can_use_field_labour(building_id):
+		return mini(wanted, _max_staffable_count_for_field_labour(building_id))
+	var assigned_elsewhere: Dictionary = _assigned_labour_by_group_excluding(building_id)
+	var requested: Dictionary = {}
+	var remaining: int = wanted
+	for group_id: String in _allowed_worker_groups_for_building(building_id):
+		if remaining <= 0:
+			break
+		var max_for_group: int = _max_staffable_count_for_building_group(building_id, group_id, requested, assigned_elsewhere)
+		var use_count: int = mini(remaining, max_for_group)
+		requested[group_id] = use_count
+		remaining -= use_count
+	var total: int = 0
+	for group_variant: Variant in requested.keys():
+		total += int(requested[group_variant])
+	return total
 
-func get_housing_mothball_data() -> Dictionary:
-	return {"buildings": get_housing_buildings(), "summary": get_housing_summary()}
+func _clamp_staffed_count_for_building_group(building_id: String, group_id: String, requested_count: int) -> int:
+	var count: int = int(estate_buildings.get(building_id, 0))
+	var wanted: int = clampi(requested_count, 0, count)
+	var max_allowed: int = _max_staffable_count_for_building_group(building_id, group_id)
+	return mini(wanted, max_allowed)
 
-func get_housing_summary() -> Dictionary:
-	var capacity: Dictionary = {}
-	for group_id: String in base_housing_capacity.keys(): capacity[group_id] = int(base_housing_capacity.get(group_id, 0))
-	_ensure_active_housing_counts()
-	for building_id: String in active_housing_counts.keys():
-		if not buildings.has(building_id): continue
-		var count: int = int(active_housing_counts.get(building_id, 0))
-		var cap: Dictionary = (buildings[building_id] as Dictionary).get("housing_capacity", {}) as Dictionary
-		for group_variant: Variant in cap.keys(): capacity[String(group_variant)] = int(capacity.get(String(group_variant), 0)) + int(cap[group_variant]) * count
-	var rows: Array[Dictionary] = []
-	for group_id: String in population.keys():
-		var pop: int = int(population.get(group_id, 0))
-		var cap_value: int = int(capacity.get(group_id, 0))
-		rows.append({"group_id": group_id, "name": _population_group_name(group_id), "population": pop, "capacity": cap_value, "free_capacity": cap_value - pop, "status": "OK" if cap_value >= pop else "Overcrowded"})
-	return {"rows": rows}
+func _building_can_use_field_labour(building_id: String) -> bool:
+	if not buildings.has(building_id):
+		return false
+	var definition: Dictionary = buildings[building_id] as Dictionary
+	if String(definition.get("screen", "")) == "chinampas":
+		return true
+	var allowed: Array[String] = _allowed_worker_groups_for_building(building_id)
+	for member_id: String in _field_labour_group_ids():
+		if allowed.has(member_id):
+			return true
+	return false
 
-func get_housing_buildings() -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	for building_id: String in building_order:
-		if not _is_housing_building_id(building_id): continue
-		var data: Dictionary = buildings[building_id] as Dictionary
-		output.append({"id": building_id, "name": String(data.get("name", building_id.capitalize())), "category": String(data.get("category", "housing")), "tier": String(data.get("tier", "")), "description": String(data.get("description", "")), "built": int(estate_buildings.get(building_id, 0)), "active": int(active_housing_counts.get(building_id, 0)), "capacity": (data.get("housing_capacity", {}) as Dictionary).duplicate(true), "maintenance": (data.get("housing_maintenance", {}) as Dictionary).duplicate(true), "build_status": build_status_text(building_id), "can_build": can_build(building_id), "can_destroy": can_destroy(building_id), "destroy_status": destroy_status_text(building_id)})
-	return output
+func _field_labour_staffed_count_for_building(building_id: String) -> int:
+	var assignments: Dictionary = _staff_assignments_for_building(building_id)
+	var total: int = int(assignments.get("field_labour", 0))
+	# Keep older per-member assignments readable if they still exist.
+	for member_id: String in _field_labour_group_ids():
+		total += int(assignments.get(member_id, 0))
+	return clampi(total, 0, int(estate_buildings.get(building_id, 0)))
 
-func set_active_housing_count(building_id: String, active_count: int) -> void:
-	if not _is_housing_building_id(building_id): return
-	active_housing_counts[building_id] = clampi(active_count, 0, int(estate_buildings.get(building_id, 0)))
+func _max_staffable_count_for_field_labour(building_id: String) -> int:
+	return _max_staffable_count_for_field_labour_with_used(building_id, _assigned_labour_by_group_excluding(building_id))
+
+func _max_staffable_count_for_building_group(building_id: String, group_id: String, override_for_building: Dictionary = {}, precomputed_elsewhere: Dictionary = {}) -> int:
+	if group_id == "field_labour":
+		var elsewhere: Dictionary = precomputed_elsewhere
+		if elsewhere.is_empty():
+			elsewhere = _assigned_labour_by_group_excluding(building_id)
+		return _max_staffable_count_for_field_labour_with_used(building_id, elsewhere)
+	if not buildings.has(building_id):
+		return 0
+	if not _allowed_worker_groups_for_building(building_id).has(group_id):
+		return 0
+	var count: int = int(estate_buildings.get(building_id, 0))
+	var assigned_elsewhere: Dictionary = precomputed_elsewhere
+	if assigned_elsewhere.is_empty():
+		assigned_elsewhere = _assigned_labour_by_group_excluding(building_id)
+	var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)
+	if needed_per <= 0:
+		return 0
+	var total_pop: int = _active_population_for_group(group_id)
+	var already_elsewhere: int = int(assigned_elsewhere.get(group_id, 0))
+	var available_pop: int = max(0, total_pop - already_elsewhere)
+	var max_by_pop: int = int(floor(float(available_pop) / float(needed_per)))
+	return mini(count, max_by_pop)
+
+func _clamp_staffed_count_with_running(building_id: String, requested_count: int, running_by_group: Dictionary) -> int:
+	var count: int = int(estate_buildings.get(building_id, 0))
+	var remaining: int = clampi(requested_count, 0, count)
+	var staffed: int = 0
+	if _building_can_use_field_labour(building_id):
+		var possible_field: int = _max_staffable_count_for_field_labour_with_used(building_id, running_by_group)
+		var use_field: int = mini(remaining, possible_field)
+		if use_field > 0:
+			var split: Dictionary = _field_labour_population_split_for_building(building_id, use_field, running_by_group)
+			for member_variant: Variant in split.keys():
+				var member_id: String = String(member_variant)
+				running_by_group[member_id] = int(running_by_group.get(member_id, 0)) + int(split[member_id])
+			staffed += use_field
+			remaining -= use_field
+	if remaining <= 0:
+		return staffed
+	for group_id: String in _allowed_worker_groups_for_building(building_id):
+		if _field_labour_group_ids().has(group_id) and _building_can_use_field_labour(building_id):
+			continue
+		if remaining <= 0:
+			break
+		var needed_per: int = _staff_required_per_copy_for_group(building_id, group_id)
+		var total: int = _active_population_for_group(group_id)
+		var already: int = int(running_by_group.get(group_id, 0))
+		var available: int = max(0, total - already)
+		var possible: int = 0
+		if needed_per > 0:
+			possible = int(floor(float(available) / float(needed_per)))
+		var use_count: int = mini(remaining, possible)
+		staffed += use_count
+		running_by_group[group_id] = already + use_count * needed_per
+		remaining -= use_count
+	return staffed
+
+func _max_staffable_count_for_building(building_id: String) -> int:
+	if not buildings.has(building_id):
+		return 0
+	return _clamp_staffed_count_for_building(building_id, int(estate_buildings.get(building_id, 0)))
+
+func _assigned_labour_by_group_excluding(excluded_building_id: String) -> Dictionary:
+	var result: Dictionary = {}
+	for building_variant: Variant in labour_assignments.keys():
+		var building_id: String = String(building_variant)
+		if building_id == excluded_building_id:
+			continue
+		var assigned: Dictionary = _staff_population_by_building(building_id)
+		for group_variant: Variant in assigned.keys():
+			var group_id: String = String(group_variant)
+			result[group_id] = int(result.get(group_id, 0)) + int(assigned[group_id])
+	return result
+
+func _assigned_labour_by_group() -> Dictionary:
+	var result: Dictionary = {}
+	for building_variant: Variant in labour_assignments.keys():
+		var building_id: String = String(building_variant)
+		var assigned: Dictionary = _staff_population_by_building(building_id)
+		for group_variant: Variant in assigned.keys():
+			var group_id: String = String(group_variant)
+			result[group_id] = int(result.get(group_id, 0)) + int(assigned[group_id])
+	return result
+
+
+func _multiply_dictionary(values: Dictionary, multiplier: int) -> Dictionary:
+	var result: Dictionary = {}
+	for key_variant: Variant in values.keys():
+		var key: String = String(key_variant)
+		result[key] = float(values[key_variant]) * float(multiplier)
+	return result
+
+func add_looted_goods_bundle(loot: Dictionary) -> void:
+	# Flower Wars should not create a separate "Looted Goods" stockpile.
+	# Loot is immediately assigned into actual goods such as maize, wood, cacao,
+	# obsidian, cloth, tools, weapons, ritual goods, or fine textiles.
+	var gained_parts: Array[String] = []
+	for resource_variant: Variant in loot.keys():
+		var resource_id: String = String(resource_variant)
+		if not resource_order.has(resource_id):
+			push_warning("Ignoring looted item that is not a real good: " + resource_id)
+			continue
+		var amount: float = maxf(0.0, float(loot[resource_id]))
+		if amount <= 0.0:
+			continue
+		_add_stock(resource_id, amount)
+		gained_parts.append(_format_amount(amount) + " " + get_resource_name(resource_id))
+	if not gained_parts.is_empty():
+		last_report.append("Loot assigned into goods: " + ", ".join(gained_parts) + ".")
 	emit_signal("state_changed")
 
-func get_building_rows_for_screen(screen_id: String) -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	for building_id: String in building_order:
-		if not buildings.has(building_id): continue
-		var data: Dictionary = buildings[building_id] as Dictionary
-		if String(data.get("screen", "")) != screen_id: continue
-		var status: Dictionary = _estimate_building_status(building_id)
-		output.append({"id": building_id, "name": String(data.get("name", building_id.capitalize())), "category": String(data.get("category", "")), "description": String(data.get("description", "")), "built": int(estate_buildings.get(building_id, 0)), "can_build": can_build(building_id), "build_status": build_status_text(building_id), "can_destroy": can_destroy(building_id), "destroy_status": destroy_status_text(building_id), "operating": int(status.get("operating", 0)), "blocked": int(status.get("blocked", 0)), "status_text": String(status.get("status_text", "")), "inputs": (data.get("inputs", {}) as Dictionary).duplicate(true), "outputs": (data.get("outputs", {}) as Dictionary).duplicate(true), "staff": (data.get("staff", {}) as Dictionary).duplicate(true), "build_cost": (data.get("build_cost", {}) as Dictionary).duplicate(true)})
-	return output
-
-func get_labour_assignment_data() -> Dictionary:
-	_ensure_labour_assignments()
-	return {"buildings": get_building_rows_for_screen("chinampas") + get_building_rows_for_screen("workshops"), "assignments": labour_assignments.duplicate(true), "population": population.duplicate(true)}
-
-func set_labour_assignment(building_id: String, group_id: String, count: int) -> void:
-	if not labour_assignments.has(building_id): labour_assignments[building_id] = {}
-	var assignment: Dictionary = labour_assignments[building_id] as Dictionary
-	assignment[group_id] = max(0, count)
-	labour_assignments[building_id] = assignment
-	_ensure_labour_assignments()
-	emit_signal("state_changed")
+func _dictionary_to_named_string(values: Dictionary, suffix: String = "") -> String:
+	var parts: Array[String] = []
+	for key_variant: Variant in values.keys():
+		var key: String = String(key_variant)
+		var label: String = key
+		if resources.has(key):
+			label = get_resource_name(key)
+		elif population.has(key) or base_housing_capacity.has(key):
+			label = _labour_group_name(key)
+		var amount_text: String = ""
+		var value: Variant = values[key_variant]
+		if value is int:
+			amount_text = str(int(value))
+		else:
+			amount_text = _format_amount(float(value))
+		if suffix != "":
+			parts.append(label + " " + amount_text + " " + suffix)
+		else:
+			parts.append(label + " " + amount_text)
+	if parts.is_empty():
+		return "None"
+	return "; ".join(parts)
 
 func _stock(resource_id: String) -> float:
 	return float(estate_stockpiles.get(resource_id, 0.0))
 
 func _add_stock(resource_id: String, amount: float) -> void:
-	estate_stockpiles[resource_id] = maxf(0.0, float(estate_stockpiles.get(resource_id, 0.0)) + amount)
+	estate_stockpiles[resource_id] = maxf(0.0, _stock(resource_id) + amount)
+
+func _reserve_breakdown(resource_id: String, upkeep_value: float, input_value: float, housing_value: float = 0.0) -> Array[String]:
+	var lines: Array[String] = []
+	if upkeep_value > 0.0:
+		lines.append("Population upkeep: " + _format_amount(upkeep_value))
+	if housing_value > 0.0:
+		lines.append("Housing building upkeep: " + _format_amount(housing_value))
+	if input_value > 0.0:
+		lines.append("Building inputs: " + _format_amount(input_value))
+	if lines.is_empty():
+		lines.append("No current reserve pressure")
+	return lines
 
 func _pressure_label(stored: float, outgoing: float) -> String:
-	if outgoing <= 0.0: return "Free"
-	var coverage: float = stored / maxf(1.0, outgoing)
-	if coverage < 1.0: return "Critical"
-	if coverage < 2.0: return "Tight"
+	if outgoing <= 0.0:
+		if stored <= 0.0:
+			return "Absent"
+		return "Stored"
+	var coverage: float = stored / outgoing
+	if coverage >= 5.0:
+		return "Abundant"
+	if coverage >= 3.0:
+		return "Comfortable"
+	if coverage >= 1.5:
+		return "Tight"
+	if coverage >= 0.75:
+		return "Shortage"
+	return "Crisis"
+
+func _scarcity_multiplier(coverage: float, demand_value: float) -> float:
+	if demand_value <= 0.0:
+		return 0.75
+	if coverage <= 0.0:
+		return 3.0
+	return maxf(0.75, minf(3.0, 3.0 / coverage))
+
+func _market_label(coverage: float, demand_value: float) -> String:
+	if demand_value <= 0.0:
+		return "No demand"
+	if coverage >= 5.0:
+		return "Abundant"
+	if coverage >= 3.0:
+		return "Comfortable"
+	if coverage >= 1.5:
+		return "Tight"
+	if coverage >= 0.75:
+		return "Shortage"
+	return "Crisis"
+
+func _market_trend(coverage: float, demand_value: float) -> String:
+	if demand_value <= 0.0:
+		return "Idle"
+	if coverage >= 5.0:
+		return "Soft"
+	if coverage >= 3.0:
+		return "Stable"
+	if coverage >= 1.5:
+		return "Rising"
+	return "Critical"
+
+func _rival_market_note(resource_id: String) -> String:
+	match resource_id:
+		"weapons", "obsidian":
+			return "War Rival pressure: weapons, obsidian and martial goods."
+		"tools", "cloth":
+			return "Cunning Rival pressure: practical bottlenecks and market leverage."
+		"cacao", "fine_textiles":
+			return "Diplomatic Rival pressure: palace-facing status goods."
+	return "Rival behaviour can alter this market once procurement is connected."
+
+
+func _apply_market_economy_to_goods(goods: Array[Dictionary]) -> Array[Dictionary]:
+	if market_economy.is_empty():
+		return goods
+	var natural: Dictionary = market_economy.get("village_natural_production", {}) as Dictionary
+	var building_outputs: Dictionary = market_economy.get("village_building_outputs", {}) as Dictionary
+	var population_use: Dictionary = market_economy.get("village_population_consumption", {}) as Dictionary
+	var building_inputs: Dictionary = market_economy.get("village_building_inputs", {}) as Dictionary
+	var construction_demand: Dictionary = market_economy.get("year1_construction_demand_per_turn", {}) as Dictionary
+	var estate_inputs: Dictionary = market_economy.get("starter_estate_input_demand", {}) as Dictionary
+	var estate_outputs: Dictionary = market_economy.get("starter_estate_output_supply", {}) as Dictionary
+	var event_modifiers: Dictionary = market_economy.get("event_modifiers", {}) as Dictionary
+	for index: int in range(goods.size()):
+		var good: Dictionary = goods[index]
+		var resource_id: String = String(good.get("id", ""))
+		var market_stock: float = float(good.get("market_stock", 0.0))
+		var base_value: float = float(good.get("base_value", 1.0))
+		var natural_output: float = _market_resource_value(natural, resource_id)
+		var building_output: float = _market_resource_value(building_outputs, resource_id)
+		var estate_output: float = _market_resource_value(estate_outputs, resource_id)
+		var population_demand: float = _market_resource_value(population_use, resource_id)
+		var building_demand: float = _market_resource_value(building_inputs, resource_id)
+		var construction_need: float = _market_resource_value(construction_demand, resource_id)
+		var estate_demand: float = _market_resource_value(estate_inputs, resource_id)
+		var event_delta: float = _market_resource_value(event_modifiers, resource_id)
+		# Spreadsheet reconciliation: the background market uses the v0.12 balance
+		# workbook as its source of truth. Natural output + village building output
+		# + the modelled starter-estate supply are compared against population
+		# upkeep + village production inputs + year-one construction pressure +
+		# starter-estate input pressure. This reproduces the Market Balance sheet
+		# net / turn values while still showing the village pieces separately.
+		var total_output: float = maxf(0.0, natural_output + building_output + estate_output + event_delta)
+		var total_demand: float = maxf(0.0, population_demand + building_demand + construction_need + estate_demand)
+		if total_demand <= 0.001:
+			total_demand = maxf(0.0, float(good.get("demand", 0.0)))
+		var net_change: float = total_output - total_demand
+		var projected_stock: float = maxf(0.0, market_stock + net_change)
+		var projected_coverage: float = 0.0
+		if total_demand > 0.001:
+			projected_coverage = projected_stock / total_demand
+		var multiplier: float = _market_scarcity_multiplier(projected_coverage, total_demand)
+		var projected_value: float = base_value * multiplier
+		good["starting_market_stock"] = market_stock
+		good["village_natural_production"] = natural_output
+		good["village_building_output"] = building_output
+		good["market_estate_output_supply"] = estate_output
+		good["village_event_delta"] = event_delta
+		good["village_total_production"] = total_output
+		good["village_population_consumption"] = population_demand
+		good["village_building_input_demand"] = building_demand
+		good["market_construction_demand"] = construction_need
+		good["market_estate_input_demand"] = estate_demand
+		good["village_total_demand"] = total_demand
+		good["village_net_change"] = net_change
+		good["projected_market_stock"] = projected_stock
+		good["projected_coverage"] = projected_coverage
+		good["projected_value"] = projected_value
+		good["demand"] = total_demand
+		good["coverage"] = projected_coverage
+		good["current_value"] = projected_value
+		good["label"] = _market_pressure_label(projected_coverage, total_demand)
+		good["trend"] = _market_net_trend(net_change, total_demand)
+		good["village_note"] = _market_good_note(resource_id)
+		goods[index] = good
+	return goods
+
+func _market_resource_value(source: Dictionary, resource_id: String) -> float:
+	return float(source.get(resource_id, 0.0))
+
+func _market_scarcity_multiplier(coverage: float, demand: float) -> float:
+	if demand <= 0.001:
+		return 1.0
+	if coverage <= 0.001:
+		return 3.0
+	return clampf(3.0 / coverage, 0.50, 3.0)
+
+func _market_pressure_label(coverage: float, demand: float) -> String:
+	if demand <= 0.001:
+		return "No demand"
+	if coverage < 1.0:
+		return "Crisis"
+	if coverage < 2.0:
+		return "Shortage"
+	if coverage < 3.0:
+		return "Tight"
+	if coverage > 6.0:
+		return "Abundant"
+	return "Comfortable"
+
+func _market_net_trend(net_change: float, demand: float) -> String:
+	if demand <= 0.001:
+		return "Stable"
+	if net_change <= -demand * 0.35:
+		return "Falling fast"
+	if net_change < -0.01:
+		return "Falling"
+	if net_change >= demand * 0.35:
+		return "Rising fast"
+	if net_change > 0.01:
+		return "Rising"
 	return "Stable"
 
-func _population_group_name(group_id: String) -> String:
-	match group_id:
-		"macehualtin": return "Macehualtin"
-		"tlacotin": return "Tlacotin"
-		"tolteca": return "Tolteca"
-		"yaotequihuaqueh": return "Warriors"
-		"tlamacazqueh": return "Priests"
-		"pipiltin": return "Nobles"
-		"malli": return "Captives"
-	return group_id.capitalize()
+func _market_good_note(resource_id: String) -> String:
+	var notes: Dictionary = market_economy.get("resource_notes", {}) as Dictionary
+	return String(notes.get(resource_id, "No village economy note recorded yet."))
 
 func _format_amount(value: float) -> String:
-	if absf(value - roundf(value)) < 0.01: return str(int(roundf(value)))
+	if absf(value - roundf(value)) < 0.01:
+		return str(int(roundf(value)))
 	return str(snappedf(value, 0.01))
-
-func _string_array(source: Array) -> Array[String]:
-	var output: Array[String] = []
-	for value: Variant in source: output.append(String(value))
-	return output

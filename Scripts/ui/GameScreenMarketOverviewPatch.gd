@@ -51,10 +51,6 @@ var _shrine_levels: Dictionary = {}
 var _shrine_upgrades: Dictionary = {}
 var _ritual_capacity_used_this_veintena: float = 0.0
 var _selected_shrine_panel_id: String = ""
-var _selected_flower_war_scale: String = "minor"
-var _selected_flower_war_doctrine: String = "unspecialised"
-var _selected_flower_war_provisioning: String = "standard"
-var _selected_flower_war_commitment: int = 5
 var _optional_shrine_art_cache: Dictionary = {}
 
 func _ready() -> void:
@@ -177,14 +173,6 @@ func show_focus(location_id: String, focus_id: String) -> void:
 	super.show_focus(location_id, focus_id)
 
 func _refresh_main_content() -> void:
-	if current_location_id == "warriors":
-		_clear_dynamic_views()
-		if location_title:
-			location_title.text = "Barracks"
-		if location_art:
-			location_art.texture = _art_for_location(current_location_id)
-		_show_barracks_content()
-		return
 	if current_location_id == "shrines":
 		_clear_dynamic_views()
 		if location_title:
@@ -205,9 +193,6 @@ func _refresh_right_panel() -> void:
 
 	if current_location_id == "shrines":
 		_build_shrine_reports()
-		return
-	if current_location_id == "warriors":
-		_build_barracks_reports()
 		return
 
 	var special_view: String = String(profile.get("special_view", ""))
@@ -245,19 +230,6 @@ func _refresh_right_panel() -> void:
 		_build_report_list(profile)
 
 func _report_title_for_current_focus(profile: Dictionary) -> String:
-	if current_location_id == "warriors":
-		match _current_focus_id():
-			"overview":
-				return "Barracks Readiness"
-			"warriors":
-				return "Warrior Muster"
-			"weapons":
-				return "Weapon Readiness"
-			"flower_wars":
-				return "Flower Wars"
-			"returns":
-				return "War Returns"
-		return "Barracks Reports"
 	if current_location_id == "shrines":
 		match _current_focus_id():
 			"overview":
@@ -457,201 +429,12 @@ func _patch_join_limited(values: Array[String], max_items: int) -> String:
 		text += ", +" + str(values.size() - max_items) + " more"
 	return text
 
-
-# -----------------------------------------------------------------------------
-# Barracks / Flower Wars v1 UI
-# -----------------------------------------------------------------------------
-
-func _show_barracks_content() -> void:
-	_set_content_root_layout(true)
-	if content_text:
-		content_text.visible = false
-	if content_root:
-		content_root.visible = true
-	if dynamic_view_host == null:
-		return
-	dynamic_view_host.visible = true
-	var panel: PanelContainer = PanelContainer.new()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.64), Color(0.84, 0.35, 0.24, 0.46), 14))
-	dynamic_view_host.add_child(panel)
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_top", 14)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_bottom", 14)
-	panel.add_child(margin)
-	var root: VBoxContainer = VBoxContainer.new()
-	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_theme_constant_override("separation", 10)
-	margin.add_child(root)
-	var focus_id: String = _current_focus_id()
-	match focus_id:
-		"warriors":
-			_build_barracks_warriors_panel(root)
-		"weapons":
-			_build_barracks_weapons_panel(root)
-		"flower_wars":
-			_build_flower_war_panel(root)
-		"returns":
-			_build_flower_war_returns_panel(root)
-		_:
-			_build_barracks_overview_panel(root)
-
-func _barracks_summary() -> Dictionary:
-	var state: Node = _state()
-	if state != null and state.has_method("get_barracks_summary"):
-		return state.call("get_barracks_summary") as Dictionary
-	return {}
-
-func _build_barracks_overview_panel(root: VBoxContainer) -> void:
-	var summary: Dictionary = _barracks_summary()
-	root.add_child(_religion_label("Barracks Overview", 30, COLOR_TEXT))
-	root.add_child(_religion_wrapped_label("Barracks v1 connects Warrior Houses, warriors, weapons and Flower War readiness. Early 5-warrior bands are for Minor wars; 10 warriors are the Standard target; Major wars need mature investment.", 19, COLOR_MUTED))
-	root.add_child(_religion_wrapped_label("Warriors: " + str(int(summary.get("warriors", 0))) + " / " + str(int(summary.get("capacity", 0))) + ". Weapons: " + _format_float(float(summary.get("weapons", 0.0))) + ". Prestige: " + _format_float(float(summary.get("prestige", 0.0))) + ".", 22, COLOR_TEAL))
-	root.add_child(_religion_wrapped_label("Minor ready: " + _yes_no(bool(summary.get("minor_ready", false))) + ". Standard ready: " + _yes_no(bool(summary.get("standard_ready", false))) + ". Major ready: " + _yes_no(bool(summary.get("major_ready", false))) + ".", 20, COLOR_MUTED))
-	root.add_child(_religion_wrapped_label("Current war season: " + _current_festival_text() + ". Veintena 8 is the main Flower War season; Nemontemi will block Flower Wars later.", 18, COLOR_MUTED))
-
-func _build_barracks_warriors_panel(root: VBoxContainer) -> void:
-	var summary: Dictionary = _barracks_summary()
-	root.add_child(_religion_label("Warrior Muster", 30, COLOR_TEXT))
-	root.add_child(_religion_wrapped_label("Warriors are the Yaotequihuaqueh population group. They consume upkeep through the normal population system and are limited by Warrior House capacity.", 19, COLOR_MUTED))
-	root.add_child(_religion_wrapped_label("Current warriors: " + str(int(summary.get("warriors", 0))) + " / " + str(int(summary.get("capacity", 0))) + ". Recruitments remaining this Veintena: " + str(int(summary.get("recruits_remaining", 0))) + ".", 21, COLOR_TEAL))
-	for amount: int in [1, 2]:
-		var button: Button = Button.new()
-		button.text = "Recruit " + str(amount) + " warrior" + ("s" if amount > 1 else "")
-		button.custom_minimum_size = Vector2(0, 48)
-		button.add_theme_font_size_override("font_size", 20)
-		var state: Node = _state()
-		if state != null and state.has_method("can_recruit_warriors"):
-			var status: Dictionary = state.call("can_recruit_warriors", amount) as Dictionary
-			button.disabled = not bool(status.get("ok", false))
-			button.tooltip_text = String(status.get("reason", ""))
-		button.pressed.connect(func() -> void:
-			var s: Node = _state()
-			if s != null and s.has_method("recruit_warriors"):
-				s.call("recruit_warriors", amount)
-			_refresh_all()
-		)
-		root.add_child(button)
-
-func _build_barracks_weapons_panel(root: VBoxContainer) -> void:
-	var summary: Dictionary = _barracks_summary()
-	root.add_child(_religion_label("Weapon Readiness", 30, COLOR_TEXT))
-	root.add_child(_religion_wrapped_label("Flower Wars require one weapon committed per warrior. Weapons are checked before launch, while losses after battle depend on result severity.", 19, COLOR_MUTED))
-	root.add_child(_religion_wrapped_label("Weapons available: " + _format_float(float(summary.get("weapons", 0.0))) + ". Warriors: " + str(int(summary.get("warriors", 0))) + ".", 22, COLOR_TEAL))
-	root.add_child(_religion_wrapped_label("Minor needs 5 weapons. Standard needs 10. Major needs 20. Weapon Yards and market trade are the main support routes.", 18, COLOR_MUTED))
-
-func _build_flower_war_panel(root: VBoxContainer) -> void:
-	root.add_child(_religion_label("Prepare Flower War", 30, COLOR_TEXT))
-	root.add_child(_religion_wrapped_label("Choose scale, doctrine, provisioning and committed warriors. This v1 resolver is strategic: no tactical battle, only commitment and outcome.", 19, COLOR_MUTED))
-	_add_choice_row(root, "Scale", {"minor": "Minor", "standard": "Standard", "major": "Major"}, _selected_flower_war_scale, func(id: String) -> void:
-		_selected_flower_war_scale = id
-		_selected_flower_war_commitment = int(({"minor":5,"standard":10,"major":20}).get(id, 5))
-		_refresh_all()
-	)
-	_add_choice_row(root, "Doctrine", {"unspecialised": "Unspecialised", "eagle": "Eagle", "jaguar": "Jaguar", "otomi": "Otomi", "coyote": "Coyote"}, _selected_flower_war_doctrine, func(id: String) -> void:
-		_selected_flower_war_doctrine = id
-		_refresh_all()
-	)
-	_add_choice_row(root, "Provisioning", {"standard": "Standard", "well": "Well", "royal": "Royal"}, _selected_flower_war_provisioning, func(id: String) -> void:
-		_selected_flower_war_provisioning = id
-		_refresh_all()
-	)
-	var spin: SpinBox = SpinBox.new()
-	spin.min_value = 1
-	spin.max_value = max(1, int(_barracks_summary().get("warriors", 0)))
-	spin.step = 1
-	spin.value = clampi(_selected_flower_war_commitment, 1, int(spin.max_value))
-	spin.custom_minimum_size = Vector2(0, 44)
-	spin.value_changed.connect(func(value: float) -> void:
-		_selected_flower_war_commitment = int(value)
-		_refresh_all()
-	)
-	root.add_child(_religion_wrapped_label("Committed warriors", 18, COLOR_MUTED))
-	root.add_child(spin)
-	var state: Node = _state()
-	var preview: Dictionary = {}
-	if state != null and state.has_method("get_flower_war_preview"):
-		preview = state.call("get_flower_war_preview", _selected_flower_war_scale, _selected_flower_war_doctrine, _selected_flower_war_provisioning, _selected_flower_war_commitment) as Dictionary
-	root.add_child(_religion_wrapped_label("Readiness: " + String(preview.get("risk", "Unknown")) + ". Cost: " + _format_cost(preview.get("cost", {}) as Dictionary) + ".", 19, COLOR_TEAL))
-	if not bool(preview.get("ok", false)):
-		root.add_child(_religion_wrapped_label("Blocked: " + String(preview.get("reason", "")), 17, Color(1.0, 0.74, 0.40, 1.0)))
-	var launch: Button = Button.new()
-	launch.text = "Commit to Flower War"
-	launch.custom_minimum_size = Vector2(0, 54)
-	launch.add_theme_font_size_override("font_size", 22)
-	launch.disabled = not bool(preview.get("ok", false))
-	launch.pressed.connect(func() -> void:
-		var s: Node = _state()
-		if s != null and s.has_method("launch_flower_war"):
-			s.call("launch_flower_war", _selected_flower_war_scale, _selected_flower_war_doctrine, _selected_flower_war_provisioning, _selected_flower_war_commitment)
-		show_focus("warriors", "returns")
-	)
-	root.add_child(launch)
-
-func _build_flower_war_returns_panel(root: VBoxContainer) -> void:
-	root.add_child(_religion_label("Flower War Returns", 30, COLOR_TEXT))
-	var state: Node = _state()
-	var lines: Array = []
-	if state != null and state.has_method("get_last_flower_war_report"):
-		lines = state.call("get_last_flower_war_report") as Array
-	if lines.is_empty():
-		root.add_child(_religion_wrapped_label("No Flower War has been resolved yet.", 20, COLOR_MUTED))
-	else:
-		for line_variant: Variant in lines:
-			root.add_child(_religion_wrapped_label("• " + String(line_variant), 19, COLOR_TEXT))
-
-func _build_barracks_reports() -> void:
-	var summary: Dictionary = _barracks_summary()
-	_add_notification("Warriors " + str(int(summary.get("warriors", 0))) + " / " + str(int(summary.get("capacity", 0))) + "; weapons " + _format_float(float(summary.get("weapons", 0.0))) + ".")
-	_add_notification("Readiness: Minor " + _yes_no(bool(summary.get("minor_ready", false))) + "; Standard " + _yes_no(bool(summary.get("standard_ready", false))) + "; Major " + _yes_no(bool(summary.get("major_ready", false))) + ".")
-	_add_notification("Doctrine roles: Eagles captives; Jaguars prestige; Otomi survival; Coyotes loot; Unspecialised baseline.")
-	if _current_focus_id() == "returns":
-		var lines: Array = summary.get("last_report", []) as Array
-		for line_variant: Variant in lines:
-			_add_notification(String(line_variant))
-
-func _add_choice_row(parent: VBoxContainer, title: String, options: Dictionary, selected_id: String, callback: Callable) -> void:
-	parent.add_child(_religion_wrapped_label(title, 18, COLOR_MUTED))
-	var row: HBoxContainer = HBoxContainer.new()
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_theme_constant_override("separation", 6)
-	parent.add_child(row)
-	for key_variant: Variant in options.keys():
-		var id: String = String(key_variant)
-		var button: Button = Button.new()
-		button.text = String(options[key_variant])
-		button.toggle_mode = true
-		button.button_pressed = id == selected_id
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.custom_minimum_size = Vector2(0, 42)
-		button.pressed.connect(func() -> void:
-			callback.call(id)
-		)
-		row.add_child(button)
-
-func _yes_no(value: bool) -> String:
-	return "Yes" if value else "No"
-
 # -----------------------------------------------------------------------------
 # Religion / Shrine Upgrades + Tiered Rituals v2
 # -----------------------------------------------------------------------------
 
 func _ensure_religion_state() -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("get_religion_state"):
-		var religion_state: Dictionary = state.call("get_religion_state") as Dictionary
-		_divine_favour = religion_state.get("divine_favour", {}) as Dictionary
-		_shrine_levels = religion_state.get("shrine_levels", {}) as Dictionary
-		_shrine_upgrades = religion_state.get("shrine_upgrades", {}) as Dictionary
-		_ritual_capacity_used_this_veintena = float(religion_state.get("ritual_capacity_used_this_veintena", 0.0))
-		_last_offering_report.clear()
-		for line_variant: Variant in religion_state.get("recent_ritual_reports", []) as Array:
-			_last_offering_report.append(String(line_variant))
-		_religion_initialized = true
+	if _religion_initialized:
 		return
 	for god_id: String in GOD_IDS:
 		_divine_favour[god_id] = RELIGION_STARTING_FAVOUR
@@ -963,20 +746,10 @@ func _add_ritual_tier_card(parent: VBoxContainer, god_id: String, tier_id: Strin
 		stack.add_child(_religion_wrapped_label("Blocked: " + String(status.get("reason", "")), 15, Color(1.0, 0.74, 0.40, 1.0)))
 
 func _shrine_level(god_id: String) -> int:
-	var state: Node = _state()
-	if state != null and state.has_method("get_shrine_level"):
-		return int(state.call("get_shrine_level", god_id))
 	_ensure_religion_state()
 	return clampi(int(_shrine_levels.get(god_id, 1)), 1, 4)
 
 func _purchased_upgrade_ids(god_id: String) -> Array[String]:
-	var state: Node = _state()
-	if state != null and state.has_method("get_purchased_shrine_upgrades"):
-		var state_upgrades: Array = state.call("get_purchased_shrine_upgrades", god_id) as Array
-		var state_output: Array[String] = []
-		for item: Variant in state_upgrades:
-			state_output.append(String(item))
-		return state_output
 	_ensure_religion_state()
 	var output: Array[String] = []
 	var raw: Array = _shrine_upgrades.get(god_id, []) as Array
@@ -1038,13 +811,6 @@ func _can_upgrade_shrine_level(god_id: String) -> Dictionary:
 	return _can_pay_religion_cost(_shrine_level_cost(next_level))
 
 func _upgrade_shrine_level(god_id: String) -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("upgrade_shrine"):
-		state.call("upgrade_shrine", god_id)
-		_religion_initialized = false
-		_ensure_religion_state()
-		_refresh_all()
-		return
 	var status: Dictionary = _can_upgrade_shrine_level(god_id)
 	if not bool(status.get("ok", false)):
 		_last_offering_report.clear()
@@ -1124,13 +890,6 @@ func _can_build_shrine_upgrade(god_id: String, upgrade: Dictionary) -> Dictionar
 	return _can_pay_religion_cost(upgrade.get("cost", {}) as Dictionary)
 
 func _build_shrine_upgrade(god_id: String, upgrade_id: String) -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("purchase_shrine_upgrade"):
-		state.call("purchase_shrine_upgrade", god_id, upgrade_id)
-		_religion_initialized = false
-		_ensure_religion_state()
-		_refresh_all()
-		return
 	var upgrade: Dictionary = _upgrade_by_id(god_id, upgrade_id)
 	if upgrade.is_empty():
 		return
@@ -1254,13 +1013,6 @@ func _can_perform_ritual(god_id: String, tier_id: String) -> Dictionary:
 	return _can_pay_religion_cost(data.get("cost", {}) as Dictionary)
 
 func _perform_ritual(god_id: String, tier_id: String) -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("perform_ritual"):
-		state.call("perform_ritual", god_id, tier_id, _current_festival_god_id())
-		_religion_initialized = false
-		_ensure_religion_state()
-		_refresh_all()
-		return
 	var status: Dictionary = _can_perform_ritual(god_id, tier_id)
 	if not bool(status.get("ok", false)):
 		_last_offering_report.clear()
@@ -1277,9 +1029,20 @@ func _perform_ritual(god_id: String, tier_id: String) -> void:
 	var before: float = float(_divine_favour.get(god_id, RELIGION_STARTING_FAVOUR))
 	var after: float = clampf(before + float(gain), 0.0, 100.0)
 	_divine_favour[god_id] = after
-	var report_line: String = String(data.get("title", "Ritual")) + " performed for " + _god_name(god_id) + ". Favour roll: +" + str(gain) + ". Favour " + _format_religion_amount(before) + " → " + _format_religion_amount(after) + "."
+	var report_line: String = String(data.get("title", "Ritual")) + " performed for " + _god_name(god_id) + ". Cost: " + _format_cost(data.get("cost", {}) as Dictionary) + ". Favour roll: +" + str(gain) + " (range +" + str(int(range[0])) + "–+" + str(int(range[1])) + "). Favour " + _format_religion_amount(before) + " → " + _format_religion_amount(after) + "."
+	if _current_festival_god_id() == god_id:
+		report_line += " Festival focus improved the ritual roll."
+	if _ritual_favour_bonus(god_id, tier_id) > 0:
+		report_line += " Shrine level/upgrades contributed to the result."
 	_last_offering_report.clear()
 	_last_offering_report.append(report_line)
+	var state: Node = _state()
+	if state != null:
+		var report_variant: Variant = state.get("last_report")
+		if report_variant is Array:
+			var report: Array = report_variant as Array
+			report.append(report_line)
+			state.set("last_report", report)
 	_emit_religion_state_changed()
 	_refresh_all()
 
@@ -1548,13 +1311,6 @@ func _build_god_boons_placeholder(parent: VBoxContainer, god_id: String) -> void
 		parent.add_child(_religion_wrapped_label("Shrine Level 4 reached. This shrine is ready for future boon implementation.", 18, COLOR_TEAL))
 
 func _apply_divine_favour_decay(report: Array, decay_amount: float = RELIGION_NORMAL_DECAY) -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("apply_divine_favour_decay"):
-		var parts: Array = state.call("apply_divine_favour_decay", decay_amount) as Array
-		report.append("Divine favour decays: " + "; ".join(parts) + ".")
-		_religion_initialized = false
-		_ensure_religion_state()
-		return
 	_ensure_religion_state()
 	var parts: Array[String] = []
 	for god_id: String in GOD_IDS:
@@ -1574,9 +1330,6 @@ func _religion_decay_for_god(god_id: String, base_decay: float) -> float:
 	return maxf(0.0, base_decay - reduction)
 
 func _reset_religion_veintena_capacity() -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("reset_religion_veintena_capacity"):
-		state.call("reset_religion_veintena_capacity")
 	_ritual_capacity_used_this_veintena = 0.0
 
 func _free_stock_for_offering(resource_id: String) -> float:
@@ -1592,16 +1345,10 @@ func _free_stock_for_offering(resource_id: String) -> float:
 	return 0.0
 
 func _religion_priest_conversion_cap() -> float:
-	var state: Node = _state()
-	if state != null and state.has_method("religion_priest_conversion_cap"):
-		return float(state.call("religion_priest_conversion_cap"))
 	var priests: int = _religion_active_priest_count()
 	return 8.0 + float(priests) * 2.0
 
 func _religion_remaining_ritual_capacity() -> float:
-	var state: Node = _state()
-	if state != null and state.has_method("religion_remaining_ritual_capacity"):
-		return float(state.call("religion_remaining_ritual_capacity"))
 	return maxf(0.0, _religion_priest_conversion_cap() - _ritual_capacity_used_this_veintena)
 
 func _religion_active_priest_count() -> int:
@@ -2084,8 +1831,6 @@ func _resolve_ordinary_veintena(state: Node) -> void:
 	report.append("6. Calendar and religion: " + _current_festival_text() + ".")
 	_apply_divine_favour_decay(report, RELIGION_NORMAL_DECAY)
 	_reset_religion_veintena_capacity()
-	if state.has_method("set"):
-		state.set("warrior_recruits_used_this_veintena", 0)
 	report.append("7. Rival AI hook: not active yet.")
 	report.append("8. Flower Wars hook: not active yet.")
 	report.append("9. Palace hook: not active yet.")
@@ -2111,8 +1856,6 @@ func _resolve_nemontemi(state: Node) -> void:
 	report.append("Nemontemi restrictions hook: no Flower Wars; construction, market activity and productivity restrictions can be connected later.")
 	_apply_divine_favour_decay(report, RELIGION_NEMONTEMI_DECAY)
 	_reset_religion_veintena_capacity()
-	if state.has_method("set"):
-		state.set("warrior_recruits_used_this_veintena", 0)
 	report.append("Annual review hooks: prestige, palace recognition, rival comparison, Flower War results and offering history will be connected later.")
 	_ritual_year += 1
 	_calendar_period = "veintena"
