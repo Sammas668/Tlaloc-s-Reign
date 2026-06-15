@@ -10,6 +10,7 @@ signal build_completed(building_id: String)
 signal build_failed(building_id: String, reason: String)
 signal destroy_completed(building_id: String)
 signal destroy_failed(building_id: String, reason: String)
+signal flower_war_resolved(result: Dictionary)
 
 const RESOURCE_DATA_PATH: String = "res://Data/Prototype0/resources.json"
 const BUILDING_DATA_PATH: String = "res://Data/Prototype0/buildings.json"
@@ -41,6 +42,32 @@ var shrine_levels: Dictionary = {}
 var shrine_upgrades: Dictionary = {}
 var ritual_capacity_used_this_veintena: float = 0.0
 var recent_ritual_reports: Array[String] = []
+
+const FLOWER_WAR_DOCTRINES: Dictionary = {
+	"unspecialised": {"name": "Unspecialised", "offence": 1.0, "defence": 1.0, "role": "General purpose."},
+	"eagle": {"name": "Eagle", "offence": 1.0, "defence": 1.2, "role": "Captive specialists.", "capture_bonus_per_warrior": 0.02},
+	"jaguar": {"name": "Jaguar", "offence": 1.3, "defence": 1.0, "role": "Elite assault warriors.", "prestige_mult": 1.15},
+	"otomi": {"name": "Otomi", "offence": 0.8, "defence": 1.5, "role": "Defensive veterans.", "death_mult": 0.8},
+	"coyote": {"name": "Coyote", "offence": 1.4, "defence": 0.5, "role": "Looting raiders.", "loot_mult": 1.25}
+}
+
+const FLOWER_WAR_SCALES: Dictionary = {
+	"minor": {"name": "Minor Flower War", "recommended": 5, "enemy_warriors": 5, "difficulty": 0.85},
+	"standard": {"name": "Standard Flower War", "recommended": 10, "enemy_warriors": 10, "difficulty": 1.0},
+	"major": {"name": "Major Flower War", "recommended": 20, "enemy_warriors": 20, "difficulty": 1.10}
+}
+
+const FLOWER_WAR_PROVISIONING: Dictionary = {
+	"standard": {"name": "Standard", "cost_mult": 1.0, "combat_mult": 1.0},
+	"well": {"name": "Well-Provisioned", "cost_mult": 2.0, "combat_mult": 1.10},
+	"royal": {"name": "Royal", "cost_mult": 4.0, "combat_mult": 1.25}
+}
+
+var warrior_recruits_used_this_veintena: int = 0
+var warrior_xp: float = 0.0
+var player_prestige: float = 0.0
+var last_flower_war_report: Array[String] = []
+var flower_war_history: Array[Dictionary] = []
 
 var current_veintena: int = 1
 var last_report: Array[String] = []
@@ -749,6 +776,288 @@ func god_name(god_id: String) -> String:
 	return "Unknown God"
 
 
+
+# -----------------------------------------------------------------------------
+# Barracks / Flower Wars v1
+# -----------------------------------------------------------------------------
+
+func get_warrior_house_count() -> int:
+	var total: int = 0
+	for id: String in ["warrior_house", "warrior_housing", "barracks"]:
+		total += int(estate_buildings.get(id, 0))
+	return total
+
+func get_warrior_capacity() -> int:
+	return get_warrior_house_count() * 10
+
+func get_warrior_count() -> int:
+	return int(population.get("yaotequihuaqueh", 0))
+
+func get_player_prestige() -> float:
+	return player_prestige
+
+func get_prestige_summary() -> Dictionary:
+	return {"prestige": player_prestige, "standing": "Standing: local claim forming", "recognition": "Recognition: unproven", "recent": "Last change: " + (last_flower_war_report[0] if not last_flower_war_report.is_empty() else "none")}
+
+func _warrior_recruitment_cost(amount: int) -> Dictionary:
+	return {"weapons": float(amount), "maize": float(amount), "cloth": float(amount) * 0.5}
+
+func _can_pay_free_stock(cost: Dictionary) -> Dictionary:
+	for resource_variant: Variant in cost.keys():
+		var resource_id: String = String(resource_variant)
+		var needed: float = float(cost[resource_variant])
+		if free_stock_after_reserves(resource_id) + 0.001 < needed:
+			return {"ok": false, "reason": "Need " + _format_amount(needed) + " free " + get_resource_name(resource_id) + " after reserves."}
+	return {"ok": true, "reason": "Ready."}
+
+func _pay_cost(cost: Dictionary) -> void:
+	for resource_variant: Variant in cost.keys():
+		_add_stock(String(resource_variant), -float(cost[resource_variant]))
+
+func can_recruit_warriors(amount: int) -> Dictionary:
+	if amount <= 0:
+		return {"ok": false, "reason": "Choose at least 1 warrior."}
+	var remaining_turn_recruits: int = max(0, 2 - warrior_recruits_used_this_veintena)
+	if remaining_turn_recruits <= 0:
+		return {"ok": false, "reason": "Warrior recruitment limit reached this Veintena."}
+	if amount > remaining_turn_recruits:
+		return {"ok": false, "reason": "Can recruit only " + str(remaining_turn_recruits) + " more warrior(s) this Veintena."}
+	var free_capacity: int = get_warrior_capacity() - get_warrior_count()
+	if free_capacity <= 0:
+		return {"ok": false, "reason": "No free Warrior House capacity."}
+	if amount > free_capacity:
+		return {"ok": false, "reason": "Only " + str(free_capacity) + " free warrior capacity."}
+	return _can_pay_free_stock(_warrior_recruitment_cost(amount))
+
+func recruit_warriors(amount: int) -> Dictionary:
+	var status: Dictionary = can_recruit_warriors(amount)
+	if not bool(status.get("ok", false)):
+		last_report.append("Warrior recruitment failed: " + String(status.get("reason", "")))
+		emit_signal("state_changed")
+		return status
+	_pay_cost(_warrior_recruitment_cost(amount))
+	population["yaotequihuaqueh"] = get_warrior_count() + amount
+	warrior_recruits_used_this_veintena += amount
+	var message: String = "Recruited " + str(amount) + " warrior(s)."
+	last_report.append(message)
+	emit_signal("state_changed")
+	return {"ok": true, "reason": message, "recruited": amount}
+
+func get_flower_war_options() -> Dictionary:
+	return {"doctrines": FLOWER_WAR_DOCTRINES.duplicate(true), "scales": FLOWER_WAR_SCALES.duplicate(true), "provisioning": FLOWER_WAR_PROVISIONING.duplicate(true)}
+
+func _provisioning_cost(committed_warriors: int, provisioning_id: String) -> Dictionary:
+	var provisioning: Dictionary = FLOWER_WAR_PROVISIONING.get(provisioning_id, FLOWER_WAR_PROVISIONING["standard"]) as Dictionary
+	var mult: float = float(provisioning.get("cost_mult", 1.0))
+	return {"maize": float(committed_warriors) * 1.0 * mult, "cacao": float(committed_warriors) * 0.05 * mult, "cloth": float(committed_warriors) * 0.1 * mult}
+
+func _flower_war_weapon_commitment(committed_warriors: int) -> Dictionary:
+	return {"weapons": float(committed_warriors)}
+
+func _combined_flower_war_cost(committed_warriors: int, provisioning_id: String) -> Dictionary:
+	var cost: Dictionary = _provisioning_cost(committed_warriors, provisioning_id)
+	_add_dictionary_amounts(cost, _flower_war_weapon_commitment(committed_warriors))
+	return cost
+
+func can_launch_flower_war(scale_id: String, doctrine_id: String, provisioning_id: String, committed_warriors: int) -> Dictionary:
+	if not FLOWER_WAR_SCALES.has(scale_id):
+		return {"ok": false, "reason": "Unknown Flower War scale."}
+	if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
+		return {"ok": false, "reason": "Unknown doctrine."}
+	if not FLOWER_WAR_PROVISIONING.has(provisioning_id):
+		return {"ok": false, "reason": "Unknown provisioning."}
+	if committed_warriors <= 0:
+		return {"ok": false, "reason": "Commit at least 1 warrior."}
+	if committed_warriors > get_warrior_count():
+		return {"ok": false, "reason": "Not enough warriors."}
+	return _can_pay_free_stock(_combined_flower_war_cost(committed_warriors, provisioning_id))
+
+func get_flower_war_preview(scale_id: String, doctrine_id: String, provisioning_id: String, committed_warriors: int) -> Dictionary:
+	var scale: Dictionary = FLOWER_WAR_SCALES.get(scale_id, FLOWER_WAR_SCALES["minor"]) as Dictionary
+	var status: Dictionary = can_launch_flower_war(scale_id, doctrine_id, provisioning_id, committed_warriors)
+	var recommended: int = int(scale.get("recommended", 5))
+	var risk: String = "Good match"
+	if committed_warriors < recommended:
+		risk = "Understrength"
+	elif committed_warriors >= recommended * 2:
+		risk = "Overwhelming commitment"
+	return {"ok": bool(status.get("ok", false)), "reason": String(status.get("reason", "")), "cost": _combined_flower_war_cost(committed_warriors, provisioning_id), "recommended": recommended, "risk": risk, "scale": scale.duplicate(true)}
+
+func launch_flower_war(scale_id: String, doctrine_id: String, provisioning_id: String, committed_warriors: int) -> Dictionary:
+	var status: Dictionary = can_launch_flower_war(scale_id, doctrine_id, provisioning_id, committed_warriors)
+	if not bool(status.get("ok", false)):
+		last_flower_war_report = ["Flower War could not be launched: " + String(status.get("reason", ""))]
+		emit_signal("state_changed")
+		return status
+	_pay_cost(_combined_flower_war_cost(committed_warriors, provisioning_id))
+	var result: Dictionary = _resolve_flower_war(scale_id, doctrine_id, provisioning_id, committed_warriors)
+	_apply_flower_war_result(result)
+	last_flower_war_report = _flower_war_report_lines(result)
+	flower_war_history.append(result.duplicate(true))
+	last_report.clear()
+	for line: String in last_flower_war_report:
+		last_report.append(line)
+	emit_signal("flower_war_resolved", result)
+	emit_signal("state_changed")
+	return result
+
+func _resolve_flower_war(scale_id: String, doctrine_id: String, provisioning_id: String, committed_warriors: int) -> Dictionary:
+	var scale: Dictionary = FLOWER_WAR_SCALES[scale_id] as Dictionary
+	var doctrine: Dictionary = FLOWER_WAR_DOCTRINES[doctrine_id] as Dictionary
+	var provisioning: Dictionary = FLOWER_WAR_PROVISIONING[provisioning_id] as Dictionary
+	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
+	rng.randomize()
+	var enemy_count: int = int(scale.get("enemy_warriors", 5))
+	var difficulty: float = float(scale.get("difficulty", 1.0))
+	var h_favour: float = get_divine_favour("huitzilopochtli")
+	var favour_mult: float = 1.0
+	if h_favour >= 80.0:
+		favour_mult = 1.10
+	elif h_favour >= 60.0:
+		favour_mult = 1.05
+	elif h_favour < 25.0:
+		favour_mult = 0.95
+	var attacker_offence: float = float(committed_warriors) * float(doctrine.get("offence", 1.0)) * float(provisioning.get("combat_mult", 1.0)) * favour_mult * rng.randf_range(0.92, 1.08)
+	var attacker_defence: float = float(committed_warriors) * float(doctrine.get("defence", 1.0)) * rng.randf_range(0.92, 1.08)
+	var defender_offence: float = float(enemy_count) * difficulty
+	var defender_defence: float = float(enemy_count) * difficulty
+	var defender_damage_ratio: float = attacker_offence / maxf(1.0, defender_defence)
+	var defender_casualty_rate: float = clampf((defender_damage_ratio - 0.55) * 0.35, 0.05, 0.65)
+	var defender_casualties: int = clampi(int(round(float(enemy_count) * defender_casualty_rate)), 0, enemy_count)
+	var remaining_defenders: int = max(0, enemy_count - defender_casualties)
+	var counterattack_strength: float = float(remaining_defenders) * difficulty
+	var attacker_damage_ratio: float = counterattack_strength / maxf(1.0, attacker_defence)
+	var attacker_casualty_rate: float = clampf((attacker_damage_ratio - 0.45) * 0.35, 0.03, 0.75)
+	var attacker_casualties: int = clampi(int(round(float(committed_warriors) * attacker_casualty_rate)), 0, committed_warriors)
+	var net_per_warrior: float = float(defender_casualties - attacker_casualties) / maxf(1.0, float(committed_warriors))
+	var result_label: String = "Stalemate"
+	if net_per_warrior >= 0.45:
+		result_label = "Crushing Victory"
+	elif net_per_warrior >= 0.15:
+		result_label = "Victory"
+	elif net_per_warrior > -0.15:
+		result_label = "Stalemate"
+	elif net_per_warrior > -0.45:
+		result_label = "Defeat"
+	else:
+		result_label = "Crushing Loss"
+	var death_share: float = _flower_war_death_share(result_label) * float(doctrine.get("death_mult", 1.0))
+	var deaths: int = clampi(int(round(float(attacker_casualties) * death_share)), 0, attacker_casualties)
+	var injuries: int = max(0, attacker_casualties - deaths)
+	var captives: int = _flower_war_captives(result_label, defender_casualties, committed_warriors, doctrine_id)
+	var loot_value: float = _flower_war_loot_value(result_label, committed_warriors, doctrine_id)
+	var loot: Dictionary = _flower_war_loot_goods(loot_value)
+	var prestige_gain: float = _flower_war_prestige(result_label, captives, defender_casualties, loot_value, doctrine_id)
+	var weapon_loss_rate: float = 0.20
+	match result_label:
+		"Crushing Victory", "Victory": weapon_loss_rate = 0.10
+		"Stalemate": weapon_loss_rate = 0.20
+		"Defeat": weapon_loss_rate = 0.35
+		"Crushing Loss": weapon_loss_rate = 0.45
+	var weapons_lost: int = clampi(int(ceil(float(committed_warriors) * weapon_loss_rate + float(deaths) * 0.5)), 0, committed_warriors)
+	return {"ok": true, "scale_id": scale_id, "scale_name": String(scale.get("name", scale_id)), "doctrine_id": doctrine_id, "doctrine_name": String(doctrine.get("name", doctrine_id)), "provisioning_id": provisioning_id, "provisioning_name": String(provisioning.get("name", provisioning_id)), "committed_warriors": committed_warriors, "enemy_warriors": enemy_count, "result": result_label, "attacker_casualties": attacker_casualties, "defender_casualties": defender_casualties, "deaths": deaths, "injuries": injuries, "captives": captives, "loot_value": loot_value, "loot": loot, "prestige": prestige_gain, "weapons_lost": weapons_lost}
+
+func _flower_war_death_share(result_label: String) -> float:
+	match result_label:
+		"Crushing Victory": return 0.10
+		"Victory": return 0.20
+		"Stalemate": return 0.30
+		"Defeat": return 0.45
+		"Crushing Loss": return 0.65
+	return 0.30
+
+func _flower_war_captives(result_label: String, defender_casualties: int, committed_warriors: int, doctrine_id: String) -> int:
+	if result_label != "Victory" and result_label != "Crushing Victory":
+		return 0
+	var rate: float = 0.30
+	if result_label == "Crushing Victory":
+		rate = 0.45
+	if doctrine_id == "eagle":
+		rate = minf(0.75, rate + float(committed_warriors) * 0.02)
+	var raw: float = float(defender_casualties) * rate
+	var captives: int = int(floor(raw))
+	if defender_casualties >= 1 and raw > 0.0 and captives < 1:
+		captives = 1
+	return clampi(captives, 0, defender_casualties)
+
+func _flower_war_loot_value(result_label: String, committed_warriors: int, doctrine_id: String) -> float:
+	var value: float = 0.0
+	match result_label:
+		"Crushing Victory": value = float(committed_warriors) * 4.0
+		"Victory": value = float(committed_warriors) * 2.5
+		"Stalemate": value = float(committed_warriors) * 1.2
+		_: value = 0.0
+	if doctrine_id == "coyote":
+		value *= 1.25
+	return value
+
+func _flower_war_loot_goods(loot_value: float) -> Dictionary:
+	var loot: Dictionary = {}
+	if loot_value <= 0.001:
+		return loot
+	var weights: Dictionary = {"maize": 0.35, "wood": 0.20, "cotton": 0.15, "cloth": 0.10, "tools": 0.08, "obsidian": 0.06, "cacao": 0.04, "ritual_goods": 0.02}
+	for resource_variant: Variant in weights.keys():
+		var resource_id: String = String(resource_variant)
+		var value_share: float = loot_value * float(weights[resource_variant])
+		var unit_value: float = 1.0
+		if resources.has(resource_id):
+			unit_value = maxf(0.1, float((resources[resource_id] as Dictionary).get("base_value", 1.0)))
+		var amount: float = snappedf(value_share / unit_value, 0.01)
+		if amount > 0.001:
+			loot[resource_id] = amount
+	return loot
+
+func _flower_war_prestige(result_label: String, captives: int, defender_casualties: int, loot_value: float, doctrine_id: String) -> float:
+	var prestige: float = 0.0
+	match result_label:
+		"Crushing Victory": prestige += 12.0
+		"Victory": prestige += 6.0
+		"Stalemate": prestige += 1.0
+		"Crushing Loss": prestige -= 3.0
+	prestige += float(captives) * 3.0
+	prestige += float(defender_casualties) * 0.5
+	prestige += loot_value * 0.05
+	if doctrine_id == "jaguar" and prestige > 0.0:
+		prestige *= 1.15
+	return snappedf(prestige, 0.01)
+
+func _apply_flower_war_result(result: Dictionary) -> void:
+	population["yaotequihuaqueh"] = max(0, get_warrior_count() - int(result.get("deaths", 0)))
+	_add_stock("weapons", -float(result.get("weapons_lost", 0)))
+	_add_stock("captives", float(result.get("captives", 0)))
+	var loot: Dictionary = result.get("loot", {}) as Dictionary
+	for resource_variant: Variant in loot.keys():
+		_add_stock(String(resource_variant), float(loot[resource_variant]))
+	player_prestige += float(result.get("prestige", 0.0))
+	warrior_xp += maxf(0.0, float(result.get("defender_casualties", 0)))
+
+func _flower_war_report_lines(result: Dictionary) -> Array[String]:
+	var lines: Array[String] = []
+	lines.append(String(result.get("scale_name", "Flower War")) + " resolved: " + String(result.get("result", "Result")) + ".")
+	lines.append("Committed " + str(int(result.get("committed_warriors", 0))) + " " + String(result.get("doctrine_name", "warriors")) + " warriors with " + String(result.get("provisioning_name", "Standard")) + " provisioning.")
+	lines.append("Casualties: " + str(int(result.get("attacker_casualties", 0))) + " affected; " + str(int(result.get("deaths", 0))) + " dead, " + str(int(result.get("injuries", 0))) + " injured and returned.")
+	lines.append("Enemy casualties: " + str(int(result.get("defender_casualties", 0))) + "; captives gained: " + str(int(result.get("captives", 0))) + ".")
+	lines.append("Loot value: " + _format_amount(float(result.get("loot_value", 0.0))) + "; prestige change: " + _format_amount(float(result.get("prestige", 0.0))) + "; weapons lost: " + str(int(result.get("weapons_lost", 0))) + ".")
+	var loot: Dictionary = result.get("loot", {}) as Dictionary
+	if not loot.is_empty():
+		var parts: Array[String] = []
+		for resource_variant: Variant in loot.keys():
+			parts.append(get_resource_name(String(resource_variant)) + " " + _format_amount(float(loot[resource_variant])))
+		lines.append("Looted goods: " + ", ".join(parts) + ".")
+	return lines
+
+func get_last_flower_war_report() -> Array[String]:
+	var output: Array[String] = []
+	for line: String in last_flower_war_report:
+		output.append(line)
+	return output
+
+func get_barracks_summary() -> Dictionary:
+	var warriors: int = get_warrior_count()
+	var capacity: int = get_warrior_capacity()
+	var weapons: float = _stock("weapons")
+	return {"warriors": warriors, "capacity": capacity, "free_capacity": max(0, capacity - warriors), "weapons": weapons, "minor_ready": warriors >= 5 and weapons >= 5.0, "standard_ready": warriors >= 10 and weapons >= 10.0, "major_ready": warriors >= 20 and weapons >= 20.0, "recruits_remaining": max(0, 2 - warrior_recruits_used_this_veintena), "prestige": player_prestige, "warrior_xp": warrior_xp, "last_report": get_last_flower_war_report()}
+
 func advance_veintena() -> void:
 	if not initialized: new_game()
 	last_report.clear()
@@ -760,6 +1069,7 @@ func advance_veintena() -> void:
 	if current_veintena > 18:
 		current_veintena = 1
 		last_report.append("Nemontemi reckoning placeholder: the next Ritual Year begins.")
+	warrior_recruits_used_this_veintena = 0
 	last_report.append("Now entering Veintena " + str(current_veintena) + ".")
 	emit_signal("turn_advanced", last_report)
 	emit_signal("state_changed")
