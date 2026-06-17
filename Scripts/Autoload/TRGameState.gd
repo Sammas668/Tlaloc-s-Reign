@@ -3194,7 +3194,7 @@ func get_palace_dedication_routes() -> Array[Dictionary]:
 			"is_available_for_future_dedication": current_god == "",
 			"can_dedicate": bool(can_dedicate_palace_to_god(god_id).get("ok", false)),
 			"dedication_status": String(can_dedicate_palace_to_god(god_id).get("reason", "")),
-			"prototype_status": "Dedication UI active. Palace structures can be built and must be maintained/staffed to stay active. Huitzilopochtli Palace now authorises attacking Flower Wars; other authority effects remain future patches."
+			"prototype_status": "Dedication UI active. Palace structures can be built and must be maintained/staffed to stay active. Huitzilopochtli authorises attacking Flower Wars; Tlaloc, Tezcatlipoca and Quetzalcoatl authority panels are information-only prototypes."
 		})
 	return rows
 
@@ -3228,7 +3228,7 @@ func _palace_authority_route_body(god_id: String, active_count: int) -> String:
 		"tezcatlipoca":
 			return "Active Tezcatlipoca structures reveal an information-only scarcity mirror: market pressure, shortage leverage and rival vulnerability hooks. Sabotage and manipulation actions are not implemented yet."
 		"quetzalcoatl":
-			return "Active Quetzalcoatl structures support future legitimacy, recognition, tribute credibility and palace trust. Ruler-demand mechanics are not implemented yet."
+			return "Active Quetzalcoatl structures reveal an information-only legitimacy court: ruler-facing credibility, tribute reliability, palace trust and recognition-route hooks. Ruler-demand and prestige mechanics are not implemented yet."
 	return "Active palace structures are ready, but their route authority has not been defined."
 
 func _palace_authority_structure_row(structure_id: String, status: Dictionary, god_id: String) -> Dictionary:
@@ -3701,6 +3701,276 @@ func get_tezcatlipoca_pressure_overview() -> Dictionary:
 		"mechanics_note": "Tezcatlipoca pressure rows are information-only in v0.29. They do not yet change market stock, prices, rival behaviour, sabotage, prestige or diplomacy."
 	}
 
+
+func _quetzalcoatl_active_structure_tier() -> int:
+	if get_palace_dedicated_god() != GOD_QUETZALCOATL:
+		return 0
+	var max_tier: int = 0
+	var statuses: Dictionary = get_palace_structure_runtime_statuses()
+	for structure_id: String in _palace_built_structure_ids_in_tree_order(GOD_QUETZALCOATL):
+		var status: Dictionary = statuses.get(structure_id, {}) as Dictionary
+		if not bool(status.get("active", false)):
+			continue
+		var structure: Dictionary = _palace_structure_by_id(structure_id, GOD_QUETZALCOATL)
+		max_tier = maxi(max_tier, int(structure.get("tier", structure.get("level", 0))))
+	return max_tier
+
+func _quetzalcoatl_active_structure_names() -> Array[String]:
+	var names: Array[String] = []
+	if get_palace_dedicated_god() != GOD_QUETZALCOATL:
+		return names
+	var statuses: Dictionary = get_palace_structure_runtime_statuses()
+	for structure_id: String in _palace_built_structure_ids_in_tree_order(GOD_QUETZALCOATL):
+		var status: Dictionary = statuses.get(structure_id, {}) as Dictionary
+		if not bool(status.get("active", false)):
+			continue
+		var structure: Dictionary = _palace_structure_by_id(structure_id, GOD_QUETZALCOATL)
+		if not structure.is_empty():
+			names.append(String(structure.get("name", structure_id)))
+	return names
+
+func _quetzalcoatl_detail_label(tier: int) -> String:
+	match tier:
+		1:
+			return "Household legitimacy signs"
+		2:
+			return "Tribute credibility reading"
+		3:
+			return "Ruler-facing trust hooks"
+		4:
+			return "Great legitimacy court"
+	return "Dormant"
+
+func _quetzalcoatl_legitimacy_rows(detail_tier: int) -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	if detail_tier <= 0:
+		return rows
+	var raw_rows: Array[Dictionary] = [
+		{"id": "palace_order", "name": "Palace Order", "domain": "Court order and visible authority", "summary": "The palace can present itself as orderly, deliberate and ruler-facing.", "future_hook": "Future hook: improves palace-performance confidence and reduces ambiguity around obligations."},
+		{"id": "tribute_credibility", "name": "Tribute Credibility", "domain": "Demand delivery and tribute reliability", "summary": "The house can make promised goods and delivered goods appear more credible to higher authority.", "future_hook": "Future hook: clearer demand delivery quality and better ruler-facing trust."},
+		{"id": "recognition_route", "name": "Recognition Route", "domain": "Regional legitimacy and public reputation", "summary": "The palace can frame estate success as lawful, civilised and worthy of recognition.", "future_hook": "Future hook: supports prestige/recognition once those systems are designed."},
+		{"id": "court_witness", "name": "Ruler Witness", "domain": "Agents, witnesses and formal reporting", "summary": "The palace is prepared to impress agents of higher authority and make obligations visible.", "future_hook": "Future hook: stronger effect on ruler-demand outcomes and formal recognition."}
+	]
+	var max_rows: int = 1
+	if detail_tier >= 2:
+		max_rows = 2
+	if detail_tier >= 3:
+		max_rows = 3
+	if detail_tier >= 4:
+		max_rows = 4
+	for index: int in range(mini(max_rows, raw_rows.size())):
+		var source: Dictionary = raw_rows[index]
+		var row: Dictionary = {
+			"id": String(source.get("id", "legitimacy")),
+			"name": String(source.get("name", "Legitimacy")),
+			"domain": "Hidden",
+			"summary": "The palace shows signs of legitimacy, but the route has not revealed clear political hooks yet.",
+			"future_hook": "Build higher active Quetzalcoatl structures to reveal future legitimacy and recognition hooks.",
+			"detail_tier": detail_tier
+		}
+		if detail_tier >= 1:
+			row["domain"] = String(source.get("domain", "Legitimacy"))
+			row["summary"] = String(source.get("summary", row["summary"]))
+		if detail_tier >= 3:
+			row["future_hook"] = String(source.get("future_hook", row["future_hook"]))
+		rows.append(row)
+	return rows
+
+func _quetzalcoatl_obligation_rows(detail_tier: int) -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	if detail_tier <= 0:
+		return rows
+	var raw_rows: Array[Dictionary] = [
+		{"id": "raw_demand", "name": "Raw Demand Credibility", "domain": "Maize, wood, cotton, cacao, obsidian", "summary": "Future ruler demands can be read as material obligations rather than vague court pressure.", "future_hook": "Future hook: improves clarity around the Raw demand slot."},
+		{"id": "processed_demand", "name": "Processed Demand Credibility", "domain": "Tools, weapons, cloth", "summary": "The palace can prepare records that make processed-good delivery more legible.", "future_hook": "Future hook: improves clarity around the Processed demand slot."},
+		{"id": "luxury_special_demand", "name": "Luxury / Special Demand Credibility", "domain": "Fine textiles, captives and high-status goods", "summary": "The palace can frame elite deliveries as legitimate service rather than mere surplus spending.", "future_hook": "Future hook: improves clarity around the Luxury/Special demand slot."}
+	]
+	var max_rows: int = 1
+	if detail_tier >= 2:
+		max_rows = 2
+	if detail_tier >= 3:
+		max_rows = 3
+	for index: int in range(mini(max_rows, raw_rows.size())):
+		var source: Dictionary = raw_rows[index]
+		var row: Dictionary = {
+			"id": String(source.get("id", "obligation")),
+			"name": String(source.get("name", "Obligation")),
+			"domain": "Hidden",
+			"summary": "The palace senses future obligation pressure, but details are not implemented yet.",
+			"future_hook": "Future hook: ruler-demand mechanics will use this route later.",
+			"detail_tier": detail_tier
+		}
+		if detail_tier >= 2:
+			row["domain"] = String(source.get("domain", "Demand goods"))
+			row["summary"] = String(source.get("summary", row["summary"]))
+		if detail_tier >= 4:
+			row["future_hook"] = String(source.get("future_hook", row["future_hook"]))
+		rows.append(row)
+	return rows
+
+func get_quetzalcoatl_legitimacy_overview() -> Dictionary:
+	var dedicated: bool = get_palace_dedicated_god() == GOD_QUETZALCOATL
+	var detail_tier: int = _quetzalcoatl_active_structure_tier()
+	var headline: String = "Quetzalcoatl legitimacy unavailable"
+	var summary_text: String = "Dedicate the Palace to Quetzalcoatl, then build and maintain active Quetzalcoatl structures to reveal legitimacy, recognition, tribute credibility and palace-trust hooks."
+	if dedicated and detail_tier <= 0:
+		headline = "Quetzalcoatl legitimacy dormant"
+		summary_text = "The palace is dedicated to Quetzalcoatl, but no active Quetzalcoatl palace structures are maintained and staffed this Veintena."
+	elif dedicated and detail_tier > 0:
+		headline = "Quetzalcoatl Legitimacy Court — " + _quetzalcoatl_detail_label(detail_tier)
+		summary_text = "Active Quetzalcoatl structures reveal legitimacy, tribute credibility and recognition-route hooks. This is an information-only prototype; it does not create prestige, royal favour, local stability or ruler-demand rewards yet."
+	var legitimacy_rows: Array[Dictionary] = []
+	var obligation_rows: Array[Dictionary] = []
+	if dedicated and detail_tier > 0:
+		legitimacy_rows = _quetzalcoatl_legitimacy_rows(detail_tier)
+		obligation_rows = _quetzalcoatl_obligation_rows(detail_tier)
+	return {
+		"available": dedicated,
+		"active": dedicated and detail_tier > 0,
+		"detail_tier": detail_tier,
+		"detail_label": _quetzalcoatl_detail_label(detail_tier),
+		"headline": headline,
+		"summary": summary_text,
+		"active_structures": _quetzalcoatl_active_structure_names(),
+		"legitimacy_rows": legitimacy_rows,
+		"obligation_rows": obligation_rows,
+		"visible_legitimacy_count": legitimacy_rows.size(),
+		"visible_obligation_count": obligation_rows.size(),
+		"mechanics_note": "Quetzalcoatl rows are information-only in v0.30. They do not yet add prestige, recognition, royal favour, local stability, ruler-demand delivery bonuses or diplomacy effects."
+	}
+
+
+
+# -----------------------------------------------------------------------------
+# Palace Ruler Demands Prototype v0.31
+# -----------------------------------------------------------------------------
+# Information-only demand cycle. This does not deliver goods, award prestige,
+# create royal favour, create local stability, or change palace recognition.
+# It gives the Palace -> Ruler Demands tab a concrete obligation preview using
+# real stockpile/free-stock data so future delivery mechanics can be designed
+# without inventing a currency layer.
+
+func _palace_ruler_demand_sets() -> Array[Dictionary]:
+	return [
+		{
+			"id": "food_and_court_cloth",
+			"title": "Food and Court Cloth Demand",
+			"veintena_band": "Early cycle",
+			"flavour": "The palace expects reliable food supply and court-facing cloth before deeper obligations are negotiated.",
+			"demands": [
+				{"slot": "raw", "slot_name": "Raw / food good", "resource_id": "maize", "amount": 25.0, "note": "Basic food obligation and public reliability."},
+				{"slot": "processed", "slot_name": "Processed good", "resource_id": "cloth", "amount": 6.0, "note": "Visible household order and practical tribute preparation."},
+				{"slot": "luxury_special", "slot_name": "Luxury / special good", "resource_id": "cacao", "amount": 3.0, "note": "Elite court hospitality and status display."}
+			]
+		},
+		{
+			"id": "construction_and_ritual_readiness",
+			"title": "Construction and Ritual Readiness Demand",
+			"veintena_band": "Middle cycle",
+			"flavour": "The palace watches whether the house can support construction, ritual display and practical administration at the same time.",
+			"demands": [
+				{"slot": "raw", "slot_name": "Raw good", "resource_id": "wood", "amount": 20.0, "note": "Construction capacity and estate readiness."},
+				{"slot": "processed", "slot_name": "Processed good", "resource_id": "tools", "amount": 4.0, "note": "Administrative and construction competence."},
+				{"slot": "luxury_special", "slot_name": "Luxury / special good", "resource_id": "ritual_goods", "amount": 2.0, "note": "Ritual credibility and visible obligation."}
+			]
+		},
+		{
+			"id": "war_and_luxury_pressure",
+			"title": "War and Luxury Pressure Demand",
+			"veintena_band": "Late cycle",
+			"flavour": "The palace tests whether the house can support martial readiness while still meeting elite expectations.",
+			"demands": [
+				{"slot": "raw", "slot_name": "Raw good", "resource_id": "cotton", "amount": 18.0, "note": "Textile base and household production capacity."},
+				{"slot": "processed", "slot_name": "Processed good", "resource_id": "weapons", "amount": 2.0, "note": "War-route visibility and martial usefulness."},
+				{"slot": "luxury_special", "slot_name": "Luxury / special good", "resource_id": "fine_textiles", "amount": 1.0, "note": "High-status palace presentation."}
+			]
+		}
+	]
+
+func _current_palace_ruler_demand_index() -> int:
+	# Three controlled demand sets rotate through the ritual year. This is a
+	# prototype display cycle, not a random political system.
+	var index: int = int(floor(float(current_veintena - 1) / 6.0))
+	return clampi(index, 0, _palace_ruler_demand_sets().size() - 1)
+
+func _palace_ruler_demand_quality_label(free_value: float, requested: float) -> String:
+	if requested <= 0.001:
+		return "No request"
+	if free_value >= requested * 1.5:
+		return "Exceptional stock available"
+	if free_value >= requested * 1.15:
+		return "Impressive stock available"
+	if free_value >= requested:
+		return "Adequate stock available"
+	if free_value > 0.0:
+		return "Shortfall"
+	return "Unavailable"
+
+func _palace_ruler_demand_row(raw_row: Dictionary) -> Dictionary:
+	var resource_id: String = String(raw_row.get("resource_id", ""))
+	var requested: float = float(raw_row.get("amount", 0.0))
+	var stored: float = _stock(resource_id)
+	var free_value: float = free_stock_after_reserves(resource_id)
+	var shortfall: float = maxf(0.0, requested - free_value)
+	var ready: bool = free_value + 0.001 >= requested
+	return {
+		"slot": String(raw_row.get("slot", "")),
+		"slot_name": String(raw_row.get("slot_name", "Demand")),
+		"resource_id": resource_id,
+		"resource_name": get_resource_name(resource_id),
+		"requested": requested,
+		"stored": stored,
+		"free_after_reserves": free_value,
+		"shortfall": shortfall,
+		"ready": ready,
+		"status": "Ready" if ready else "Shortfall",
+		"quality_hint": _palace_ruler_demand_quality_label(free_value, requested),
+		"note": String(raw_row.get("note", "Palace-facing obligation."))
+	}
+
+func get_palace_ruler_demands_summary() -> Dictionary:
+	var demand_sets: Array[Dictionary] = _palace_ruler_demand_sets()
+	var selected_index: int = _current_palace_ruler_demand_index()
+	var selected: Dictionary = demand_sets[selected_index] if demand_sets.size() > 0 else {}
+	var rows: Array[Dictionary] = []
+	var ready_count: int = 0
+	var total_count: int = 0
+	var total_requested_value: float = 0.0
+	var total_free_value: float = 0.0
+	var raw_rows: Array = selected.get("demands", []) as Array
+	for row_variant: Variant in raw_rows:
+		if not (row_variant is Dictionary):
+			continue
+		var row: Dictionary = _palace_ruler_demand_row(row_variant as Dictionary)
+		rows.append(row)
+		total_count += 1
+		if bool(row.get("ready", false)):
+			ready_count += 1
+		total_requested_value += float(row.get("requested", 0.0))
+		total_free_value += minf(float(row.get("free_after_reserves", 0.0)), float(row.get("requested", 0.0)))
+	var headline: String = "Ruler demands prototype: " + str(ready_count) + " / " + str(total_count) + " requested categories currently covered by free stock."
+	if total_count <= 0:
+		headline = "Ruler demands prototype has no active demand rows."
+	return {
+		"schema_version": "palace_ruler_demands_v0_31",
+		"active": true,
+		"delivery_enabled": false,
+		"current_veintena": current_veintena,
+		"cycle_index": selected_index,
+		"cycle_id": String(selected.get("id", "")),
+		"title": String(selected.get("title", "Current Palace Demand")),
+		"veintena_band": String(selected.get("veintena_band", "Prototype cycle")),
+		"flavour": String(selected.get("flavour", "The ruler's agents watch whether the estate can meet palace-facing obligations.")),
+		"rows": rows,
+		"ready_count": ready_count,
+		"total_count": total_count,
+		"headline": headline,
+		"completion_label": str(ready_count) + " / " + str(total_count) + " categories ready",
+		"total_requested_value": total_requested_value,
+		"total_free_matching_value": total_free_value,
+		"mechanics_note": "v0.31 is display/infrastructure only. Goods cannot be delivered yet, and no prestige, royal favour, recognition, local stability or ruler-demand reward is created."
+	}
+
 func get_palace_summary() -> Dictionary:
 	var dedicated_god: String = get_palace_dedicated_god()
 	var dedicated: bool = dedicated_god != ""
@@ -3710,7 +3980,7 @@ func get_palace_summary() -> Dictionary:
 		route_name = get_palace_route_name(dedicated_god)
 		god_name = _god_display_name(dedicated_god)
 	return {
-		"schema_version": "palace_tezcatlipoca_pressure_v0_29",
+		"schema_version": "palace_ruler_demands_v0_31",
 		"palace_level": get_palace_level(),
 		"dedicated": dedicated,
 		"dedicated_god": dedicated_god,
@@ -3734,12 +4004,14 @@ func get_palace_summary() -> Dictionary:
 		"authority_summary": get_palace_authority_summary(),
 		"tlaloc_forecast": get_tlaloc_natural_calendar_forecast(),
 		"tezcatlipoca_pressure": get_tezcatlipoca_pressure_overview(),
+		"quetzalcoatl_legitimacy": get_quetzalcoatl_legitimacy_overview(),
+		"ruler_demands": get_palace_ruler_demands_summary(),
 		"authority_status": String(get_palace_authority_summary().get("headline", "Palace authority not connected.")),
-		"ruler_demand_status": "Ruler demand UI/mechanics are reserved for a later palace patch.",
+		"ruler_demand_status": String(get_palace_ruler_demands_summary().get("headline", "Ruler demands prototype active.")),
 		"flower_war_gate_enabled": is_flower_war_palace_gate_enabled(),
 		"flower_war_gate_passed": flower_war_palace_gate_passed(),
 		"flower_war_gate_status": flower_war_palace_gate_status_text(),
-		"implementation_note": "v0.29 adds the Tezcatlipoca scarcity / intrigue / market-pressure authority prototype. Huitzilopochtli Flower War gate remains active; Tlaloc forecast remains information-only; Quetzalcoatl and ruler-demand mechanics remain future patches."
+		"implementation_note": "v0.31 adds a display-only ruler demands prototype: one Raw, one Processed, and one Luxury/Special request with free-stock readiness. No delivery rewards, prestige, royal favour or local stability are implemented."
 	}
 
 func get_flower_war_options() -> Array[Dictionary]:

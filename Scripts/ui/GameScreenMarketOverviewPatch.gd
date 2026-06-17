@@ -1154,7 +1154,7 @@ func _show_palace_content() -> void:
 		"authority":
 			_build_palace_authority_main_view()
 		"ruler_demands":
-			_build_palace_placeholder_main_view("Ruler Demands", "Palace-facing tribute obligations and political demands will be shown here after the ruler-demand system is designed.")
+			_build_palace_ruler_demands_main_view()
 		_:
 			_build_palace_overview_main_view()
 
@@ -1181,6 +1181,112 @@ func _build_palace_placeholder_main_view(title_text: String, body_text: String) 
 	var body: RichTextLabel = _palace_wrapped_label(body_text, 20, Color(0.80, 0.82, 0.76, 1.0))
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.add_child(body)
+
+
+func _build_palace_ruler_demands_main_view() -> void:
+	var state: Node = _state()
+	var demands: Dictionary = {}
+	if state != null and state.has_method("get_palace_ruler_demands_summary"):
+		demands = state.call("get_palace_ruler_demands_summary") as Dictionary
+	elif state != null and state.has_method("get_palace_summary"):
+		var summary: Dictionary = state.call("get_palace_summary") as Dictionary
+		demands = summary.get("ruler_demands", {}) as Dictionary
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.030, 0.026, 0.020, 0.92), Color(0.78, 0.62, 0.34, 0.62), 18))
+	dynamic_view_host.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_top", 20)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.add_theme_constant_override("margin_bottom", 20)
+	panel.add_child(margin)
+	var root: VBoxContainer = VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 12)
+	margin.add_child(root)
+
+	var title_label: Label = _palace_label("RULER DEMANDS", 33, Color(1.0, 0.86, 0.50, 1.0))
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root.add_child(title_label)
+	if demands.is_empty():
+		root.add_child(_palace_wrapped_label("Ruler-demand backend data is not connected yet.", 18, Color(0.86, 0.80, 0.68, 1.0)))
+		return
+	root.add_child(_palace_wrapped_label(String(demands.get("title", "Current Palace Demand")), 22, Color(0.96, 0.78, 0.46, 1.0)))
+	root.add_child(_palace_wrapped_label(String(demands.get("flavour", "The ruler's agents watch whether the estate can meet palace-facing obligations.")), 16, Color(0.82, 0.84, 0.76, 1.0)))
+	root.add_child(_palace_wrapped_label(String(demands.get("headline", "Ruler demand prototype active.")), 15, Color(0.74, 0.94, 0.72, 1.0)))
+
+	var status_row: HBoxContainer = HBoxContainer.new()
+	status_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_row.add_theme_constant_override("separation", 10)
+	root.add_child(status_row)
+	_add_palace_summary_card(status_row, "Cycle", String(demands.get("veintena_band", "Prototype")), "Veintena " + str(int(demands.get("current_veintena", 1))) + ". Controlled test demand, not random politics.", Color(0.88, 0.70, 0.40, 1.0))
+	_add_palace_summary_card(status_row, "Readiness", String(demands.get("completion_label", "0 / 3 categories ready")), "Uses free stock after reserves, not total stockpile.", Color(0.72, 0.92, 0.70, 1.0))
+	_add_palace_summary_card(status_row, "Delivery", "Disabled", "Display-only prototype; no goods are handed in yet.", Color(0.92, 0.70, 0.46, 1.0))
+
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var list: VBoxContainer = VBoxContainer.new()
+	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	list.add_theme_constant_override("separation", 10)
+	scroll.add_child(list)
+	var rows: Array = demands.get("rows", []) as Array
+	for row_variant: Variant in rows:
+		if row_variant is Dictionary:
+			_add_palace_ruler_demand_row_card(list, row_variant as Dictionary)
+	var note_panel: PanelContainer = PanelContainer.new()
+	note_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	note_panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.018, 0.020, 0.018, 0.88), Color(0.42, 0.42, 0.34, 0.50), 10))
+	list.add_child(note_panel)
+	var note_margin: MarginContainer = MarginContainer.new()
+	note_margin.add_theme_constant_override("margin_left", 12)
+	note_margin.add_theme_constant_override("margin_top", 8)
+	note_margin.add_theme_constant_override("margin_right", 12)
+	note_margin.add_theme_constant_override("margin_bottom", 8)
+	note_panel.add_child(note_margin)
+	note_margin.add_child(_palace_wrapped_label(String(demands.get("mechanics_note", "Display-only. No rewards are created.")), 14, Color(0.74, 0.76, 0.68, 1.0)))
+
+func _add_palace_ruler_demand_row_card(parent: VBoxContainer, row: Dictionary) -> void:
+	var ready: bool = bool(row.get("ready", false))
+	var border: Color = Color(0.54, 0.90, 0.58, 0.80) if ready else Color(1.0, 0.58, 0.34, 0.82)
+	var card: PanelContainer = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_stylebox_override("panel", _make_panel_style(Color(0.022, 0.024, 0.022, 0.92), border, 11))
+	parent.add_child(card)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 9)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 9)
+	card.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 5)
+	margin.add_child(stack)
+	var top: HBoxContainer = HBoxContainer.new()
+	top.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_theme_constant_override("separation", 8)
+	stack.add_child(top)
+	var title: Label = _palace_label(String(row.get("slot_name", "Demand")) + " — " + String(row.get("resource_name", "Good")), 19, border.lightened(0.20))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(title)
+	var status: Label = _palace_label(String(row.get("status", "Unknown")), 15, border.lightened(0.10))
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	status.custom_minimum_size = Vector2(120, 0)
+	top.add_child(status)
+	stack.add_child(_palace_wrapped_label(String(row.get("note", "Palace-facing obligation.")), 14, Color(0.82, 0.84, 0.76, 1.0)))
+	var requested: float = float(row.get("requested", 0.0))
+	var stored: float = float(row.get("stored", 0.0))
+	var free_value: float = float(row.get("free_after_reserves", 0.0))
+	var shortfall: float = float(row.get("shortfall", 0.0))
+	stack.add_child(_palace_wrapped_label("Requested: " + _format_religion_amount(requested) + " | Stored: " + _format_religion_amount(stored) + " | Free after reserves: " + _format_religion_amount(free_value), 14, Color(0.76, 0.82, 0.74, 1.0)))
+	if ready:
+		stack.add_child(_palace_wrapped_label(String(row.get("quality_hint", "Adequate stock available")) + ". Delivery is not enabled yet.", 13, Color(0.66, 0.92, 0.68, 1.0)))
+	else:
+		stack.add_child(_palace_wrapped_label("Shortfall: " + _format_religion_amount(shortfall) + " " + String(row.get("resource_name", "Good")) + ".", 13, Color(1.0, 0.72, 0.45, 1.0)))
 
 
 func _build_palace_authority_main_view() -> void:
@@ -1239,6 +1345,12 @@ func _build_palace_authority_main_view() -> void:
 		if tez_state != null and tez_state.has_method("get_tezcatlipoca_pressure_overview"):
 			pressure = tez_state.call("get_tezcatlipoca_pressure_overview") as Dictionary
 		_add_tezcatlipoca_pressure_panel(stack, pressure, colour)
+	elif god_id == "quetzalcoatl":
+		var legitimacy: Dictionary = {}
+		var quetz_state: Node = _state()
+		if quetz_state != null and quetz_state.has_method("get_quetzalcoatl_legitimacy_overview"):
+			legitimacy = quetz_state.call("get_quetzalcoatl_legitimacy_overview") as Dictionary
+		_add_quetzalcoatl_legitimacy_panel(stack, legitimacy, colour)
 	_add_palace_authority_section(stack, "Active Authority Structures", active_rows, colour, true)
 	_add_palace_authority_section(stack, "Inactive Built Structures", inactive_rows, Color(1.0, 0.58, 0.34, 1.0), false)
 	_add_palace_authority_locked_section(stack, locked_rows, colour)
@@ -1363,6 +1475,61 @@ func _add_tezcatlipoca_rival_pressure_card(parent: VBoxContainer, row: Dictionar
 	stack.add_child(_palace_wrapped_label("Domain: " + String(row.get("domain", "Hidden")), 13, Color(0.78, 0.82, 0.76, 1.0)))
 	stack.add_child(_palace_wrapped_label(String(row.get("summary", "The mirror reveals an unclear rival weakness.")), 13, Color(0.82, 0.84, 0.78, 1.0)))
 	stack.add_child(_palace_wrapped_label(String(row.get("future_hook", "Future manipulation hook.")), 13, Color(0.86, 0.80, 0.62, 1.0)))
+
+
+func _add_quetzalcoatl_legitimacy_panel(parent: VBoxContainer, legitimacy: Dictionary, colour: Color) -> void:
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.024, 0.034, 0.026, 0.92), colour.lightened(0.08), 14))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 8)
+	margin.add_child(stack)
+	stack.add_child(_palace_label(String(legitimacy.get("headline", "Quetzalcoatl Legitimacy Court")), 22, colour.lightened(0.26)))
+	stack.add_child(_palace_wrapped_label(String(legitimacy.get("summary", "Build and maintain active Quetzalcoatl palace structures to reveal legitimacy, recognition and tribute-credibility hooks.")), 15, Color(0.84, 0.88, 0.80, 1.0)))
+	var active_structures: Array = legitimacy.get("active_structures", []) as Array
+	if not active_structures.is_empty():
+		stack.add_child(_palace_wrapped_label("Reading through: " + ", ".join(active_structures) + ".", 13, Color(0.86, 0.94, 0.76, 1.0)))
+	var legitimacy_rows: Array = legitimacy.get("legitimacy_rows", []) as Array
+	if legitimacy_rows.is_empty():
+		stack.add_child(_palace_wrapped_label("No legitimacy hooks are currently visible at this palace authority level.", 14, Color(0.74, 0.76, 0.70, 1.0)))
+	else:
+		stack.add_child(_palace_label("Legitimacy and Recognition Hooks", 18, Color(1.0, 0.88, 0.56, 1.0)))
+		for row_variant: Variant in legitimacy_rows:
+			if row_variant is Dictionary:
+				_add_quetzalcoatl_legitimacy_card(stack, row_variant as Dictionary, colour)
+	var obligation_rows: Array = legitimacy.get("obligation_rows", []) as Array
+	if not obligation_rows.is_empty():
+		stack.add_child(_palace_label("Tribute Credibility Readings", 18, Color(1.0, 0.88, 0.56, 1.0)))
+		for row_variant: Variant in obligation_rows:
+			if row_variant is Dictionary:
+				_add_quetzalcoatl_legitimacy_card(stack, row_variant as Dictionary, colour)
+	stack.add_child(_palace_wrapped_label(String(legitimacy.get("mechanics_note", "Quetzalcoatl authority rows are information-only for now.")), 13, Color(0.94, 0.76, 0.48, 1.0)))
+
+func _add_quetzalcoatl_legitimacy_card(parent: VBoxContainer, row: Dictionary, colour: Color) -> void:
+	var card: PanelContainer = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_stylebox_override("panel", _make_panel_style(Color(0.014, 0.022, 0.016, 0.88), colour.darkened(0.08), 9))
+	parent.add_child(card)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	card.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 4)
+	margin.add_child(stack)
+	stack.add_child(_palace_label(String(row.get("name", "Legitimacy")), 18, colour.lightened(0.24)))
+	stack.add_child(_palace_wrapped_label("Domain: " + String(row.get("domain", "Hidden")), 13, Color(0.78, 0.82, 0.76, 1.0)))
+	stack.add_child(_palace_wrapped_label(String(row.get("summary", "The palace reveals a legitimacy hook.")), 13, Color(0.82, 0.86, 0.78, 1.0)))
+	stack.add_child(_palace_wrapped_label(String(row.get("future_hook", "Future recognition hook.")), 13, Color(0.86, 0.82, 0.62, 1.0)))
 
 func _add_palace_authority_section(parent: VBoxContainer, title_text: String, rows: Array, colour: Color, active_section: bool) -> void:
 	var panel: PanelContainer = PanelContainer.new()
@@ -1500,7 +1667,7 @@ func _build_palace_overview_main_view() -> void:
 	note_margin.add_theme_constant_override("margin_right", 12)
 	note_margin.add_theme_constant_override("margin_bottom", 9)
 	note_panel.add_child(note_margin)
-	note_margin.add_child(_palace_wrapped_label("Palace structures consume maintenance and reserve existing active staff when the Veintena resolves. The Authority tab now reads active structures; Huitzilopochtli gates attacking Flower Wars and Tlaloc has an information-only natural calendar forecast prototype. Ruler demands and other authority effects remain future patches.", 15, Color(0.74, 0.78, 0.70, 1.0)))
+	note_margin.add_child(_palace_wrapped_label("Palace structures consume maintenance and reserve existing active staff when the Veintena resolves. The Authority tab reads active structures; Huitzilopochtli gates attacking Flower Wars, Tlaloc shows natural foresight, Tezcatlipoca shows scarcity pressure, and Quetzalcoatl shows legitimacy hooks. Ruler demands remain future patches.", 15, Color(0.74, 0.78, 0.70, 1.0)))
 
 func _add_palace_summary_card(parent: HBoxContainer, heading: String, value: String, detail: String, colour: Color) -> void:
 	var card: PanelContainer = PanelContainer.new()
@@ -2102,7 +2269,7 @@ func _build_palace_overview_probe_reports() -> void:
 	_add_notification("Structures: " + str(int(summary.get("built_structure_count", 0))) + " built; " + str(int(summary.get("active_structure_count", 0))) + " active; " + str(int(summary.get("inactive_structure_count", 0))) + " inactive.")
 	var staff_summary: Dictionary = summary.get("staff_summary", {}) as Dictionary
 	_add_notification(String(staff_summary.get("headline", "No palace staff required yet.")))
-	_add_notification("Palace upkeep and staff now resolve on Veintena advance. Huitzilopochtli dedication now gates attacking Flower Wars; other authority effects and ruler demands remain future patches.")
+	_add_notification("Palace upkeep and staff now resolve on Veintena advance. Huitzilopochtli dedication now gates attacking Flower Wars; other authority effects and ruler demands now show a display-only readiness prototype.")
 
 func _build_palace_divine_seat_probe_reports() -> void:
 	var summary: Dictionary = _palace_probe_summary()
@@ -2212,12 +2379,35 @@ func _build_palace_authority_probe_reports() -> void:
 	if route_id == "tezcatlipoca" and summary.has("tezcatlipoca_pressure") and summary["tezcatlipoca_pressure"] is Dictionary:
 		var pressure: Dictionary = summary["tezcatlipoca_pressure"] as Dictionary
 		_add_notification("Tezcatlipoca pressure: " + str(int(pressure.get("visible_market_pressure_count", 0))) + " market readings; " + str(int(pressure.get("visible_rival_pressure_count", 0))) + " rival hooks. Information-only prototype.")
-	_add_notification("Structures: " + str(int(authority.get("active_structure_count", 0))) + " active; " + str(int(authority.get("inactive_structure_count", 0))) + " inactive. Implemented route effects currently are the Huitzilopochtli Flower War gate, Tlaloc forecast display, and Tezcatlipoca pressure display.")
+	if route_id == "quetzalcoatl" and summary.has("quetzalcoatl_legitimacy") and summary["quetzalcoatl_legitimacy"] is Dictionary:
+		var legitimacy: Dictionary = summary["quetzalcoatl_legitimacy"] as Dictionary
+		_add_notification("Quetzalcoatl legitimacy: " + str(int(legitimacy.get("visible_legitimacy_count", 0))) + " legitimacy hooks; " + str(int(legitimacy.get("visible_obligation_count", 0))) + " tribute credibility readings. Information-only prototype.")
+	_add_notification("Structures: " + str(int(authority.get("active_structure_count", 0))) + " active; " + str(int(authority.get("inactive_structure_count", 0))) + " inactive. Implemented route effects currently are the Huitzilopochtli Flower War gate, Tlaloc forecast display, Tezcatlipoca pressure display, and Quetzalcoatl legitimacy display.")
 
 func _build_palace_ruler_demands_probe_reports() -> void:
-	_add_notification("Ruler Demands. This tab is reserved for palace-facing obligations and tribute expectations.")
-	_add_notification("Future structure: one Raw demand, one Processed demand, and one Luxury/Special demand. Delivery quality and reward rules are not implemented yet.")
-	_add_notification("No royal favour, local stability, prestige scoring, or ruler-demand mechanic has been added by this probe.")
+	var summary: Dictionary = _palace_probe_summary()
+	var demands: Dictionary = {}
+	if summary.has("ruler_demands") and summary["ruler_demands"] is Dictionary:
+		demands = summary["ruler_demands"] as Dictionary
+	else:
+		var state: Node = _state()
+		if state != null and state.has_method("get_palace_ruler_demands_summary"):
+			demands = state.call("get_palace_ruler_demands_summary") as Dictionary
+	if demands.is_empty():
+		_add_notification("Ruler Demands. Backend data is not connected yet.")
+		return
+	_add_notification(String(demands.get("title", "Current Palace Demand")) + ". " + String(demands.get("headline", "Ruler demand prototype active.")))
+	_add_notification(String(demands.get("flavour", "The ruler's agents watch whether the estate can meet palace-facing obligations.")))
+	var rows: Array = demands.get("rows", []) as Array
+	for row_variant: Variant in rows:
+		if not (row_variant is Dictionary):
+			continue
+		var row: Dictionary = row_variant as Dictionary
+		var line: String = String(row.get("slot_name", "Demand")) + ": " + String(row.get("resource_name", "Good")) + " " + _format_religion_amount(float(row.get("requested", 0.0))) + " — " + String(row.get("status", "Unknown"))
+		if not bool(row.get("ready", false)):
+			line += "; short " + _format_religion_amount(float(row.get("shortfall", 0.0)))
+		_add_notification(line + ".")
+	_add_notification(String(demands.get("mechanics_note", "Display-only. No delivery or rewards are implemented.")))
 
 func _palace_probe_summary() -> Dictionary:
 	var state: Node = _state()
@@ -6135,7 +6325,7 @@ func _add_palace_estate_probe_card() -> void:
 		title = "Palace — Dedication: None"
 	_add_notification(title + ". Palace Level " + str(palace_level) + ". Built structures: " + str(structure_count) + ".")
 	_add_notification("Palace route: " + route_name + ". " + power_summary)
-	_add_notification("Palace status: " + authority_status + " Dedication and structure construction are handled on Palace → Divine Seat; maintenance and staff clarity are active, while ruler demands are not active yet.")
+	_add_notification("Palace status: " + authority_status + " Dedication and structure construction are handled on Palace → Divine Seat; maintenance and staff clarity are active, while ruler demands show a display-only readiness prototype.")
 	_add_notification("Flower War authority check: " + gate_status)
 
 func _estate_report_title(report_id: String) -> String:
