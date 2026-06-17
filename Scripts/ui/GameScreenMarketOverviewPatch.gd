@@ -65,6 +65,8 @@ var _flower_war_event_provisioning_id: String = "standard"
 var _flower_war_event_selected_warbands: Dictionary = {}
 var _flower_war_event_report: Dictionary = {}
 var _flower_war_defence_strategy_id: String = "balanced"
+var _selected_palace_route_id: String = ""
+var _pending_palace_dedication_confirm_id: String = ""
 
 
 class WarbandSkillWebCanvas:
@@ -844,6 +846,7 @@ class WarbandSkillWebCanvas:
 func _ready() -> void:
 	_remove_shrine_offerings_focus()
 	_add_barracks_warbands_focus()
+	_setup_palace_navigation_probe()
 	super._ready()
 
 func _add_barracks_warbands_focus() -> void:
@@ -867,6 +870,26 @@ func _add_barracks_warbands_focus() -> void:
 		output.append({"id": "warbands", "label": "Warbands"})
 	profile["focuses"] = output
 	_screen_profiles["warriors"] = profile
+
+func _setup_palace_navigation_probe() -> void:
+	# Palace v0.22: Divine Seat visual + structure node data.
+	# Uses the existing base Palace button/profile, but the Divine Seat choice now
+	# lives in the big middle-left DynamicViewHost instead of being buried in the
+	# right-hand report list.
+	var profile: Dictionary = {}
+	if _screen_profiles.has("palace"):
+		profile = (_screen_profiles["palace"] as Dictionary).duplicate(true)
+	profile["title"] = "Palace"
+	profile["report_title"] = "Palace Reports"
+	profile["body"] = "The Palace is the estate's political and divine centre. The Divine Seat is a ceremonial dedication hall: choose one route, then view that god's palace structure construction data."
+	profile["focuses"] = [
+		{"id": "overview", "label": "Overview"},
+		{"id": "divine_seat", "label": "Divine Seat"},
+		{"id": "authority", "label": "Authority"},
+		{"id": "ruler_demands", "label": "Ruler Demands"}
+	]
+	profile["reports"] = []
+	_screen_profiles["palace"] = profile
 
 func _remove_shrine_offerings_focus() -> void:
 	# Offerings are now handled inside each god's Ritual Tiers panel, not as a
@@ -985,6 +1008,9 @@ func show_focus(location_id: String, focus_id: String) -> void:
 		_selected_shrine_panel_id = ""
 	if location_id == "warriors" and focus_id != "warbands":
 		_selected_warband_skill_web_id = ""
+	if location_id == "palace" and focus_id != "divine_seat":
+		_selected_palace_route_id = ""
+		_pending_palace_dedication_confirm_id = ""
 	super.show_focus(location_id, focus_id)
 
 func _refresh_main_content() -> void:
@@ -1004,6 +1030,14 @@ func _refresh_main_content() -> void:
 			location_art.texture = _art_for_location(current_location_id)
 		_show_barracks_content()
 		return
+	if current_location_id == "palace":
+		_clear_dynamic_views()
+		if location_title:
+			location_title.text = "Palace"
+		if location_art:
+			location_art.texture = _art_for_location(current_location_id)
+		_show_palace_content()
+		return
 	super._refresh_main_content()
 
 func _refresh_right_panel() -> void:
@@ -1019,6 +1053,9 @@ func _refresh_right_panel() -> void:
 		return
 	if current_location_id == "warriors":
 		_build_barracks_reports()
+		return
+	if current_location_id == "palace":
+		_build_palace_navigation_probe_reports()
 		return
 
 	var special_view: String = String(profile.get("special_view", ""))
@@ -1069,6 +1106,17 @@ func _report_title_for_current_focus(profile: Dictionary) -> String:
 			"quetzalcoatl":
 				return "Quetzalcoatl Reports"
 		return "Shrine Reports"
+	if current_location_id == "palace":
+		match _current_focus_id():
+			"overview":
+				return "Palace Overview"
+			"divine_seat":
+				return "Divine Seat"
+			"authority":
+				return "Palace Authority"
+			"ruler_demands":
+				return "Ruler Demands"
+		return "Palace Reports"
 	if current_location_id == "warriors":
 		match _current_focus_id():
 			"overview":
@@ -1085,6 +1133,681 @@ func _report_title_for_current_focus(profile: Dictionary) -> String:
 				return "War Returns"
 		return "Barracks Reports"
 	return super._report_title_for_current_focus(profile)
+
+
+# -----------------------------------------------------------------------------
+# Palace main-view content v0.24
+# -----------------------------------------------------------------------------
+
+func _show_palace_content() -> void:
+	_set_content_root_layout(true)
+	if content_text:
+		content_text.visible = false
+	if content_root:
+		content_root.visible = true
+	if dynamic_view_host == null:
+		return
+	dynamic_view_host.visible = true
+	match _current_focus_id():
+		"divine_seat":
+			_build_palace_divine_seat_main_view()
+		"authority":
+			_build_palace_placeholder_main_view("Palace Authority", "The chosen divine route will express its active power here once built palace structures gain authority effects.")
+		"ruler_demands":
+			_build_palace_placeholder_main_view("Ruler Demands", "Palace-facing tribute obligations and political demands will be shown here after the ruler-demand system is designed.")
+		_:
+			_build_palace_placeholder_main_view("Palace Overview", "The Palace is the political and divine centre of the house. Use Divine Seat to choose and later develop a palace route.")
+
+func _build_palace_placeholder_main_view(title_text: String, body_text: String) -> void:
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.030, 0.030, 0.024, 0.90), Color(0.70, 0.58, 0.34, 0.55), 16))
+	dynamic_view_host.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 24)
+	margin.add_theme_constant_override("margin_top", 22)
+	margin.add_theme_constant_override("margin_right", 24)
+	margin.add_theme_constant_override("margin_bottom", 22)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	stack.add_theme_constant_override("separation", 12)
+	margin.add_child(stack)
+	var title_label: Label = _palace_label(title_text, 34, Color(0.96, 0.86, 0.58, 1.0))
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stack.add_child(title_label)
+	var body: RichTextLabel = _palace_wrapped_label(body_text, 20, Color(0.80, 0.82, 0.76, 1.0))
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	stack.add_child(body)
+
+func _build_palace_divine_seat_main_view() -> void:
+	var summary: Dictionary = _palace_probe_summary()
+	var outer: PanelContainer = PanelContainer.new()
+	outer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	outer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	outer.add_theme_stylebox_override("panel", _make_panel_style(Color(0.025, 0.022, 0.018, 0.94), Color(0.76, 0.60, 0.34, 0.70), 18))
+	dynamic_view_host.add_child(outer)
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 20)
+	margin.add_theme_constant_override("margin_top", 16)
+	margin.add_theme_constant_override("margin_right", 20)
+	margin.add_theme_constant_override("margin_bottom", 16)
+	outer.add_child(margin)
+
+	var root: VBoxContainer = VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 12)
+	margin.add_child(root)
+
+	var title_label: Label = _palace_label("PALACE DIVINE SEAT", 32, Color(1.0, 0.86, 0.48, 1.0))
+	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root.add_child(title_label)
+
+	if bool(summary.get("dedicated", false)):
+		_build_palace_dedicated_main_tree(root, summary)
+	else:
+		_build_palace_undedicated_main_choice(root)
+
+func _build_palace_undedicated_main_choice(root: VBoxContainer) -> void:
+	root.add_child(_palace_wrapped_label("Choose the god whose authority will sit at the heart of your house. This dedication is permanent for Prototype 0.", 18, Color(0.80, 0.84, 0.78, 1.0)))
+
+	var routes: Array[Dictionary] = _palace_probe_routes()
+	if _selected_palace_route_id == "" and routes.size() > 0:
+		_selected_palace_route_id = String(routes[0].get("id", routes[0].get("god_id", "")))
+
+	var hall: HBoxContainer = HBoxContainer.new()
+	hall.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	hall.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	hall.add_theme_constant_override("separation", 14)
+	root.add_child(hall)
+
+	var left_col: VBoxContainer = VBoxContainer.new()
+	left_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	left_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	left_col.add_theme_constant_override("separation", 12)
+	hall.add_child(left_col)
+
+	var centre_col: VBoxContainer = VBoxContainer.new()
+	centre_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	centre_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	centre_col.add_theme_constant_override("separation", 12)
+	centre_col.custom_minimum_size = Vector2(330, 0)
+	hall.add_child(centre_col)
+
+	var right_col: VBoxContainer = VBoxContainer.new()
+	right_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	right_col.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	right_col.add_theme_constant_override("separation", 12)
+	hall.add_child(right_col)
+
+	var route_tlaloc: Dictionary = _palace_route_by_id("tlaloc")
+	var route_tez: Dictionary = _palace_route_by_id("tezcatlipoca")
+	var route_huitz: Dictionary = _palace_route_by_id("huitzilopochtli")
+	var route_quetz: Dictionary = _palace_route_by_id("quetzalcoatl")
+	if not route_tlaloc.is_empty():
+		left_col.add_child(_make_palace_route_button_card(route_tlaloc))
+	if not route_tez.is_empty():
+		left_col.add_child(_make_palace_route_button_card(route_tez))
+	_build_palace_central_seat_panel(centre_col)
+	var selected_route: Dictionary = _palace_route_by_id(_selected_palace_route_id)
+	_build_palace_route_detail_panel(centre_col, selected_route)
+	if not route_huitz.is_empty():
+		right_col.add_child(_make_palace_route_button_card(route_huitz))
+	if not route_quetz.is_empty():
+		right_col.add_child(_make_palace_route_button_card(route_quetz))
+
+func _make_palace_route_button_card(route: Dictionary) -> Button:
+	var god_id: String = String(route.get("id", route.get("god_id", "")))
+	var god_name: String = String(route.get("god_name", route.get("name", god_id.capitalize())))
+	var route_name: String = String(route.get("route_name", "Palace Route"))
+	var selected: bool = god_id == _selected_palace_route_id
+	var colour: Color = _palace_route_colour(god_id)
+	var button: Button = Button.new()
+	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	button.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	button.custom_minimum_size = Vector2(210, 145)
+	button.text = god_name.to_upper() + "\n" + _palace_route_domain_line(god_id) + "\n\n" + route_name
+	button.tooltip_text = String(route.get("power_summary", ""))
+	button.add_theme_font_size_override("font_size", 17)
+	button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.035, 0.034, 0.028, 0.94), colour.darkened(0.10), 13))
+	button.add_theme_stylebox_override("hover", _make_panel_style(Color(0.055, 0.050, 0.038, 0.98), colour.lightened(0.14), 13))
+	button.add_theme_stylebox_override("pressed", _make_panel_style(Color(0.070, 0.055, 0.038, 1.0), colour.lightened(0.25), 13))
+	if selected:
+		button.add_theme_stylebox_override("normal", _make_panel_style(Color(0.065, 0.050, 0.035, 0.98), colour.lightened(0.32), 13))
+	button.pressed.connect(func() -> void:
+		_on_palace_route_selected(god_id)
+	)
+	return button
+
+func _build_palace_central_seat_panel(parent: VBoxContainer) -> void:
+	var selected_route: Dictionary = _palace_route_by_id(_selected_palace_route_id)
+	var god_id: String = String(selected_route.get("id", selected_route.get("god_id", "")))
+	var colour: Color = _palace_route_colour(god_id)
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.custom_minimum_size = Vector2(0, 145)
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.020, 0.018, 0.016, 0.95), colour, 18))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 16)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_right", 16)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	stack.add_theme_constant_override("separation", 5)
+	margin.add_child(stack)
+	var title_text: String = "EMPTY DIVINE SEAT"
+	var subtitle_text: String = "Select a god to preview the authority route."
+	if not selected_route.is_empty():
+		title_text = String(selected_route.get("god_name", "Chosen")).to_upper() + " SELECTED"
+		subtitle_text = String(selected_route.get("route_name", "Palace Route"))
+	var title: Label = _palace_label(title_text, 24, Color(1.0, 0.88, 0.54, 1.0))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stack.add_child(title)
+	var subtitle: Label = _palace_label(subtitle_text, 18, Color(0.82, 0.88, 0.80, 1.0))
+	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stack.add_child(subtitle)
+	var glyph: Label = _palace_label(_palace_route_seat_glyph(god_id), 34, colour.lightened(0.20))
+	glyph.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	stack.add_child(glyph)
+
+func _build_palace_route_detail_panel(parent: VBoxContainer, route: Dictionary) -> void:
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.040, 0.035, 0.026, 0.96), Color(0.72, 0.58, 0.34, 0.55), 14))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	stack.add_theme_constant_override("separation", 8)
+	margin.add_child(stack)
+	if route.is_empty():
+		stack.add_child(_palace_label("No route selected", 22, Color(0.92, 0.84, 0.62, 1.0)))
+		stack.add_child(_palace_wrapped_label("Choose a god card to preview the Divine Seat route.", 17, Color(0.78, 0.80, 0.74, 1.0)))
+		return
+	var god_id: String = String(route.get("id", route.get("god_id", "")))
+	var colour: Color = _palace_route_colour(god_id)
+	stack.add_child(_palace_label(String(route.get("god_name", "Chosen")).to_upper(), 25, colour.lightened(0.18)))
+	stack.add_child(_palace_wrapped_label(_palace_route_domain_line(god_id), 16, Color(0.82, 0.82, 0.72, 1.0)))
+	stack.add_child(_palace_wrapped_label("Power: " + String(route.get("route_name", "Palace Route")), 18, Color(1.0, 0.86, 0.52, 1.0)))
+	stack.add_child(_palace_wrapped_label(_palace_route_flavour(god_id), 17, Color(0.80, 0.84, 0.78, 1.0)))
+	stack.add_child(_palace_wrapped_label("Future palace structures: " + ", ".join(_palace_tree_preview_names(god_id)) + ".", 15, Color(0.68, 0.78, 0.74, 1.0)))
+	var status: Dictionary = {"ok": false, "reason": "Dedication backend not connected."}
+	var state: Node = _state()
+	if state != null and state.has_method("can_dedicate_palace_to_god"):
+		status = state.call("can_dedicate_palace_to_god", god_id) as Dictionary
+	var confirm: Button = Button.new()
+	confirm.text = "Dedicate Palace to " + String(route.get("god_name", "Chosen"))
+	confirm.custom_minimum_size = Vector2(0, 46)
+	confirm.add_theme_font_size_override("font_size", 20)
+	confirm.add_theme_stylebox_override("normal", _make_panel_style(Color(0.055, 0.045, 0.030, 0.94), colour, 10))
+	confirm.add_theme_stylebox_override("hover", _make_panel_style(Color(0.075, 0.055, 0.034, 1.0), colour.lightened(0.18), 10))
+	confirm.disabled = not bool(status.get("ok", false))
+	confirm.tooltip_text = String(status.get("reason", ""))
+	confirm.pressed.connect(func() -> void:
+		_on_palace_confirm_dedication_pressed(god_id)
+	)
+	stack.add_child(confirm)
+	stack.add_child(_palace_wrapped_label("Permanent for Prototype 0. The Divine Seat will become this god's palace structure node data.", 14, Color(0.92, 0.72, 0.50, 1.0)))
+
+func _build_palace_dedicated_main_tree(root: VBoxContainer, summary: Dictionary) -> void:
+	var god_id: String = String(summary.get("dedicated_god", ""))
+	var colour: Color = _palace_route_colour(god_id)
+	var header: PanelContainer = PanelContainer.new()
+	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_theme_stylebox_override("panel", _make_panel_style(Color(0.026, 0.026, 0.020, 0.96), colour, 16))
+	root.add_child(header)
+	var header_margin: MarginContainer = MarginContainer.new()
+	header_margin.add_theme_constant_override("margin_left", 18)
+	header_margin.add_theme_constant_override("margin_top", 12)
+	header_margin.add_theme_constant_override("margin_right", 18)
+	header_margin.add_theme_constant_override("margin_bottom", 12)
+	header.add_child(header_margin)
+	var header_stack: VBoxContainer = VBoxContainer.new()
+	header_stack.add_theme_constant_override("separation", 6)
+	header_margin.add_child(header_stack)
+	var title: Label = _palace_label("PALACE DEDICATED TO " + String(summary.get("dedicated_god_name", "Chosen")).to_upper(), 28, colour.lightened(0.24))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	header_stack.add_child(title)
+	header_stack.add_child(_palace_wrapped_label(String(summary.get("route_name", "Palace Route")) + ". " + String(summary.get("power_summary", "")), 17, Color(0.84, 0.86, 0.78, 1.0)))
+
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var tree_stack: VBoxContainer = VBoxContainer.new()
+	tree_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	tree_stack.add_theme_constant_override("separation", 10)
+	scroll.add_child(tree_stack)
+	var tree: Dictionary = {}
+	if summary.has("structure_tree_shell") and summary["structure_tree_shell"] is Dictionary:
+		tree = summary["structure_tree_shell"] as Dictionary
+	else:
+		var state: Node = _state()
+		if state != null and state.has_method("get_palace_structure_tree_shell"):
+			tree = state.call("get_palace_structure_tree_shell", god_id) as Dictionary
+	if tree.is_empty():
+		tree_stack.add_child(_palace_wrapped_label("Palace structure node data is not connected yet.", 18, Color(0.82, 0.76, 0.62, 1.0)))
+		return
+	var tiers: Array = tree.get("tiers", []) as Array
+	for tier_variant: Variant in tiers:
+		if tier_variant is Dictionary:
+			_add_palace_tree_tier_card(tree_stack, tier_variant as Dictionary, colour)
+	_add_palace_paths_not_chosen_panel(tree_stack, god_id)
+
+func _add_palace_tree_tier_card(parent: VBoxContainer, tier: Dictionary, colour: Color) -> void:
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.035, 0.033, 0.026, 0.90), colour.darkened(0.10), 12))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 8)
+	margin.add_child(stack)
+	stack.add_child(_palace_label(String(tier.get("title", "Palace Tier")), 21, Color(1.0, 0.84, 0.54, 1.0)))
+	var structures: Array = tier.get("structures", []) as Array
+	for structure_variant: Variant in structures:
+		if structure_variant is Dictionary:
+			var structure: Dictionary = structure_variant as Dictionary
+			_add_palace_structure_node_card(stack, structure, colour)
+
+func _add_palace_structure_node_card(parent: VBoxContainer, structure: Dictionary, route_colour: Color) -> void:
+	var card: PanelContainer = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_stylebox_override("panel", _make_panel_style(Color(0.020, 0.023, 0.021, 0.92), route_colour.darkened(0.22), 9))
+	parent.add_child(card)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	card.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 4)
+	margin.add_child(stack)
+
+	var title_row: HBoxContainer = HBoxContainer.new()
+	title_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_row.add_theme_constant_override("separation", 8)
+	stack.add_child(title_row)
+	var title: Label = _palace_label(String(structure.get("name", "Palace Structure")), 19, route_colour.lightened(0.24))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title_row.add_child(title)
+	var status: Label = _palace_label(String(structure.get("status", "Not built")), 14, Color(0.92, 0.74, 0.48, 1.0))
+	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	status.custom_minimum_size = Vector2(110, 0)
+	title_row.add_child(status)
+
+	stack.add_child(_palace_wrapped_label("Tier " + str(int(structure.get("tier", structure.get("level", 1)))) + " — " + String(structure.get("route", "Palace Route")), 14, Color(0.72, 0.78, 0.72, 1.0)))
+	stack.add_child(_palace_wrapped_label(String(structure.get("description", structure.get("summary", "Future palace structure."))), 15, Color(0.80, 0.83, 0.76, 1.0)))
+
+	var build_cost: Dictionary = structure.get("build_cost", {}) as Dictionary
+	var maintenance_cost: Dictionary = structure.get("maintenance_cost", {}) as Dictionary
+	var staff_requirement: Dictionary = structure.get("staff_requirement", {}) as Dictionary
+	var prerequisite_text: String = String(structure.get("prerequisite_text", "None"))
+	var effect_summary: String = String(structure.get("effect_summary", structure.get("summary", "Future palace authority hook.")))
+	stack.add_child(_palace_wrapped_label("Build cost: " + _format_cost(build_cost), 14, Color(0.77, 0.83, 0.76, 1.0)))
+	stack.add_child(_palace_wrapped_label("Maintenance: " + _format_cost(maintenance_cost), 14, Color(0.77, 0.83, 0.76, 1.0)))
+	stack.add_child(_palace_wrapped_label("Staff: " + _palace_format_staff_requirement(staff_requirement), 14, Color(0.77, 0.83, 0.76, 1.0)))
+	stack.add_child(_palace_wrapped_label("Prerequisites: " + prerequisite_text, 14, Color(0.70, 0.76, 0.70, 1.0)))
+	stack.add_child(_palace_wrapped_label("Effect: " + effect_summary, 14, Color(0.92, 0.82, 0.55, 1.0)))
+
+	var structure_id: String = String(structure.get("id", ""))
+	var built: bool = bool(structure.get("built", false))
+	if built:
+		var active: bool = bool(structure.get("active", false))
+		if active:
+			stack.add_child(_palace_wrapped_label("Active. Maintenance and staff are currently covered; authority effects will be connected later.", 13, Color(0.62, 0.95, 0.70, 1.0)))
+		else:
+			stack.add_child(_palace_wrapped_label("Built but inactive: " + String(structure.get("inactive_reason", "missing maintenance or staff.")), 13, Color(1.0, 0.72, 0.45, 1.0)))
+		return
+	var build_status: Dictionary = {"ok": bool(structure.get("can_build", false)), "reason": String(structure.get("build_status", ""))}
+	var state: Node = _state()
+	if state != null and state.has_method("can_build_palace_structure"):
+		build_status = state.call("can_build_palace_structure", structure_id) as Dictionary
+	var build_button: Button = Button.new()
+	build_button.text = "Build Palace Structure"
+	build_button.custom_minimum_size = Vector2(0, 38)
+	build_button.add_theme_font_size_override("font_size", 16)
+	build_button.disabled = not bool(build_status.get("ok", false))
+	build_button.tooltip_text = String(build_status.get("reason", ""))
+	build_button.pressed.connect(func() -> void:
+		var build_state: Node = _state()
+		if build_state != null and build_state.has_method("build_palace_structure"):
+			build_state.call("build_palace_structure", structure_id)
+		_refresh_all()
+	)
+	stack.add_child(build_button)
+	if not bool(build_status.get("ok", false)):
+		stack.add_child(_palace_wrapped_label("Blocked: " + String(build_status.get("reason", "")), 13, Color(1.0, 0.72, 0.45, 1.0)))
+	else:
+		stack.add_child(_palace_wrapped_label("Construction pays the build cost now. The structure must then be maintained and staffed each Veintena to stay active.", 13, Color(0.72, 0.78, 0.66, 1.0)))
+
+func _palace_format_staff_requirement(staff: Dictionary) -> String:
+	if staff.is_empty():
+		return "none"
+	var parts: Array[String] = []
+	for staff_variant: Variant in staff.keys():
+		var staff_id: String = String(staff_variant)
+		parts.append(_palace_staff_display_name(staff_id) + " " + str(int(staff[staff_variant])))
+	return ", ".join(parts)
+
+func _palace_staff_display_name(staff_id: String) -> String:
+	match staff_id:
+		"tlamacazqueh":
+			return "Priests"
+		"pipiltin":
+			return "Nobles"
+		"tlacotin":
+			return "Tlacotin"
+		"macehualtin":
+			return "Macehualtin"
+		"tolteca":
+			return "Tolteca"
+		"yaotequihuaqueh":
+			return "Warriors"
+		"malli":
+			return "Captives"
+	return staff_id.replace("_", " ").capitalize()
+
+func _add_palace_paths_not_chosen_panel(parent: VBoxContainer, chosen_id: String) -> void:
+	var muted: Array[String] = []
+	for route: Dictionary in _palace_probe_routes():
+		var route_id: String = String(route.get("id", route.get("god_id", "")))
+		if route_id == chosen_id:
+			continue
+		muted.append(String(route.get("god_name", route_id.capitalize())) + " — not chosen")
+	if muted.is_empty():
+		return
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.022, 0.024, 0.022, 0.82), Color(0.38, 0.40, 0.34, 0.55), 10))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(margin)
+	margin.add_child(_palace_wrapped_label("Other divine routes sealed for Prototype 0: " + "; ".join(muted) + ".", 15, Color(0.66, 0.68, 0.62, 1.0)))
+
+func _on_palace_route_selected(god_id: String) -> void:
+	_selected_palace_route_id = god_id
+	_pending_palace_dedication_confirm_id = ""
+	_refresh_main_content()
+	_refresh_right_panel()
+
+func _on_palace_confirm_dedication_pressed(god_id: String) -> void:
+	var state: Node = _state()
+	if state == null:
+		return
+	if state.has_method("dedicate_palace_to_god"):
+		state.call("dedicate_palace_to_god", god_id)
+	elif state.has_method("set_player_palace_dedicated_god"):
+		state.call("set_player_palace_dedicated_god", god_id)
+	_selected_palace_route_id = ""
+	_pending_palace_dedication_confirm_id = ""
+	_refresh_all()
+
+func _palace_route_by_id(god_id: String) -> Dictionary:
+	for route: Dictionary in _palace_probe_routes():
+		var route_id: String = String(route.get("id", route.get("god_id", "")))
+		if route_id == god_id:
+			return route
+	return {}
+
+func _palace_tree_preview_names(god_id: String) -> Array[String]:
+	var tree: Dictionary = {}
+	var state: Node = _state()
+	if state != null and state.has_method("get_palace_structure_tree_shell"):
+		tree = state.call("get_palace_structure_tree_shell", god_id) as Dictionary
+	var names: Array[String] = []
+	var tiers: Array = tree.get("tiers", []) as Array
+	for tier_variant: Variant in tiers:
+		if not (tier_variant is Dictionary):
+			continue
+		var tier: Dictionary = tier_variant as Dictionary
+		var structures: Array = tier.get("structures", []) as Array
+		for structure_variant: Variant in structures:
+			if structure_variant is Dictionary:
+				names.append(String((structure_variant as Dictionary).get("name", "Structure")))
+			if names.size() >= 5:
+				return names
+	return names
+
+func _palace_route_colour(god_id: String) -> Color:
+	match god_id:
+		"tlaloc":
+			return Color(0.32, 0.86, 0.92, 0.96)
+		"huitzilopochtli":
+			return Color(0.92, 0.36, 0.26, 0.96)
+		"tezcatlipoca":
+			return Color(0.62, 0.48, 0.88, 0.96)
+		"quetzalcoatl":
+			return Color(0.52, 0.90, 0.58, 0.96)
+	return Color(0.72, 0.62, 0.42, 0.94)
+
+func _palace_route_domain_line(god_id: String) -> String:
+	match god_id:
+		"tlaloc":
+			return "Rain • Drought • Flood • Harvest Signs"
+		"huitzilopochtli":
+			return "War • Captives • Sacrifice • Martial Authority"
+		"tezcatlipoca":
+			return "Scarcity • Intrigue • Rival Pressure • Hidden Power"
+		"quetzalcoatl":
+			return "Legitimacy • Recognition • Tribute Trust • Palace Order"
+	return "Divine authority"
+
+func _palace_route_flavour(god_id: String) -> String:
+	match god_id:
+		"tlaloc":
+			return "Read the coming pressure of sky, lake and field before rival houses can react."
+		"huitzilopochtli":
+			return "Formally authorise the house to launch Flower Wars and pursue the war route."
+		"tezcatlipoca":
+			return "Exploit shortage, fear, ambition and rival weakness through dangerous palace power."
+		"quetzalcoatl":
+			return "Strengthen the house's credibility before ruler, court and region."
+	return "The palace route will define the house's authority."
+
+func _palace_route_seat_glyph(god_id: String) -> String:
+	match god_id:
+		"tlaloc":
+			return "WATER SEAT"
+		"huitzilopochtli":
+			return "WAR SEAT"
+		"tezcatlipoca":
+			return "MIRROR SEAT"
+		"quetzalcoatl":
+			return "FEATHER SEAT"
+	return "EMPTY ALTAR"
+
+func _palace_label(text: String, font_size: int, colour: Color) -> Label:
+	var label: Label = Label.new()
+	label.text = text
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_font_size_override("font_size", font_size)
+	label.add_theme_color_override("font_color", colour)
+	return label
+
+func _palace_wrapped_label(text: String, font_size: int, colour: Color) -> RichTextLabel:
+	var label: RichTextLabel = RichTextLabel.new()
+	label.bbcode_enabled = false
+	label.text = text
+	label.fit_content = true
+	label.scroll_active = false
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_font_size_override("normal_font_size", font_size)
+	label.add_theme_color_override("default_color", colour)
+	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	return label
+
+# -----------------------------------------------------------------------------
+# Palace navigation probe v0.20.3
+# -----------------------------------------------------------------------------
+
+func _build_palace_navigation_probe_reports() -> void:
+	var focus_id: String = _current_focus_id()
+	match focus_id:
+		"divine_seat":
+			_build_palace_divine_seat_probe_reports()
+		"authority":
+			_build_palace_authority_probe_reports()
+		"ruler_demands":
+			_build_palace_ruler_demands_probe_reports()
+		_:
+			_build_palace_overview_probe_reports()
+
+func _build_palace_overview_probe_reports() -> void:
+	var summary: Dictionary = _palace_probe_summary()
+	_add_notification("Palace Overview. Level " + str(int(summary.get("palace_level", 1))) + ". Dedication: " + String(summary.get("dedicated_god_name", "None")) + ".")
+	_add_notification("Route: " + String(summary.get("route_name", "No dedication")) + ". " + String(summary.get("power_summary", "No palace route has been chosen yet.")))
+	_add_notification("Authority status: " + String(summary.get("authority_status", "Palace authority mechanics are not active yet.")))
+	_add_notification("Structures: " + str(int(summary.get("built_structure_count", 0))) + " built; " + str(int(summary.get("active_structure_count", 0))) + " active; " + str(int(summary.get("inactive_structure_count", 0))) + " inactive.")
+	_add_notification("Palace upkeep now resolves on Veintena advance. Built structures need maintenance and existing staff to stay active; authority effects, ruler-demand mechanics and Flower War gate reconnection remain future patches.")
+
+func _build_palace_divine_seat_probe_reports() -> void:
+	var summary: Dictionary = _palace_probe_summary()
+	var dedicated: bool = bool(summary.get("dedicated", false))
+	if dedicated:
+		_add_notification("Divine Seat: Palace dedicated to " + String(summary.get("dedicated_god_name", "Chosen")) + ".")
+		_add_notification("The large palace view now shows palace structures with build costs, maintenance, staff, prerequisites, effect summaries and active/inactive status.")
+		_build_palace_not_chosen_routes(summary)
+		return
+	_add_notification("Divine Seat: choose one palace route in the large centre-left dedication hall.")
+	_add_notification("This is permanent for Prototype 0. Select a divine route, review the central route panel, then confirm dedication from the main Palace view.")
+	_add_notification("Tlaloc = foresight. Huitzilopochtli = Flower Wars. Tezcatlipoca = scarcity and intrigue. Quetzalcoatl = legitimacy and recognition.")
+
+func _add_palace_dedication_route_card(route: Dictionary) -> void:
+	var god_id: String = String(route.get("id", route.get("god_id", "")))
+	var god_name: String = String(route.get("god_name", route.get("name", god_id.capitalize())))
+	var route_name: String = String(route.get("route_name", route.get("route", "Palace Route")))
+	var summary: String = String(route.get("power_summary", ""))
+	_add_notification(god_name + " — " + route_name + ". " + summary)
+	var state: Node = _state()
+	var can_dedicate: bool = bool(route.get("can_dedicate", false))
+	var reason: String = String(route.get("dedication_status", ""))
+	if state != null and state.has_method("can_dedicate_palace_to_god"):
+		var status: Dictionary = state.call("can_dedicate_palace_to_god", god_id) as Dictionary
+		can_dedicate = bool(status.get("ok", false))
+		reason = String(status.get("reason", reason))
+	var button: Button = Button.new()
+	button.text = "Dedicate to " + god_name
+	button.custom_minimum_size = Vector2(0, 38)
+	button.add_theme_font_size_override("font_size", 16)
+	button.disabled = not can_dedicate
+	button.tooltip_text = reason
+	button.pressed.connect(func() -> void:
+		_on_palace_dedication_pressed(god_id)
+	)
+	notification_list.add_child(button)
+	if reason != "":
+		_add_notification("Dedication status: " + reason)
+
+func _on_palace_dedication_pressed(god_id: String) -> void:
+	var state: Node = _state()
+	if state == null:
+		return
+	if state.has_method("dedicate_palace_to_god"):
+		state.call("dedicate_palace_to_god", god_id)
+	elif state.has_method("set_player_palace_dedicated_god"):
+		state.call("set_player_palace_dedicated_god", god_id)
+	_refresh_all()
+
+func _build_palace_dedicated_tree_reports(summary: Dictionary) -> void:
+	var god_name: String = String(summary.get("dedicated_god_name", "Chosen"))
+	var route_name: String = String(summary.get("route_name", "Palace Route"))
+	_add_notification("Divine Seat: Palace dedicated to " + god_name + ".")
+	_add_notification(route_name + ". " + String(summary.get("power_summary", "")))
+	var tree: Dictionary = {}
+	if summary.has("structure_tree_shell") and summary["structure_tree_shell"] is Dictionary:
+		tree = summary["structure_tree_shell"] as Dictionary
+	else:
+		var state: Node = _state()
+		if state != null and state.has_method("get_palace_structure_tree_shell"):
+			tree = state.call("get_palace_structure_tree_shell", String(summary.get("dedicated_god", ""))) as Dictionary
+	if tree.is_empty():
+		_add_notification("Tree shell not connected yet.")
+		return
+	_add_notification(String(tree.get("note", "Palace structure construction data.")))
+	var tiers: Array = tree.get("tiers", []) as Array
+	for tier_variant: Variant in tiers:
+		if not (tier_variant is Dictionary):
+			continue
+		var tier: Dictionary = tier_variant as Dictionary
+		_add_notification(String(tier.get("title", "Palace Tier")))
+		var structures: Array = tier.get("structures", []) as Array
+		for structure_variant: Variant in structures:
+			if not (structure_variant is Dictionary):
+				continue
+			var structure: Dictionary = structure_variant as Dictionary
+			_add_notification("• " + String(structure.get("name", "Structure")) + " — " + String(structure.get("summary", "Future palace structure.")))
+	_build_palace_not_chosen_routes(summary)
+
+func _build_palace_not_chosen_routes(summary: Dictionary) -> void:
+	var chosen_id: String = String(summary.get("dedicated_god", ""))
+	var routes: Array[Dictionary] = _palace_probe_routes()
+	var parts: Array[String] = []
+	for route: Dictionary in routes:
+		var route_id: String = String(route.get("id", route.get("god_id", "")))
+		if route_id == chosen_id:
+			continue
+		parts.append(String(route.get("god_name", route.get("name", route_id.capitalize()))) + " — not chosen")
+	if not parts.is_empty():
+		_add_notification("Other Divine Routes: " + "; ".join(parts) + ".")
+
+func _build_palace_authority_probe_reports() -> void:
+	var summary: Dictionary = _palace_probe_summary()
+	var route_id: String = String(summary.get("dedicated_god", ""))
+	if route_id == "":
+		_add_notification("No Palace Authority. Dedicate the palace on the Divine Seat tab to unlock a route-specific authority screen later.")
+		_add_notification("Tlaloc = natural calendar foresight. Huitzilopochtli = Flower Wars authority. Tezcatlipoca = scarcity/intrigue pressure. Quetzalcoatl = legitimacy and palace trust.")
+		return
+	_add_notification(String(summary.get("dedicated_god_name", "Chosen")) + " Authority. " + String(summary.get("power_summary", "")))
+	_add_notification("Authority mechanics are not active yet. Later patches will read built palace structures and show the route-specific power output here.")
+
+func _build_palace_ruler_demands_probe_reports() -> void:
+	_add_notification("Ruler Demands. This tab is reserved for palace-facing obligations and tribute expectations.")
+	_add_notification("Future structure: one Raw demand, one Processed demand, and one Luxury/Special demand. Delivery quality and reward rules are not implemented yet.")
+	_add_notification("No royal favour, local stability, prestige scoring, or ruler-demand mechanic has been added by this probe.")
+
+func _palace_probe_summary() -> Dictionary:
+	var state: Node = _state()
+	if state != null and state.has_method("get_palace_summary"):
+		return state.call("get_palace_summary") as Dictionary
+	return {"palace_level": 1, "dedicated": false, "dedicated_god": "", "dedicated_god_name": "None", "route_name": "No dedication", "power_summary": "Palace backend summary is not connected.", "authority_status": "Not connected.", "built_structure_count": 0}
+
+func _palace_probe_routes() -> Array[Dictionary]:
+	var output: Array[Dictionary] = []
+	var state: Node = _state()
+	if state != null and state.has_method("get_palace_dedication_routes"):
+		var raw_routes: Variant = state.call("get_palace_dedication_routes")
+		if raw_routes is Array:
+			var route_rows: Array = raw_routes as Array
+			for route_variant: Variant in route_rows:
+				if route_variant is Dictionary:
+					output.append(route_variant as Dictionary)
+	return output
 
 # -----------------------------------------------------------------------------
 # Market / Trade Basket patch
@@ -4946,6 +5669,39 @@ func _calendar_tooltip_for_veintena(veintena_number: int) -> String:
 func _on_calendar_card_pressed(report_id: String) -> void:
 	selected_estate_report_id = report_id
 	show_location("estate")
+
+func _build_estate_reports() -> void:
+	# Palace v0.20.2: safe Estate-screen display card only.
+	# This deliberately avoids adding a Palace navigation tab after the previous
+	# Palace shell broke the screen profile setup. It only proves the UI can read
+	# the palace backend data from the stable Estate report area.
+	super._build_estate_reports()
+	var focus_id: String = _current_focus_id()
+	if focus_id != "" and focus_id != "overview":
+		return
+	_add_palace_estate_probe_card()
+
+func _add_palace_estate_probe_card() -> void:
+	var state: Node = _state()
+	if state == null or not state.has_method("get_palace_summary"):
+		_add_notification("Palace: backend data is not connected yet.")
+		return
+	var summary: Dictionary = state.call("get_palace_summary") as Dictionary
+	var dedicated: bool = bool(summary.get("dedicated", false))
+	var dedication_name: String = String(summary.get("dedicated_god_name", "None"))
+	var route_name: String = String(summary.get("route_name", "No dedication"))
+	var power_summary: String = String(summary.get("power_summary", "No palace route has been chosen."))
+	var palace_level: int = int(summary.get("palace_level", 1))
+	var structure_count: int = int(summary.get("built_structure_count", 0))
+	var authority_status: String = String(summary.get("authority_status", "No active palace authority mechanics are implemented yet."))
+	var gate_status: String = String(summary.get("flower_war_gate_status", "Flower War palace gate not checked."))
+	var title: String = "Palace — Dedication: " + dedication_name
+	if not dedicated:
+		title = "Palace — Dedication: None"
+	_add_notification(title + ". Palace Level " + str(palace_level) + ". Built structures: " + str(structure_count) + ".")
+	_add_notification("Palace route: " + route_name + ". " + power_summary)
+	_add_notification("Palace status: " + authority_status + " Dedication and structure construction are handled on Palace → Divine Seat; maintenance and ruler demands are not active yet.")
+	_add_notification("Flower War authority check: " + gate_status)
 
 func _estate_report_title(report_id: String) -> String:
 	if report_id.begins_with("calendar|"):
