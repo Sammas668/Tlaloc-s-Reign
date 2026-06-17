@@ -1152,11 +1152,11 @@ func _show_palace_content() -> void:
 		"divine_seat":
 			_build_palace_divine_seat_main_view()
 		"authority":
-			_build_palace_placeholder_main_view("Palace Authority", "The chosen divine route will express its active power here once built palace structures gain authority effects.")
+			_build_palace_authority_main_view()
 		"ruler_demands":
 			_build_palace_placeholder_main_view("Ruler Demands", "Palace-facing tribute obligations and political demands will be shown here after the ruler-demand system is designed.")
 		_:
-			_build_palace_placeholder_main_view("Palace Overview", "The Palace is the political and divine centre of the house. Use Divine Seat to choose and later develop a palace route.")
+			_build_palace_overview_main_view()
 
 func _build_palace_placeholder_main_view(title_text: String, body_text: String) -> void:
 	var panel: PanelContainer = PanelContainer.new()
@@ -1181,6 +1181,414 @@ func _build_palace_placeholder_main_view(title_text: String, body_text: String) 
 	var body: RichTextLabel = _palace_wrapped_label(body_text, 20, Color(0.80, 0.82, 0.76, 1.0))
 	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	stack.add_child(body)
+
+
+func _build_palace_authority_main_view() -> void:
+	var summary: Dictionary = _palace_probe_summary()
+	var authority: Dictionary = {}
+	if summary.has("authority_summary") and summary["authority_summary"] is Dictionary:
+		authority = summary["authority_summary"] as Dictionary
+	else:
+		authority = {"dedicated": bool(summary.get("dedicated", false)), "god_id": String(summary.get("dedicated_god", "")), "god_name": String(summary.get("dedicated_god_name", "None")), "route_name": String(summary.get("route_name", "No dedication")), "headline": String(summary.get("authority_status", "Palace authority not connected.")), "body": String(summary.get("power_summary", "")), "active_structures": [], "inactive_structures": [], "next_locked_structures": [], "mechanics_note": "Authority summary backend not connected."}
+	var god_id: String = String(authority.get("god_id", summary.get("dedicated_god", "")))
+	var colour: Color = _palace_route_colour(god_id)
+	var outer: PanelContainer = PanelContainer.new()
+	outer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	outer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	outer.add_theme_stylebox_override("panel", _make_panel_style(Color(0.024, 0.022, 0.018, 0.94), colour.darkened(0.24), 18))
+	dynamic_view_host.add_child(outer)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 22)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_right", 22)
+	margin.add_theme_constant_override("margin_bottom", 18)
+	outer.add_child(margin)
+	var root: VBoxContainer = VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 12)
+	margin.add_child(root)
+	var title: Label = _palace_label("PALACE AUTHORITY", 33, Color(1.0, 0.86, 0.50, 1.0))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root.add_child(title)
+	root.add_child(_palace_wrapped_label(String(authority.get("headline", "Palace Authority")), 21, colour.lightened(0.24)))
+	root.add_child(_palace_wrapped_label(String(authority.get("body", "Dedicate and build palace structures to reveal this route's authority.")), 17, Color(0.82, 0.86, 0.78, 1.0)))
+	root.add_child(_palace_wrapped_label(String(authority.get("mechanics_note", "This screen reads active palace structures only.")), 14, Color(0.92, 0.74, 0.48, 1.0)))
+
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stack.add_theme_constant_override("separation", 12)
+	scroll.add_child(stack)
+
+	var active_rows: Array = authority.get("active_structures", []) as Array
+	var inactive_rows: Array = authority.get("inactive_structures", []) as Array
+	var locked_rows: Array = authority.get("next_locked_structures", []) as Array
+	if god_id == "tlaloc":
+		var forecast: Dictionary = {}
+		var state: Node = _state()
+		if state != null and state.has_method("get_tlaloc_natural_calendar_forecast"):
+			forecast = state.call("get_tlaloc_natural_calendar_forecast") as Dictionary
+		_add_tlaloc_forecast_panel(stack, forecast, colour)
+	elif god_id == "tezcatlipoca":
+		var pressure: Dictionary = {}
+		var tez_state: Node = _state()
+		if tez_state != null and tez_state.has_method("get_tezcatlipoca_pressure_overview"):
+			pressure = tez_state.call("get_tezcatlipoca_pressure_overview") as Dictionary
+		_add_tezcatlipoca_pressure_panel(stack, pressure, colour)
+	_add_palace_authority_section(stack, "Active Authority Structures", active_rows, colour, true)
+	_add_palace_authority_section(stack, "Inactive Built Structures", inactive_rows, Color(1.0, 0.58, 0.34, 1.0), false)
+	_add_palace_authority_locked_section(stack, locked_rows, colour)
+
+func _add_tlaloc_forecast_panel(parent: VBoxContainer, forecast: Dictionary, colour: Color) -> void:
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.018, 0.032, 0.038, 0.92), colour.lightened(0.08), 14))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 8)
+	margin.add_child(stack)
+	stack.add_child(_palace_label(String(forecast.get("headline", "Tlaloc Natural Calendar Foresight")), 22, colour.lightened(0.26)))
+	stack.add_child(_palace_wrapped_label(String(forecast.get("summary", "Build and maintain active Tlaloc palace structures to reveal upcoming natural pressure.")), 15, Color(0.82, 0.88, 0.80, 1.0)))
+	var active_structures: Array = forecast.get("active_structures", []) as Array
+	if not active_structures.is_empty():
+		stack.add_child(_palace_wrapped_label("Reading through: " + ", ".join(active_structures) + ".", 13, Color(0.70, 0.90, 0.86, 1.0)))
+	var events: Array = forecast.get("events", []) as Array
+	if events.is_empty():
+		stack.add_child(_palace_wrapped_label("No natural pressures are currently visible at this palace authority level.", 14, Color(0.72, 0.76, 0.70, 1.0)))
+	else:
+		for event_variant: Variant in events:
+			if event_variant is Dictionary:
+				_add_tlaloc_forecast_event_card(stack, event_variant as Dictionary, colour)
+	stack.add_child(_palace_wrapped_label(String(forecast.get("mechanics_note", "Forecast rows are information-only for now.")), 13, Color(0.94, 0.76, 0.48, 1.0)))
+
+func _add_tlaloc_forecast_event_card(parent: VBoxContainer, row: Dictionary, colour: Color) -> void:
+	var card: PanelContainer = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_stylebox_override("panel", _make_panel_style(Color(0.010, 0.020, 0.024, 0.86), colour.darkened(0.06), 9))
+	parent.add_child(card)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	card.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 4)
+	margin.add_child(stack)
+	stack.add_child(_palace_label(String(row.get("timing", "Soon")) + " — " + String(row.get("name", "Natural pressure")), 18, colour.lightened(0.22)))
+	stack.add_child(_palace_wrapped_label(String(row.get("category", "Natural pressure")) + ": " + String(row.get("summary", "The palace senses pressure in the natural calendar.")), 14, Color(0.82, 0.86, 0.78, 1.0)))
+	stack.add_child(_palace_wrapped_label("Severity: " + String(row.get("severity", "Hidden")) + " | Goods: " + String(row.get("affected_goods", "Hidden")) + " | Duration: " + String(row.get("duration", "Hidden")), 13, Color(0.72, 0.80, 0.74, 1.0)))
+	if int(row.get("detail_tier", 0)) >= 4:
+		stack.add_child(_palace_wrapped_label("Preparation: " + String(row.get("preparation", "No preparation advice revealed.")), 13, Color(0.86, 0.84, 0.62, 1.0)))
+
+
+func _add_tezcatlipoca_pressure_panel(parent: VBoxContainer, pressure: Dictionary, colour: Color) -> void:
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.030, 0.022, 0.034, 0.92), colour.lightened(0.08), 14))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 14)
+	margin.add_theme_constant_override("margin_top", 12)
+	margin.add_theme_constant_override("margin_right", 14)
+	margin.add_theme_constant_override("margin_bottom", 12)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 8)
+	margin.add_child(stack)
+	stack.add_child(_palace_label(String(pressure.get("headline", "Tezcatlipoca Scarcity Mirror")), 22, colour.lightened(0.26)))
+	stack.add_child(_palace_wrapped_label(String(pressure.get("summary", "Build and maintain active Tezcatlipoca palace structures to reveal scarcity and rival pressure hooks.")), 15, Color(0.84, 0.82, 0.88, 1.0)))
+	var active_structures: Array = pressure.get("active_structures", []) as Array
+	if not active_structures.is_empty():
+		stack.add_child(_palace_wrapped_label("Reading through: " + ", ".join(active_structures) + ".", 13, Color(0.86, 0.78, 0.96, 1.0)))
+	var market_rows: Array = pressure.get("market_pressure_rows", []) as Array
+	if market_rows.is_empty():
+		stack.add_child(_palace_wrapped_label("No market pressure is currently visible at this palace authority level.", 14, Color(0.74, 0.72, 0.76, 1.0)))
+	else:
+		stack.add_child(_palace_label("Market Pressure Readings", 18, Color(1.0, 0.84, 0.54, 1.0)))
+		for row_variant: Variant in market_rows:
+			if row_variant is Dictionary:
+				_add_tezcatlipoca_market_pressure_card(stack, row_variant as Dictionary, colour)
+	var rival_rows: Array = pressure.get("rival_pressure_rows", []) as Array
+	if not rival_rows.is_empty():
+		stack.add_child(_palace_label("Rival Pressure Hooks", 18, Color(1.0, 0.84, 0.54, 1.0)))
+		for row_variant: Variant in rival_rows:
+			if row_variant is Dictionary:
+				_add_tezcatlipoca_rival_pressure_card(stack, row_variant as Dictionary, colour)
+	stack.add_child(_palace_wrapped_label(String(pressure.get("mechanics_note", "Tezcatlipoca pressure rows are information-only for now.")), 13, Color(0.94, 0.76, 0.48, 1.0)))
+
+func _add_tezcatlipoca_market_pressure_card(parent: VBoxContainer, row: Dictionary, colour: Color) -> void:
+	var card: PanelContainer = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_stylebox_override("panel", _make_panel_style(Color(0.018, 0.014, 0.022, 0.88), colour.darkened(0.08), 9))
+	parent.add_child(card)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	card.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 4)
+	margin.add_child(stack)
+	stack.add_child(_palace_label(String(row.get("name", "Good")) + " — " + String(row.get("pressure", "Pressure")), 18, colour.lightened(0.24)))
+	stack.add_child(_palace_wrapped_label("Exposure: " + String(row.get("exposure", "Hidden")) + " | Coverage: " + String(row.get("coverage", "Hidden")) + " | Value: " + String(row.get("current_value", "Hidden")), 13, Color(0.78, 0.82, 0.76, 1.0)))
+	stack.add_child(_palace_wrapped_label(String(row.get("leverage", "Future market-pressure hook.")), 13, Color(0.86, 0.80, 0.62, 1.0)))
+
+func _add_tezcatlipoca_rival_pressure_card(parent: VBoxContainer, row: Dictionary, colour: Color) -> void:
+	var card: PanelContainer = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_stylebox_override("panel", _make_panel_style(Color(0.018, 0.014, 0.022, 0.84), colour.darkened(0.14), 9))
+	parent.add_child(card)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	card.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 4)
+	margin.add_child(stack)
+	stack.add_child(_palace_label(String(row.get("rival", "Rival")) + " — pressure point", 18, colour.lightened(0.22)))
+	stack.add_child(_palace_wrapped_label("Domain: " + String(row.get("domain", "Hidden")), 13, Color(0.78, 0.82, 0.76, 1.0)))
+	stack.add_child(_palace_wrapped_label(String(row.get("summary", "The mirror reveals an unclear rival weakness.")), 13, Color(0.82, 0.84, 0.78, 1.0)))
+	stack.add_child(_palace_wrapped_label(String(row.get("future_hook", "Future manipulation hook.")), 13, Color(0.86, 0.80, 0.62, 1.0)))
+
+func _add_palace_authority_section(parent: VBoxContainer, title_text: String, rows: Array, colour: Color, active_section: bool) -> void:
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.026, 0.028, 0.023, 0.90), colour.darkened(0.08), 12))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 6)
+	margin.add_child(stack)
+	stack.add_child(_palace_label(title_text, 21, Color(1.0, 0.84, 0.54, 1.0)))
+	if rows.is_empty():
+		var empty_text: String = "No active palace structures yet. Build structures, pay their maintenance and provide staff to activate authority."
+		if not active_section:
+			empty_text = "No built structures are currently inactive."
+		stack.add_child(_palace_wrapped_label(empty_text, 14, Color(0.70, 0.74, 0.68, 1.0)))
+		return
+	for row_variant: Variant in rows:
+		if not (row_variant is Dictionary):
+			continue
+		var row: Dictionary = row_variant as Dictionary
+		_add_palace_authority_structure_card(stack, row, colour, active_section)
+
+func _add_palace_authority_structure_card(parent: VBoxContainer, row: Dictionary, colour: Color, active_section: bool) -> void:
+	var card: PanelContainer = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var border: Color = colour
+	if not active_section:
+		border = Color(1.0, 0.58, 0.34, 0.72)
+	card.add_theme_stylebox_override("panel", _make_panel_style(Color(0.018, 0.020, 0.017, 0.86), border, 9))
+	parent.add_child(card)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	card.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 4)
+	margin.add_child(stack)
+	var status_text: String = "Active" if active_section else "Inactive"
+	stack.add_child(_palace_label(String(row.get("name", "Palace Structure")) + " — " + status_text, 18, border.lightened(0.20)))
+	stack.add_child(_palace_wrapped_label("Tier " + str(int(row.get("tier", 1))) + ". " + String(row.get("effect_summary", "Future authority hook.")), 14, Color(0.80, 0.84, 0.76, 1.0)))
+	if active_section:
+		stack.add_child(_palace_wrapped_label("Maintenance paid: " + _format_cost(row.get("maintenance_paid", {}) as Dictionary) + ". Staff assigned: " + _palace_format_staff_requirement(row.get("staff_assigned", {}) as Dictionary) + ".", 13, Color(0.70, 0.90, 0.66, 1.0)))
+	else:
+		stack.add_child(_palace_wrapped_label(String(row.get("inactive_reason", "Missing maintenance or staff.")), 13, Color(1.0, 0.72, 0.45, 1.0)))
+
+func _add_palace_authority_locked_section(parent: VBoxContainer, rows: Array, colour: Color) -> void:
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.020, 0.022, 0.020, 0.84), Color(0.45, 0.48, 0.38, 0.55), 10))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 9)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 9)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 5)
+	margin.add_child(stack)
+	stack.add_child(_palace_label("Future Authority Locked Behind Structures", 18, Color(1.0, 0.84, 0.54, 1.0)))
+	if rows.is_empty():
+		stack.add_child(_palace_wrapped_label("No further palace structure data is visible for this route.", 14, Color(0.70, 0.74, 0.68, 1.0)))
+		return
+	for row_variant: Variant in rows:
+		if not (row_variant is Dictionary):
+			continue
+		var row: Dictionary = row_variant as Dictionary
+		var line: String = String(row.get("name", "Structure")) + " — Tier " + str(int(row.get("tier", 1))) + ": " + String(row.get("effect_summary", "Future authority hook."))
+		stack.add_child(_palace_wrapped_label(line, 14, Color(0.72, 0.78, 0.70, 1.0)))
+		stack.add_child(_palace_wrapped_label("Status: " + String(row.get("build_status", "Locked.")), 13, Color(0.62, 0.68, 0.62, 1.0)))
+
+func _build_palace_overview_main_view() -> void:
+	var summary: Dictionary = _palace_probe_summary()
+	var god_id: String = String(summary.get("dedicated_god", ""))
+	var colour: Color = _palace_route_colour(god_id)
+	var outer: PanelContainer = PanelContainer.new()
+	outer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	outer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	outer.add_theme_stylebox_override("panel", _make_panel_style(Color(0.026, 0.024, 0.019, 0.94), Color(0.76, 0.60, 0.34, 0.68), 18))
+	dynamic_view_host.add_child(outer)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 22)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_right", 22)
+	margin.add_theme_constant_override("margin_bottom", 18)
+	outer.add_child(margin)
+	var root: VBoxContainer = VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 12)
+	margin.add_child(root)
+	var title: Label = _palace_label("PALACE OVERVIEW", 33, Color(1.0, 0.86, 0.50, 1.0))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root.add_child(title)
+	var dedication_text: String = "No dedication chosen"
+	if bool(summary.get("dedicated", false)):
+		dedication_text = String(summary.get("dedicated_god_name", "Chosen")) + " — " + String(summary.get("route_name", "Palace Route"))
+	root.add_child(_palace_wrapped_label(dedication_text + ". " + String(summary.get("power_summary", "Choose a Divine Seat to define the palace route.")), 18, Color(0.83, 0.86, 0.78, 1.0)))
+
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stack.add_theme_constant_override("separation", 12)
+	scroll.add_child(stack)
+
+	var status_row: HBoxContainer = HBoxContainer.new()
+	status_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_row.add_theme_constant_override("separation", 10)
+	stack.add_child(status_row)
+	_add_palace_summary_card(status_row, "Palace Level", str(int(summary.get("palace_level", 1))), "Highest built palace structure tier.", colour)
+	_add_palace_summary_card(status_row, "Structures", str(int(summary.get("built_structure_count", 0))) + " built", str(int(summary.get("active_structure_count", 0))) + " active; " + str(int(summary.get("inactive_structure_count", 0))) + " inactive.", colour)
+	_add_palace_summary_card(status_row, "Authority", str(int(summary.get("active_structure_count", 0))) + " active", "Authority tab now reads active palace structures; effects remain display-only.", colour)
+
+	_build_palace_staff_summary_panel(stack, summary, false)
+	_build_palace_maintenance_summary_panel(stack, summary)
+
+	var note_panel: PanelContainer = PanelContainer.new()
+	note_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	note_panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.020, 0.023, 0.020, 0.84), Color(0.45, 0.48, 0.38, 0.55), 10))
+	stack.add_child(note_panel)
+	var note_margin: MarginContainer = MarginContainer.new()
+	note_margin.add_theme_constant_override("margin_left", 12)
+	note_margin.add_theme_constant_override("margin_top", 9)
+	note_margin.add_theme_constant_override("margin_right", 12)
+	note_margin.add_theme_constant_override("margin_bottom", 9)
+	note_panel.add_child(note_margin)
+	note_margin.add_child(_palace_wrapped_label("Palace structures consume maintenance and reserve existing active staff when the Veintena resolves. The Authority tab now reads active structures; Huitzilopochtli gates attacking Flower Wars and Tlaloc has an information-only natural calendar forecast prototype. Ruler demands and other authority effects remain future patches.", 15, Color(0.74, 0.78, 0.70, 1.0)))
+
+func _add_palace_summary_card(parent: HBoxContainer, heading: String, value: String, detail: String, colour: Color) -> void:
+	var card: PanelContainer = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_stylebox_override("panel", _make_panel_style(Color(0.030, 0.032, 0.026, 0.90), colour.darkened(0.10), 11))
+	parent.add_child(card)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	card.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 4)
+	margin.add_child(stack)
+	stack.add_child(_palace_label(heading, 15, Color(0.72, 0.76, 0.70, 1.0)))
+	stack.add_child(_palace_label(value, 24, colour.lightened(0.24)))
+	stack.add_child(_palace_wrapped_label(detail, 13, Color(0.74, 0.78, 0.70, 1.0)))
+
+func _build_palace_staff_summary_panel(parent: VBoxContainer, summary: Dictionary, compact: bool = false) -> void:
+	var staff_summary: Dictionary = {}
+	if summary.has("staff_summary") and summary["staff_summary"] is Dictionary:
+		staff_summary = summary["staff_summary"] as Dictionary
+	var rows: Array = staff_summary.get("rows", []) as Array
+	var border_colour: Color = Color(0.72, 0.58, 0.36, 0.72)
+	if int(staff_summary.get("total_shortfall", 0)) > 0:
+		border_colour = Color(1.0, 0.52, 0.28, 0.88)
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.025, 0.026, 0.022, 0.90), border_colour, 12))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 6)
+	margin.add_child(stack)
+	stack.add_child(_palace_label("Palace Staff", 21 if not compact else 17, Color(1.0, 0.84, 0.54, 1.0)))
+	stack.add_child(_palace_wrapped_label(String(staff_summary.get("headline", "No palace staff required yet.")), 15, Color(0.82, 0.84, 0.76, 1.0)))
+	if rows.is_empty():
+		stack.add_child(_palace_wrapped_label("No built palace structure currently requires staff.", 14, Color(0.70, 0.74, 0.68, 1.0)))
+		return
+	for row_variant: Variant in rows:
+		if not (row_variant is Dictionary):
+			continue
+		var row: Dictionary = row_variant as Dictionary
+		var line_colour: Color = Color(0.76, 0.80, 0.72, 1.0)
+		if int(row.get("shortfall", 0)) > 0:
+			line_colour = Color(1.0, 0.70, 0.42, 1.0)
+		var line: String = String(row.get("name", "Staff")) + ": " + str(int(row.get("assigned_to_active_structures", 0))) + " assigned / " + str(int(row.get("required_by_built_structures", 0))) + " required; available " + str(int(row.get("available", 0))) + ". " + String(row.get("status", ""))
+		if int(row.get("shortfall", 0)) > 0:
+			line += " — short " + str(int(row.get("shortfall", 0)))
+		stack.add_child(_palace_wrapped_label(line, 14 if not compact else 13, line_colour))
+	if not compact:
+		stack.add_child(_palace_wrapped_label(String(staff_summary.get("note", "Uses existing active population groups.")), 13, Color(0.66, 0.70, 0.64, 1.0)))
+
+func _build_palace_maintenance_summary_panel(parent: VBoxContainer, summary: Dictionary) -> void:
+	var total_maintenance: Dictionary = summary.get("total_maintenance", {}) as Dictionary
+	var operation: Dictionary = summary.get("palace_operation_preview", {}) as Dictionary
+	var paid: Dictionary = operation.get("maintenance_paid", {}) as Dictionary
+	var shortfalls: Dictionary = operation.get("maintenance_shortfalls", {}) as Dictionary
+	var border_colour: Color = Color(0.64, 0.70, 0.52, 0.70)
+	if not shortfalls.is_empty():
+		border_colour = Color(1.0, 0.52, 0.28, 0.88)
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.024, 0.026, 0.022, 0.90), border_colour, 12))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 5)
+	margin.add_child(stack)
+	stack.add_child(_palace_label("Palace Maintenance", 21, Color(1.0, 0.84, 0.54, 1.0)))
+	stack.add_child(_palace_wrapped_label("Total built-structure upkeep: " + _format_cost(total_maintenance), 15, Color(0.82, 0.84, 0.76, 1.0)))
+	if paid.is_empty() and total_maintenance.is_empty():
+		stack.add_child(_palace_wrapped_label("No built palace structures require maintenance yet.", 14, Color(0.70, 0.74, 0.68, 1.0)))
+	else:
+		stack.add_child(_palace_wrapped_label("Preview paid this Veintena if resolved now: " + _format_cost(paid), 14, Color(0.70, 0.90, 0.66, 1.0)))
+	if not shortfalls.is_empty():
+		stack.add_child(_palace_wrapped_label("Maintenance shortfall: " + _format_cost(shortfalls), 14, Color(1.0, 0.70, 0.42, 1.0)))
 
 func _build_palace_divine_seat_main_view() -> void:
 	var summary: Dictionary = _palace_probe_summary()
@@ -1385,6 +1793,8 @@ func _build_palace_dedicated_main_tree(root: VBoxContainer, summary: Dictionary)
 	header_stack.add_child(title)
 	header_stack.add_child(_palace_wrapped_label(String(summary.get("route_name", "Palace Route")) + ". " + String(summary.get("power_summary", "")), 17, Color(0.84, 0.86, 0.78, 1.0)))
 
+	_build_palace_staff_summary_panel(root, summary, true)
+
 	var scroll: ScrollContainer = ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1475,6 +1885,12 @@ func _add_palace_structure_node_card(parent: VBoxContainer, structure: Dictionar
 	var built: bool = bool(structure.get("built", false))
 	if built:
 		var active: bool = bool(structure.get("active", false))
+		var paid_preview: Dictionary = structure.get("maintenance_paid_preview", {}) as Dictionary
+		var staff_preview: Dictionary = structure.get("staff_assigned_preview", {}) as Dictionary
+		if not paid_preview.is_empty():
+			stack.add_child(_palace_wrapped_label("Maintenance covered: " + _format_cost(paid_preview), 13, Color(0.70, 0.86, 0.68, 1.0)))
+		if not staff_preview.is_empty():
+			stack.add_child(_palace_wrapped_label("Staff assigned: " + _palace_format_staff_requirement(staff_preview), 13, Color(0.70, 0.86, 0.68, 1.0)))
 		if active:
 			stack.add_child(_palace_wrapped_label("Active. Maintenance and staff are currently covered; authority effects will be connected later.", 13, Color(0.62, 0.95, 0.70, 1.0)))
 		else:
@@ -1684,7 +2100,9 @@ func _build_palace_overview_probe_reports() -> void:
 	_add_notification("Route: " + String(summary.get("route_name", "No dedication")) + ". " + String(summary.get("power_summary", "No palace route has been chosen yet.")))
 	_add_notification("Authority status: " + String(summary.get("authority_status", "Palace authority mechanics are not active yet.")))
 	_add_notification("Structures: " + str(int(summary.get("built_structure_count", 0))) + " built; " + str(int(summary.get("active_structure_count", 0))) + " active; " + str(int(summary.get("inactive_structure_count", 0))) + " inactive.")
-	_add_notification("Palace upkeep now resolves on Veintena advance. Built structures need maintenance and existing staff to stay active; authority effects, ruler-demand mechanics and Flower War gate reconnection remain future patches.")
+	var staff_summary: Dictionary = summary.get("staff_summary", {}) as Dictionary
+	_add_notification(String(staff_summary.get("headline", "No palace staff required yet.")))
+	_add_notification("Palace upkeep and staff now resolve on Veintena advance. Huitzilopochtli dedication now gates attacking Flower Wars; other authority effects and ruler demands remain future patches.")
 
 func _build_palace_divine_seat_probe_reports() -> void:
 	var summary: Dictionary = _palace_probe_summary()
@@ -1778,13 +2196,23 @@ func _build_palace_not_chosen_routes(summary: Dictionary) -> void:
 
 func _build_palace_authority_probe_reports() -> void:
 	var summary: Dictionary = _palace_probe_summary()
+	var authority: Dictionary = {}
+	if summary.has("authority_summary") and summary["authority_summary"] is Dictionary:
+		authority = summary["authority_summary"] as Dictionary
 	var route_id: String = String(summary.get("dedicated_god", ""))
 	if route_id == "":
-		_add_notification("No Palace Authority. Dedicate the palace on the Divine Seat tab to unlock a route-specific authority screen later.")
+		_add_notification("No Palace Authority. Dedicate the palace on the Divine Seat tab to unlock a route-specific authority screen.")
 		_add_notification("Tlaloc = natural calendar foresight. Huitzilopochtli = Flower Wars authority. Tezcatlipoca = scarcity/intrigue pressure. Quetzalcoatl = legitimacy and palace trust.")
 		return
-	_add_notification(String(summary.get("dedicated_god_name", "Chosen")) + " Authority. " + String(summary.get("power_summary", "")))
-	_add_notification("Authority mechanics are not active yet. Later patches will read built palace structures and show the route-specific power output here.")
+	_add_notification(String(authority.get("headline", String(summary.get("dedicated_god_name", "Chosen")) + " Authority")))
+	_add_notification(String(authority.get("body", summary.get("power_summary", ""))))
+	if route_id == "tlaloc" and summary.has("tlaloc_forecast") and summary["tlaloc_forecast"] is Dictionary:
+		var forecast: Dictionary = summary["tlaloc_forecast"] as Dictionary
+		_add_notification("Tlaloc forecast: " + str(int(forecast.get("visible_event_count", 0))) + " visible natural pressures; range " + str(int(forecast.get("forecast_range_veintenas", 0))) + " Veintenas. Information-only prototype.")
+	if route_id == "tezcatlipoca" and summary.has("tezcatlipoca_pressure") and summary["tezcatlipoca_pressure"] is Dictionary:
+		var pressure: Dictionary = summary["tezcatlipoca_pressure"] as Dictionary
+		_add_notification("Tezcatlipoca pressure: " + str(int(pressure.get("visible_market_pressure_count", 0))) + " market readings; " + str(int(pressure.get("visible_rival_pressure_count", 0))) + " rival hooks. Information-only prototype.")
+	_add_notification("Structures: " + str(int(authority.get("active_structure_count", 0))) + " active; " + str(int(authority.get("inactive_structure_count", 0))) + " inactive. Implemented route effects currently are the Huitzilopochtli Flower War gate, Tlaloc forecast display, and Tezcatlipoca pressure display.")
 
 func _build_palace_ruler_demands_probe_reports() -> void:
 	_add_notification("Ruler Demands. This tab is reserved for palace-facing obligations and tribute expectations.")
@@ -3476,7 +3904,14 @@ func _build_skill_web_warband_stats_header(parent: VBoxContainer, web: Dictionar
 func _open_flower_war_attack_event(option_id: String = "standard", source_id: String = "player", context: Dictionary = {}) -> void:
 	var state: Node = _state()
 	if state != null and state.has_method("start_flower_war_attack_event"):
-		state.call("start_flower_war_attack_event", option_id, source_id, context)
+		var hook_result_variant: Variant = state.call("start_flower_war_attack_event", option_id, source_id, context)
+		if hook_result_variant is Dictionary:
+			var hook_result: Dictionary = hook_result_variant as Dictionary
+			if not bool(hook_result.get("ok", false)):
+				_last_skill_web_report.clear()
+				_last_skill_web_report.append(String(hook_result.get("reason", hook_result.get("message", "Flower War attack event is blocked."))))
+				_refresh_all()
+				return
 	_flower_war_event_option_id = option_id
 	_flower_war_event_provisioning_id = "standard"
 	_flower_war_event_report.clear()
@@ -4290,7 +4725,7 @@ func _build_barracks_weapons_panel(parent: VBoxContainer) -> void:
 
 func _build_barracks_flower_wars_panel(parent: VBoxContainer) -> void:
 	parent.add_child(_barracks_label("Flower Wars", 31, COLOR_TEXT))
-	parent.add_child(_barracks_wrapped_label("Flower Wars now open as full-screen ceremonial events. Choose a scale here, then muster warbands and provisions in the event screen.", 19, COLOR_MUTED))
+	parent.add_child(_barracks_wrapped_label("Attacking Flower Wars now use the Palace authority gate. A Huitzilopochtli Palace authorises the war route; defensive Flower Wars can still occur regardless of dedication.", 19, COLOR_MUTED))
 	parent.add_child(_barracks_wrapped_label(_barracks_palace_gate_text(), 18, _barracks_palace_gate_colour()))
 	var rows: Array[Dictionary] = _barracks_warband_rows()
 	if rows.is_empty():
@@ -4611,12 +5046,12 @@ func _barracks_palace_gate_text() -> String:
 	if state != null and state.has_method("get_player_palace_dedicated_god"):
 		dedicated = String(state.call("get_player_palace_dedicated_god"))
 	if not _barracks_flower_war_palace_gate_enabled():
-		return "Palace gate inactive: Flower Wars are currently open. Future implementation will require a Huitzilopochtli palace."
+		return "Palace gate inactive: attacking Flower Wars are open for testing."
 	if _barracks_has_war_god_palace():
-		return "War palace gate open: Palace dedicated to Huitzilopochtli."
+		return "Huitzilopochtli Palace authority active: attacking Flower Wars are authorised."
 	if dedicated == "":
-		return "Flower Wars locked: Requires Palace dedicated to Huitzilopochtli."
-	return "Flower Wars locked: current palace dedication is " + dedicated.capitalize() + "; requires Huitzilopochtli."
+		return "Attacking Flower Wars locked: dedicate the Palace to Huitzilopochtli. Defensive Flower Wars can still occur."
+	return "Attacking Flower Wars locked: current palace dedication is " + dedicated.capitalize() + "; Huitzilopochtli is required. Defensive Flower Wars can still occur."
 
 
 func _barracks_action_button(text_value: String, positive: bool) -> Button:
@@ -5700,7 +6135,7 @@ func _add_palace_estate_probe_card() -> void:
 		title = "Palace — Dedication: None"
 	_add_notification(title + ". Palace Level " + str(palace_level) + ". Built structures: " + str(structure_count) + ".")
 	_add_notification("Palace route: " + route_name + ". " + power_summary)
-	_add_notification("Palace status: " + authority_status + " Dedication and structure construction are handled on Palace → Divine Seat; maintenance and ruler demands are not active yet.")
+	_add_notification("Palace status: " + authority_status + " Dedication and structure construction are handled on Palace → Divine Seat; maintenance and staff clarity are active, while ruler demands are not active yet.")
 	_add_notification("Flower War authority check: " + gate_status)
 
 func _estate_report_title(report_id: String) -> String:

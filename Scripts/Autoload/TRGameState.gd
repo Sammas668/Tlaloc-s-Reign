@@ -44,10 +44,10 @@ var player_palace_dedicated_god: String = ""
 var palace_built_structures: Dictionary = {}
 var palace_structure_runtime_statuses: Dictionary = {}
 var last_palace_maintenance_report: Array[String] = []
-# Palace gating infrastructure is present, but disabled for now.
-# Later palace implementation can flip this to true so Flower Wars require
-# a Huitzilopochtli-dedicated palace without rewriting the war backend.
-var flower_war_palace_gate_enabled: bool = false
+# Palace gate is now reconnected: player-started attacking Flower Wars require
+# a Palace dedicated to Huitzilopochtli. Defensive Flower Wars can still happen
+# regardless of dedication because the player is responding to an attack.
+var flower_war_palace_gate_enabled: bool = true
 
 var population_upkeep_rates: Dictionary = {
 	"macehualtin": {"maize": 1.0, "cotton": 0.05, "cloth": 0.2, "tools": 0.1},
@@ -2498,21 +2498,21 @@ func set_flower_war_palace_gate_enabled(enabled: bool) -> Dictionary:
 	return {"ok": true, "enabled": enabled}
 
 func flower_war_palace_gate_passed() -> bool:
-	# Temporary MVP behaviour: the infrastructure exists, but the gate is disabled
-	# until the Palace screen/dedication system is implemented. When enabled, the
-	# existing Huitzilopochtli dedication check becomes active immediately.
+	# v0.27 reconnects the canonical palace gate. Attacking Flower Wars require
+	# the Palace to be dedicated to Huitzilopochtli. Defensive Flower Wars use their
+	# own resolver and do not call this gate.
 	if not is_flower_war_palace_gate_enabled():
 		return true
 	return has_war_god_palace()
 
 func flower_war_palace_gate_status_text() -> String:
 	if not is_flower_war_palace_gate_enabled():
-		return "Palace gate inactive: Flower Wars are currently open. Future implementation will require a Huitzilopochtli palace."
+		return "Palace gate inactive: attacking Flower Wars are open for testing."
 	if has_war_god_palace():
-		return "War palace gate open: Palace dedicated to Huitzilopochtli."
+		return "Huitzilopochtli Palace authority active: attacking Flower Wars are authorised."
 	if player_palace_dedicated_god == "":
-		return "Flower Wars locked: Requires Palace dedicated to Huitzilopochtli."
-	return "Flower Wars locked: current palace dedication is " + _god_display_name(player_palace_dedicated_god) + "; requires Huitzilopochtli."
+		return "Attacking Flower Wars locked: dedicate the Palace to Huitzilopochtli to authorise the war route. Defensive Flower Wars can still occur."
+	return "Attacking Flower Wars locked: current palace dedication is " + _god_display_name(player_palace_dedicated_god) + "; Huitzilopochtli is required. Defensive Flower Wars can still occur."
 
 func _god_display_name(god_id: String) -> String:
 	match god_id:
@@ -2555,7 +2555,7 @@ func get_palace_route_power_summary(god_id: String) -> String:
 		"tlaloc":
 			return "Deep calendar and natural-event foresight: higher palace levels will reveal droughts, floods, harvest pressure and other natural events earlier and in more detail."
 		"huitzilopochtli":
-			return "Flower Wars authority: dedicating the Palace to Huitzilopochtli will formally authorise attacking Flower Wars and the war route once the palace gate is reconnected."
+			return "Flower Wars authority: dedicating the Palace to Huitzilopochtli formally authorises attacking Flower Wars and the war route."
 		"tezcatlipoca":
 			return "Scarcity, intrigue and market pressure: future structures will support rival pressure, disruption, manipulation, sabotage hooks and market leverage."
 		"quetzalcoatl":
@@ -2671,7 +2671,7 @@ func _palace_structure_tree_tiers(god_id: String) -> Array[Dictionary]:
 		"huitzilopochtli":
 			return [
 				{"tier": 1, "title": "Level 1 — War Banner Court", "structures": [
-					_palace_structure_node("huitz_war_banner_court", god_id, 1, "War Banner Court", "A court for public war standards, muster rites and the formal authority of the war route.", {"wood": 20.0, "cloth": 5.0, "weapons": 1.0}, {"cacao": 0.5, "cloth": 0.5}, {"pipiltin": 1}, [], "Future home of formal Flower War authority."),
+					_palace_structure_node("huitz_war_banner_court", god_id, 1, "War Banner Court", "A court for public war standards, muster rites and the formal authority of the war route.", {"wood": 20.0, "cloth": 5.0, "weapons": 1.0}, {"cacao": 0.5, "cloth": 0.5}, {"pipiltin": 1}, [], "Supports formal Flower War authority under a Huitzilopochtli Palace."),
 					_palace_structure_node("huitz_captive_procession_steps", god_id, 1, "Captive Procession Steps", "Ceremonial steps for bringing captives, witnesses and war spoils into palace view.", {"wood": 18.0, "cloth": 4.0, "ritual_goods": 1.0}, {"cacao": 0.5, "ritual_goods": 0.25}, {"tlamacazqueh": 1, "pipiltin": 1}, [], "Future hook for captives, sacrifice and war-route visibility."),
 					_palace_structure_node("huitz_weapon_oath_hall", god_id, 1, "Weapon Oath Hall", "A hall where warriors and nobles bind weapons, discipline and palace service to the war god.", {"wood": 24.0, "cloth": 4.0, "weapons": 2.0}, {"cacao": 0.5, "weapons": 0.25}, {"pipiltin": 1}, [], "Future hook for military organisation and warrior preparation.")
 				]},
@@ -2928,11 +2928,88 @@ func _palace_built_structure_ids_in_tree_order(god_id: String) -> Array[String]:
 				output.append(structure_id)
 	return output
 
+func _palace_staff_group_order() -> Array[String]:
+	# Palace staffing uses existing population groups. This is display/support data only;
+	# it does not create new population types or a separate palace workforce.
+	return ["pipiltin", "tlamacazqueh", "tolteca", "tlacotin", "macehualtin", "yaotequihuaqueh", "malli"]
+
 func get_palace_staff_capacity() -> Dictionary:
 	var result: Dictionary = {}
-	for group_id: String in ["tlamacazqueh", "pipiltin", "tolteca"]:
+	for group_id: String in _palace_staff_group_order():
 		result[group_id] = _active_population_for_group(group_id)
 	return result
+
+func get_palace_staff_summary() -> Dictionary:
+	var capacity: Dictionary = get_palace_staff_capacity()
+	var required: Dictionary = get_palace_required_staff()
+	var operation: Dictionary = get_palace_structure_operation_preview()
+	var used: Dictionary = operation.get("staff_used", {}) as Dictionary
+	var shortfalls: Dictionary = operation.get("staff_shortfalls", {}) as Dictionary
+	var rows: Array[Dictionary] = []
+	var group_ids: Array[String] = _palace_staff_group_order()
+	for key_variant: Variant in required.keys():
+		var key_id: String = String(key_variant)
+		if not group_ids.has(key_id):
+			group_ids.append(key_id)
+	for key_variant: Variant in used.keys():
+		var key_id: String = String(key_variant)
+		if not group_ids.has(key_id):
+			group_ids.append(key_id)
+	for key_variant: Variant in shortfalls.keys():
+		var key_id: String = String(key_variant)
+		if not group_ids.has(key_id):
+			group_ids.append(key_id)
+	var total_required: int = 0
+	var total_used: int = 0
+	var total_shortfall: int = 0
+	for group_id: String in group_ids:
+		var available_count: int = int(capacity.get(group_id, 0))
+		var required_count: int = int(required.get(group_id, 0))
+		var used_count: int = int(used.get(group_id, 0))
+		var shortfall_count: int = int(shortfalls.get(group_id, 0))
+		if available_count <= 0 and required_count <= 0 and used_count <= 0 and shortfall_count <= 0:
+			continue
+		total_required += required_count
+		total_used += used_count
+		total_shortfall += shortfall_count
+		var status: String = "Idle"
+		if required_count <= 0:
+			status = "Not required"
+		elif shortfall_count > 0:
+			status = "Shortfall"
+		elif used_count >= required_count:
+			status = "Covered"
+		elif used_count > 0:
+			status = "Partly assigned"
+		else:
+			status = "Available"
+		rows.append({
+			"id": group_id,
+			"name": _labour_group_name(group_id),
+			"available": available_count,
+			"required_by_built_structures": required_count,
+			"assigned_to_active_structures": used_count,
+			"remaining_after_active_structures": max(0, available_count - used_count),
+			"shortfall": shortfall_count,
+			"status": status
+		})
+	var headline: String = "No palace staff required yet."
+	if total_required > 0:
+		headline = "Palace staff: " + str(total_used) + " assigned to active structures / " + str(total_required) + " required by built structures."
+		if total_shortfall > 0:
+			headline += " Shortfall: " + str(total_shortfall) + "."
+	return {
+		"rows": rows,
+		"capacity": capacity,
+		"required": required,
+		"used": used,
+		"shortfalls": shortfalls,
+		"total_required": total_required,
+		"total_used": total_used,
+		"total_shortfall": total_shortfall,
+		"headline": headline,
+		"note": "Palace structures use existing active population groups such as Pipiltin nobles, Tlamacazqueh priests, Tolteca specialists and labour groups where specified."
+	}
 
 func get_palace_structure_operation_preview() -> Dictionary:
 	return _resolve_palace_structure_operation(false)
@@ -3117,9 +3194,512 @@ func get_palace_dedication_routes() -> Array[Dictionary]:
 			"is_available_for_future_dedication": current_god == "",
 			"can_dedicate": bool(can_dedicate_palace_to_god(god_id).get("ok", false)),
 			"dedication_status": String(can_dedicate_palace_to_god(god_id).get("reason", "")),
-			"prototype_status": "Dedication UI active. Palace structures can be built and must be maintained/staffed to stay active; authority effects and Flower War gate reconnection are future patches."
+			"prototype_status": "Dedication UI active. Palace structures can be built and must be maintained/staffed to stay active. Huitzilopochtli Palace now authorises attacking Flower Wars; other authority effects remain future patches."
 		})
 	return rows
+
+
+func _palace_authority_route_headline(god_id: String, active_count: int) -> String:
+	if god_id == "":
+		return "No Palace Authority"
+	if active_count <= 0:
+		return _god_display_name(god_id) + " authority is dormant"
+	match god_id:
+		"tlaloc":
+			return "Tlaloc Authority — Natural Calendar Foresight"
+		"huitzilopochtli":
+			return "Huitzilopochtli Authority — Flower Wars"
+		"tezcatlipoca":
+			return "Tezcatlipoca Authority — Scarcity and Intrigue"
+		"quetzalcoatl":
+			return "Quetzalcoatl Authority — Legitimacy and Recognition"
+	return "Palace Authority"
+
+func _palace_authority_route_body(god_id: String, active_count: int) -> String:
+	if god_id == "":
+		return "Dedicate the palace on the Divine Seat tab to unlock a route-specific authority screen."
+	if active_count <= 0:
+		return "Build, maintain and staff palace structures before this route can express authority."
+	match god_id:
+		"tlaloc":
+			return "Active Tlaloc structures now reveal a controlled natural-calendar forecast prototype: rain, drought, flood, crop and field pressures appear earlier and in more detail as the palace grows."
+		"huitzilopochtli":
+			return "Huitzilopochtli dedication authorises attacking Flower Wars. Active Huitzilopochtli structures support future war-route authority and escalation."
+		"tezcatlipoca":
+			return "Active Tezcatlipoca structures reveal an information-only scarcity mirror: market pressure, shortage leverage and rival vulnerability hooks. Sabotage and manipulation actions are not implemented yet."
+		"quetzalcoatl":
+			return "Active Quetzalcoatl structures support future legitimacy, recognition, tribute credibility and palace trust. Ruler-demand mechanics are not implemented yet."
+	return "Active palace structures are ready, but their route authority has not been defined."
+
+func _palace_authority_structure_row(structure_id: String, status: Dictionary, god_id: String) -> Dictionary:
+	var structure: Dictionary = _palace_structure_by_id(structure_id, god_id)
+	if structure.is_empty():
+		return {}
+	return {
+		"id": structure_id,
+		"name": String(structure.get("name", structure_id)),
+		"tier": int(structure.get("tier", 1)),
+		"effect_summary": String(structure.get("effect_summary", structure.get("summary", "Future palace authority hook."))),
+		"active": bool(status.get("active", false)),
+		"inactive_reason": String(status.get("inactive_reason", "")),
+		"maintenance_paid": (status.get("maintenance_paid", {}) as Dictionary).duplicate(true),
+		"staff_assigned": (status.get("staff_assigned", {}) as Dictionary).duplicate(true)
+	}
+
+func _palace_next_locked_authority_rows(god_id: String, limit: int = 4) -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	if god_id == "":
+		return rows
+	var tiers: Array[Dictionary] = _palace_structure_tree_tiers(god_id)
+	for tier: Dictionary in tiers:
+		var structures: Array = tier.get("structures", []) as Array
+		for structure_variant: Variant in structures:
+			if not (structure_variant is Dictionary):
+				continue
+			var structure: Dictionary = structure_variant as Dictionary
+			var structure_id: String = String(structure.get("id", ""))
+			if structure_id == "" or _is_palace_structure_built(structure_id):
+				continue
+			var build_status: Dictionary = can_build_palace_structure(structure_id)
+			rows.append({
+				"id": structure_id,
+				"name": String(structure.get("name", structure_id)),
+				"tier": int(structure.get("tier", 1)),
+				"effect_summary": String(structure.get("effect_summary", structure.get("summary", "Future palace authority hook."))),
+				"can_build": bool(build_status.get("ok", false)),
+				"build_status": String(build_status.get("reason", ""))
+			})
+			if rows.size() >= limit:
+				return rows
+	return rows
+
+func get_palace_authority_summary() -> Dictionary:
+	var god_id: String = get_palace_dedicated_god()
+	var statuses: Dictionary = get_palace_structure_runtime_statuses()
+	var active_rows: Array[Dictionary] = []
+	var inactive_rows: Array[Dictionary] = []
+	var highest_active_tier: int = 0
+	if god_id != "":
+		var ordered_built: Array[String] = _palace_built_structure_ids_in_tree_order(god_id)
+		for structure_id: String in ordered_built:
+			var status: Dictionary = statuses.get(structure_id, {}) as Dictionary
+			var row: Dictionary = _palace_authority_structure_row(structure_id, status, god_id)
+			if row.is_empty():
+				continue
+			if bool(row.get("active", false)):
+				highest_active_tier = maxi(highest_active_tier, int(row.get("tier", 1)))
+				active_rows.append(row)
+			else:
+				inactive_rows.append(row)
+	var headline: String = _palace_authority_route_headline(god_id, active_rows.size())
+	var body: String = _palace_authority_route_body(god_id, active_rows.size())
+	return {
+		"dedicated": god_id != "",
+		"god_id": god_id,
+		"god_name": _god_display_name(god_id) if god_id != "" else "None",
+		"route_name": get_palace_route_name(god_id),
+		"headline": headline,
+		"body": body,
+		"active_structure_count": active_rows.size(),
+		"inactive_structure_count": inactive_rows.size(),
+		"highest_active_tier": highest_active_tier,
+		"active_structures": active_rows,
+		"inactive_structures": inactive_rows,
+		"next_locked_structures": _palace_next_locked_authority_rows(god_id, 4),
+		"mechanics_note": "This tab now reads active palace structures. It does not yet apply route authority effects to gameplay.",
+		"flower_war_gate_status": flower_war_palace_gate_status_text(),
+		"ruler_demand_status": "Ruler demand mechanics remain reserved for a later palace patch."
+	}
+
+func _tlaloc_controlled_natural_pressure_events() -> Array[Dictionary]:
+	# v0.28 uses a deterministic test calendar instead of a random natural-event
+	# system. These events do not apply gameplay effects yet; they exist so the
+	# Tlaloc Palace route can prove its information/forecasting identity safely.
+	return [
+		{
+			"id": "dry_wind_signs",
+			"target_veintena": 4,
+			"name": "Dry Wind Signs",
+			"category": "Drought pressure",
+			"summary": "Fields and canals show early dry-season stress.",
+			"severity": "Moderate",
+			"affected_goods": ["maize", "cacao"],
+			"duration": "2 Veintenas",
+			"preparation": "Protect maize stores, avoid over-selling food, and prepare rain rites or irrigation responses."
+		},
+		{
+			"id": "heavy_rain_risk",
+			"target_veintena": 7,
+			"name": "Heavy Rain Risk",
+			"category": "Flood / water pressure",
+			"summary": "Lake and canal signs suggest a heavy rain period.",
+			"severity": "Light to moderate",
+			"affected_goods": ["wood", "maize"],
+			"duration": "1 Veintena",
+			"preparation": "Protect wood stocks, watch canal-linked production, and prepare for temporary field disruption."
+		},
+		{
+			"id": "field_pest_pressure",
+			"target_veintena": 10,
+			"name": "Field Pest Pressure",
+			"category": "Crop / pest pressure",
+			"summary": "Field samples and omen records suggest pest pressure in the growing cycle.",
+			"severity": "Moderate",
+			"affected_goods": ["maize", "cotton"],
+			"duration": "2–3 Veintenas",
+			"preparation": "Build food buffer, avoid relying on one crop chain, and keep tools available for field response."
+		},
+		{
+			"id": "clear_sky_window",
+			"target_veintena": 13,
+			"name": "Clear Sky Window",
+			"category": "Favourable weather window",
+			"summary": "The sky-reading basin suggests a calmer period for hauling, drying and outdoor work.",
+			"severity": "Favourable",
+			"affected_goods": ["wood", "cotton", "cloth"],
+			"duration": "1–2 Veintenas",
+			"preparation": "Plan construction and transport-heavy production while weather pressure is low."
+		},
+		{
+			"id": "late_water_warning",
+			"target_veintena": 16,
+			"name": "Late Water Warning",
+			"category": "Rain / canal uncertainty",
+			"summary": "Late-year water signs are unstable and could disrupt estate timing.",
+			"severity": "Uncertain",
+			"affected_goods": ["maize", "tools"],
+			"duration": "Unknown",
+			"preparation": "Keep reserves flexible and avoid spending all tools before late-year obligations are known."
+		}
+	]
+
+func _veintena_distance_to(target_veintena: int) -> int:
+	var target: int = clampi(target_veintena, 1, 18)
+	var distance: int = target - current_veintena
+	if distance < 0:
+		distance += 18
+	return distance
+
+func _tlaloc_active_structure_tier() -> int:
+	if get_palace_dedicated_god() != GOD_TLALOC:
+		return 0
+	var highest: int = 0
+	var statuses: Dictionary = get_palace_structure_runtime_statuses()
+	for structure_id: String in _palace_built_structure_ids_in_tree_order(GOD_TLALOC):
+		var status: Dictionary = statuses.get(structure_id, {}) as Dictionary
+		if not bool(status.get("active", false)):
+			continue
+		var structure: Dictionary = _palace_structure_by_id(structure_id, GOD_TLALOC)
+		if structure.is_empty():
+			continue
+		highest = maxi(highest, int(structure.get("tier", 1)))
+	return highest
+
+func _tlaloc_active_structure_names() -> Array[String]:
+	var names: Array[String] = []
+	if get_palace_dedicated_god() != GOD_TLALOC:
+		return names
+	var statuses: Dictionary = get_palace_structure_runtime_statuses()
+	for structure_id: String in _palace_built_structure_ids_in_tree_order(GOD_TLALOC):
+		var status: Dictionary = statuses.get(structure_id, {}) as Dictionary
+		if not bool(status.get("active", false)):
+			continue
+		var structure: Dictionary = _palace_structure_by_id(structure_id, GOD_TLALOC)
+		if not structure.is_empty():
+			names.append(String(structure.get("name", structure_id)))
+	return names
+
+func _tlaloc_forecast_range_for_tier(tier: int) -> int:
+	match tier:
+		1:
+			return 3
+		2:
+			return 6
+		3:
+			return 10
+		4:
+			return 18
+	return 0
+
+func _tlaloc_forecast_detail_label(tier: int) -> String:
+	match tier:
+		1:
+			return "Basic near warning"
+		2:
+			return "Extended warning"
+		3:
+			return "Detailed forecast"
+		4:
+			return "Deep natural calendar"
+	return "Dormant"
+
+func _format_veintena_distance(distance: int) -> String:
+	if distance <= 0:
+		return "Current Veintena"
+	if distance == 1:
+		return "Next Veintena"
+	return "In " + str(distance) + " Veintenas"
+
+func _format_resource_id_list(resource_ids: Array) -> String:
+	var parts: Array[String] = []
+	for resource_variant: Variant in resource_ids:
+		parts.append(get_resource_name(String(resource_variant)))
+	if parts.is_empty():
+		return "Unknown"
+	return ", ".join(parts)
+
+func _tlaloc_forecast_row(event: Dictionary, detail_tier: int, distance: int) -> Dictionary:
+	var name: String = "Unclear natural pressure"
+	var category: String = "Natural pressure"
+	var severity: String = "Hidden"
+	var affected_goods: String = "Hidden"
+	var duration: String = "Hidden"
+	var preparation: String = "Build active Tlaloc structures to reveal preparation advice."
+	var summary_text: String = "The palace senses pressure in the natural calendar, but details are still unclear."
+	if detail_tier >= 1:
+		category = String(event.get("category", category))
+		summary_text = String(event.get("summary", summary_text))
+	if detail_tier >= 2:
+		name = String(event.get("name", name))
+	if detail_tier >= 3:
+		severity = String(event.get("severity", severity))
+		affected_goods = _format_resource_id_list(event.get("affected_goods", []) as Array)
+		duration = String(event.get("duration", duration))
+	if detail_tier >= 4:
+		preparation = String(event.get("preparation", preparation))
+	return {
+		"id": String(event.get("id", "natural_pressure")),
+		"name": name,
+		"category": category,
+		"timing": _format_veintena_distance(distance),
+		"turns_until": distance,
+		"target_veintena": int(event.get("target_veintena", 1)),
+		"summary": summary_text,
+		"severity": severity,
+		"affected_goods": affected_goods,
+		"duration": duration,
+		"preparation": preparation,
+		"detail_tier": detail_tier
+	}
+
+func get_tlaloc_natural_calendar_forecast() -> Dictionary:
+	var dedicated: bool = get_palace_dedicated_god() == GOD_TLALOC
+	var detail_tier: int = _tlaloc_active_structure_tier()
+	var forecast_range: int = _tlaloc_forecast_range_for_tier(detail_tier)
+	var rows: Array[Dictionary] = []
+	var hidden_count: int = 0
+	for event: Dictionary in _tlaloc_controlled_natural_pressure_events():
+		var distance: int = _veintena_distance_to(int(event.get("target_veintena", 1)))
+		if dedicated and detail_tier > 0 and distance <= forecast_range:
+			rows.append(_tlaloc_forecast_row(event, detail_tier, distance))
+		else:
+			hidden_count += 1
+	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return int(a.get("turns_until", 0)) < int(b.get("turns_until", 0))
+	)
+	var headline: String = "Tlaloc foresight unavailable"
+	var summary_text: String = "Dedicate the Palace to Tlaloc, then build and maintain active Tlaloc structures to reveal natural pressure before rivals can react."
+	if dedicated and detail_tier <= 0:
+		headline = "Tlaloc foresight dormant"
+		summary_text = "The palace is dedicated to Tlaloc, but no active Tlaloc palace structures are maintained and staffed this Veintena."
+	elif dedicated and detail_tier > 0:
+		headline = "Tlaloc Natural Calendar Foresight — " + _tlaloc_forecast_detail_label(detail_tier)
+		summary_text = "Active Tlaloc structures reveal natural pressures up to " + str(forecast_range) + " Veintenas ahead. This is a controlled prototype forecast; it does not apply event effects yet."
+	return {
+		"available": dedicated,
+		"active": dedicated and detail_tier > 0,
+		"detail_tier": detail_tier,
+		"detail_label": _tlaloc_forecast_detail_label(detail_tier),
+		"forecast_range_veintenas": forecast_range,
+		"current_veintena": current_veintena,
+		"headline": headline,
+		"summary": summary_text,
+		"active_structures": _tlaloc_active_structure_names(),
+		"events": rows,
+		"visible_event_count": rows.size(),
+		"hidden_event_count": hidden_count,
+		"mechanics_note": "Forecast rows are information only in v0.28. They do not yet alter production, markets, yields, disasters or rival behaviour."
+	}
+
+
+func _tezcatlipoca_active_structure_tier() -> int:
+	if get_palace_dedicated_god() != GOD_TEZCATLIPOCA:
+		return 0
+	var highest: int = 0
+	var statuses: Dictionary = get_palace_structure_runtime_statuses()
+	for structure_id: String in _palace_built_structure_ids_in_tree_order(GOD_TEZCATLIPOCA):
+		var status: Dictionary = statuses.get(structure_id, {}) as Dictionary
+		if not bool(status.get("active", false)):
+			continue
+		var structure: Dictionary = _palace_structure_by_id(structure_id, GOD_TEZCATLIPOCA)
+		if structure.is_empty():
+			continue
+		highest = maxi(highest, int(structure.get("tier", 1)))
+	return highest
+
+func _tezcatlipoca_active_structure_names() -> Array[String]:
+	var names: Array[String] = []
+	if get_palace_dedicated_god() != GOD_TEZCATLIPOCA:
+		return names
+	var statuses: Dictionary = get_palace_structure_runtime_statuses()
+	for structure_id: String in _palace_built_structure_ids_in_tree_order(GOD_TEZCATLIPOCA):
+		var status: Dictionary = statuses.get(structure_id, {}) as Dictionary
+		if not bool(status.get("active", false)):
+			continue
+		var structure: Dictionary = _palace_structure_by_id(structure_id, GOD_TEZCATLIPOCA)
+		if not structure.is_empty():
+			names.append(String(structure.get("name", structure_id)))
+	return names
+
+func _tezcatlipoca_pressure_detail_label(tier: int) -> String:
+	match tier:
+		1:
+			return "First pressure signs"
+		2:
+			return "Named shortages and rivals"
+		3:
+			return "Leverage reading"
+		4:
+			return "Deep mirror council"
+	return "Dormant"
+
+func _tezcatlipoca_market_pressure_limit(tier: int) -> int:
+	match tier:
+		1:
+			return 2
+		2:
+			return 4
+		3:
+			return 6
+		4:
+			return 8
+	return 0
+
+func _tezcatlipoca_pressure_score(good: Dictionary) -> float:
+	var score: float = 0.0
+	var label: String = String(good.get("label", ""))
+	var coverage: float = float(good.get("coverage", 0.0))
+	var current_value: float = float(good.get("current_value", good.get("projected_value", 0.0)))
+	var base_value: float = maxf(0.01, float(good.get("base_value", 1.0)))
+	match label:
+		"Crisis":
+			score += 100.0
+		"Shortage":
+			score += 70.0
+		"Tight":
+			score += 40.0
+		"Abundant":
+			score -= 20.0
+	if coverage > 0.0:
+		score += maxf(0.0, 3.0 - coverage) * 12.0
+	score += maxf(0.0, (current_value / base_value) - 1.0) * 25.0
+	return score
+
+func _tezcatlipoca_market_pressure_row(good: Dictionary, detail_tier: int) -> Dictionary:
+	var good_id: String = String(good.get("id", ""))
+	var good_name: String = String(good.get("name", get_resource_name(good_id)))
+	var label: String = String(good.get("label", "Unknown"))
+	var trend: String = String(good.get("trend", "Stable"))
+	var coverage_text: String = "Hidden"
+	var value_text: String = "Hidden"
+	var leverage_text: String = "Pressure exists, but the mirror has not revealed a usable hook."
+	var exposure_text: String = "Hidden"
+	if detail_tier >= 2:
+		coverage_text = _format_amount(float(good.get("coverage", 0.0)))
+		exposure_text = label + " / " + trend
+	if detail_tier >= 3:
+		value_text = _format_amount(float(good.get("current_value", good.get("projected_value", 0.0))))
+		leverage_text = "Future hook: watch this good for market pressure, rival procurement pressure or scarcity manipulation."
+	if detail_tier >= 4:
+		leverage_text = "Deep mirror hook: future Tezcatlipoca actions may pressure this good, exploit shortage, or turn rival demand against them."
+	return {
+		"id": good_id,
+		"name": good_name,
+		"pressure": label,
+		"trend": trend,
+		"coverage": coverage_text,
+		"current_value": value_text,
+		"exposure": exposure_text,
+		"leverage": leverage_text,
+		"score": _tezcatlipoca_pressure_score(good),
+		"detail_tier": detail_tier
+	}
+
+func _tezcatlipoca_rival_pressure_hooks(detail_tier: int) -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	if detail_tier <= 0:
+		return rows
+	var raw_hooks: Array[Dictionary] = [
+		{"id": "war_rival_martial_goods", "rival": "War Rival", "domain": "Obsidian, weapons, captives", "summary": "The War Rival is vulnerable to equipment bottlenecks and captive pressure.", "future_hook": "Future hook: expose or exploit martial-goods shortages before a Flower War."},
+		{"id": "cunning_rival_practical_bottlenecks", "rival": "Cunning Rival", "domain": "Tools, cloth, wood", "summary": "The Cunning Rival depends on practical bottlenecks and flexible building goods.", "future_hook": "Future hook: counter-pressure, misinformation or market leverage against practical goods."},
+		{"id": "diplomatic_rival_status_goods", "rival": "Diplomatic Rival", "domain": "Cacao, fine textiles, tribute goods", "summary": "The Diplomatic Rival is exposed through status goods and ruler-facing obligations.", "future_hook": "Future hook: palace embarrassment, tribute pressure or credibility disruption."}
+	]
+	var max_rows: int = 1
+	if detail_tier >= 2:
+		max_rows = 2
+	if detail_tier >= 3:
+		max_rows = 3
+	for index: int in range(mini(max_rows, raw_hooks.size())):
+		var hook: Dictionary = raw_hooks[index]
+		var row: Dictionary = {
+			"id": String(hook.get("id", "hook")),
+			"rival": String(hook.get("rival", "Rival")),
+			"domain": "Hidden",
+			"summary": "The mirror suggests a rival pressure point, but the details are not yet clear.",
+			"future_hook": "Build higher active Tezcatlipoca structures to reveal future manipulation hooks.",
+			"detail_tier": detail_tier
+		}
+		if detail_tier >= 2:
+			row["domain"] = String(hook.get("domain", "Pressure goods"))
+			row["summary"] = String(hook.get("summary", row["summary"]))
+		if detail_tier >= 3:
+			row["future_hook"] = String(hook.get("future_hook", row["future_hook"]))
+		rows.append(row)
+	return rows
+
+func get_tezcatlipoca_pressure_overview() -> Dictionary:
+	var dedicated: bool = get_palace_dedicated_god() == GOD_TEZCATLIPOCA
+	var detail_tier: int = _tezcatlipoca_active_structure_tier()
+	var market_rows: Array[Dictionary] = []
+	if dedicated and detail_tier > 0:
+		var goods: Array = estimate_market_resolution().get("goods", []) as Array
+		var pressure_goods: Array[Dictionary] = []
+		for good_variant: Variant in goods:
+			if not (good_variant is Dictionary):
+				continue
+			var good: Dictionary = good_variant as Dictionary
+			var label: String = String(good.get("label", ""))
+			var score: float = _tezcatlipoca_pressure_score(good)
+			if score > 0.0 or label == "Crisis" or label == "Shortage" or label == "Tight":
+				pressure_goods.append(good)
+		pressure_goods.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+			return _tezcatlipoca_pressure_score(a) > _tezcatlipoca_pressure_score(b)
+		)
+		var limit: int = _tezcatlipoca_market_pressure_limit(detail_tier)
+		for index: int in range(mini(limit, pressure_goods.size())):
+			market_rows.append(_tezcatlipoca_market_pressure_row(pressure_goods[index], detail_tier))
+	var headline: String = "Tezcatlipoca pressure unavailable"
+	var summary_text: String = "Dedicate the Palace to Tezcatlipoca, then build and maintain active Tezcatlipoca structures to read scarcity, rival pressure and hidden market leverage."
+	if dedicated and detail_tier <= 0:
+		headline = "Tezcatlipoca pressure dormant"
+		summary_text = "The palace is dedicated to Tezcatlipoca, but no active Tezcatlipoca palace structures are maintained and staffed this Veintena."
+	elif dedicated and detail_tier > 0:
+		headline = "Tezcatlipoca Scarcity Mirror — " + _tezcatlipoca_pressure_detail_label(detail_tier)
+		summary_text = "Active Tezcatlipoca structures reveal market pressure and rival vulnerability hooks. This is an information-only prototype; it does not manipulate goods, sabotage rivals or alter prices yet."
+	return {
+		"available": dedicated,
+		"active": dedicated and detail_tier > 0,
+		"detail_tier": detail_tier,
+		"detail_label": _tezcatlipoca_pressure_detail_label(detail_tier),
+		"headline": headline,
+		"summary": summary_text,
+		"active_structures": _tezcatlipoca_active_structure_names(),
+		"market_pressure_rows": market_rows,
+		"rival_pressure_rows": _tezcatlipoca_rival_pressure_hooks(detail_tier),
+		"visible_market_pressure_count": market_rows.size(),
+		"visible_rival_pressure_count": _tezcatlipoca_rival_pressure_hooks(detail_tier).size(),
+		"mechanics_note": "Tezcatlipoca pressure rows are information-only in v0.29. They do not yet change market stock, prices, rival behaviour, sabotage, prestige or diplomacy."
+	}
 
 func get_palace_summary() -> Dictionary:
 	var dedicated_god: String = get_palace_dedicated_god()
@@ -3130,7 +3710,7 @@ func get_palace_summary() -> Dictionary:
 		route_name = get_palace_route_name(dedicated_god)
 		god_name = _god_display_name(dedicated_god)
 	return {
-		"schema_version": "palace_maintenance_active_state_v0_24",
+		"schema_version": "palace_tezcatlipoca_pressure_v0_29",
 		"palace_level": get_palace_level(),
 		"dedicated": dedicated,
 		"dedicated_god": dedicated_god,
@@ -3148,14 +3728,18 @@ func get_palace_summary() -> Dictionary:
 		"total_maintenance": get_palace_total_maintenance(),
 		"required_staff": get_palace_required_staff(),
 		"staff_capacity": get_palace_staff_capacity(),
+		"staff_summary": get_palace_staff_summary(),
 		"palace_operation_preview": get_palace_structure_operation_preview(),
 		"last_palace_maintenance_report": last_palace_maintenance_report.duplicate(),
-		"authority_status": "No authority effects are implemented yet. Only active palace structures will count once authority systems are connected.",
+		"authority_summary": get_palace_authority_summary(),
+		"tlaloc_forecast": get_tlaloc_natural_calendar_forecast(),
+		"tezcatlipoca_pressure": get_tezcatlipoca_pressure_overview(),
+		"authority_status": String(get_palace_authority_summary().get("headline", "Palace authority not connected.")),
 		"ruler_demand_status": "Ruler demand UI/mechanics are reserved for a later palace patch.",
 		"flower_war_gate_enabled": is_flower_war_palace_gate_enabled(),
 		"flower_war_gate_passed": flower_war_palace_gate_passed(),
 		"flower_war_gate_status": flower_war_palace_gate_status_text(),
-		"implementation_note": "v0.24 pays palace maintenance on Veintena advance and marks built palace structures active or inactive based on upkeep and existing staff. Authority effects, ruler-demand mechanics and Flower War gate reconnection remain future patches."
+		"implementation_note": "v0.29 adds the Tezcatlipoca scarcity / intrigue / market-pressure authority prototype. Huitzilopochtli Flower War gate remains active; Tlaloc forecast remains information-only; Quetzalcoatl and ruler-demand mechanics remain future patches."
 	}
 
 func get_flower_war_options() -> Array[Dictionary]:
@@ -3182,6 +3766,17 @@ func start_flower_war_attack_event(option_id: String = "standard", source_id: St
 	# a standard payload that UI, rivals, calendar, palace or religion systems can
 	# use to open the attacking Flower War muster later.
 	_ensure_warband_state()
+	if not flower_war_palace_gate_passed():
+		return {
+			"ok": false,
+			"event_type": "flower_war_attack_muster",
+			"war_direction": "attack",
+			"source_id": source_id,
+			"context": context.duplicate(true),
+			"option_id": option_id,
+			"reason": flower_war_palace_gate_status_text(),
+			"message": flower_war_palace_gate_status_text()
+		}
 	if not FLOWER_WAR_OPTIONS.has(option_id):
 		option_id = "standard"
 	var selected_ids: Array[String] = []
