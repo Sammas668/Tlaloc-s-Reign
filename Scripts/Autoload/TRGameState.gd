@@ -16,6 +16,12 @@ const BUILDING_DATA_PATH: String = "res://Data/Prototype0/buildings.json"
 const START_STATE_PATH: String = "res://Data/Prototype0/start_state.json"
 const MARKET_ECONOMY_DATA_PATH: String = "res://Data/Prototype0/market_economy.json"
 
+const GOD_TLALOC: String = "tlaloc"
+const GOD_HUITZILOPOCHTLI: String = "huitzilopochtli"
+const GOD_TEZCATLIPOCA: String = "tezcatlipoca"
+const GOD_QUETZALCOATL: String = "quetzalcoatl"
+const PALACE_GOD_IDS: Array[String] = [GOD_TLALOC, GOD_HUITZILOPOCHTLI, GOD_TEZCATLIPOCA, GOD_QUETZALCOATL]
+
 var resources: Dictionary = {}
 var resource_order: Array[String] = []
 var buildings: Dictionary = {}
@@ -34,6 +40,11 @@ var market_economy: Dictionary = {}
 var current_veintena: int = 1
 var last_report: Array[String] = []
 var initialized: bool = false
+var player_palace_dedicated_god: String = ""
+# Palace gating infrastructure is present, but disabled for now.
+# Later palace implementation can flip this to true so Flower Wars require
+# a Huitzilopochtli-dedicated palace without rewriting the war backend.
+var flower_war_palace_gate_enabled: bool = false
 
 var population_upkeep_rates: Dictionary = {
 	"macehualtin": {"maize": 1.0, "cotton": 0.05, "cloth": 0.2, "tools": 0.1},
@@ -54,6 +65,9 @@ func new_game() -> void:
 	_load_building_definitions()
 	_load_market_economy_definitions()
 	_load_start_state()
+	_ensure_warband_state()
+	last_flower_war_report.clear()
+	flower_war_report_archive.clear()
 	initialized = true
 	last_report.clear()
 	last_report.append("New estate simulation started.")
@@ -1353,6 +1367,7 @@ func advance_veintena() -> void:
 	_pay_population_upkeep()
 	_pay_housing_maintenance()
 	_operate_buildings()
+	_recover_injured_warriors()
 	current_veintena += 1
 	if current_veintena > 18:
 		current_veintena = 1
@@ -2297,52 +2312,13 @@ func _format_amount(value: float) -> String:
 		return str(int(roundf(value)))
 	return str(snappedf(value, 0.01))
 
-
-
 # -----------------------------------------------------------------------------
-# Warbands v0.1 — backend read-only
-# -----------------------------------------------------------------------------
-
-var warbands: Dictionary = {}
-
-func _ensure_warband_state() -> void:
-	if not warbands.is_empty():
-		return
-	var ready_count: int = get_warrior_count()
-	warbands["household"] = {
-		"id": "household",
-		"name": "Household Warband",
-		"doctrine_id": "unspecialised",
-		"doctrine_name": "Unspecialised",
-		"ready_warriors": ready_count,
-		"injured_warriors": 0,
-		"dead_warriors": 0,
-		"xp": 1.0,
-		"level": 1,
-		"commander": "Unassigned",
-		"status": "Ready" if ready_count > 0 else "No ready warriors"
-	}
-
-func get_primary_warband() -> Dictionary:
-	_ensure_warband_state()
-	return (warbands.get("household", {}) as Dictionary).duplicate(true)
-
-func get_warband_rows() -> Array[Dictionary]:
-	_ensure_warband_state()
-	var rows: Array[Dictionary] = []
-	for key_variant: Variant in warbands.keys():
-		var warband_id: String = String(key_variant)
-		var row: Dictionary = (warbands[warband_id] as Dictionary).duplicate(true)
-		row["total_warriors"] = int(row.get("ready_warriors", 0)) + int(row.get("injured_warriors", 0))
-		row["available_for_flower_war"] = int(row.get("ready_warriors", 0))
-		rows.append(row)
-	return rows
-
-# -----------------------------------------------------------------------------
-# Barracks / Flower Wars v0.2 — backend launch only
+# Barracks / Flower Wars v0.15 — injured recovery + reinforcement clarity
 # -----------------------------------------------------------------------------
 
 var last_flower_war_report: Dictionary = {}
+var flower_war_report_archive: Array[Dictionary] = []
+var warbands: Dictionary = {}
 
 const FLOWER_WAR_DOCTRINES: Dictionary = {
 	"unspecialised": {"name": "Unspecialised", "offence": 1.0, "defence": 1.0, "role": "Balanced household warriors."},
@@ -2364,6 +2340,12 @@ const FLOWER_WAR_OPTIONS: Dictionary = {
 	"major": {"name": "Major Flower War", "warriors": 20, "enemy_warriors": 20, "enemy_xp": 1.0, "enemy_offence": 1.0, "enemy_defence": 1.0, "base_loot_value": 4.8}
 }
 
+const FLOWER_WAR_DEFENCE_STRATEGIES: Dictionary = {
+	"balanced": {"name": "Balanced Defence", "offence_multiplier": 1.0, "defence_multiplier": 1.0, "description": "A steady response with no bonus or penalty."},
+	"depth": {"name": "Defence in Depth", "offence_multiplier": 0.85, "defence_multiplier": 1.25, "description": "Protect the warbands and absorb the attack. More defence, less offence."},
+	"good_offence": {"name": "The Best Defence is a Good Offence", "offence_multiplier": 1.25, "defence_multiplier": 0.85, "description": "Counterattack hard. More offence, less defence."}
+}
+
 func get_warrior_count() -> int:
 	return int(population.get("yaotequihuaqueh", 0))
 
@@ -2378,10 +2360,166 @@ func get_barracks_summary() -> Dictionary:
 		"warriors": warriors,
 		"capacity": capacity,
 		"free_capacity": max(0, capacity - warriors),
+		"unassigned_warriors": _unassigned_warrior_pool(),
 		"status": "Ready" if warriors > 0 else "No warriors available",
+		"weapons": free_stock_after_reserves("weapons"),
+		"captives": int(estate_stockpiles.get("captives", 0.0)),
+		"palace_dedicated_god": get_player_palace_dedicated_god(),
+		"has_war_god_palace": has_war_god_palace(),
+		"flower_war_palace_gate_enabled": is_flower_war_palace_gate_enabled(),
+		"flower_war_palace_gate_passed": flower_war_palace_gate_passed(),
 		"doctrines": FLOWER_WAR_DOCTRINES.duplicate(true),
-		"provisioning": FLOWER_WAR_PROVISIONING.duplicate(true)
+		"provisioning": FLOWER_WAR_PROVISIONING.duplicate(true),
+		"defence_strategies": FLOWER_WAR_DEFENCE_STRATEGIES.duplicate(true),
+		"army_muster": get_army_muster_summary()
 	}
+
+func get_warband_combat_stats(warband_id: String) -> Dictionary:
+	_ensure_warband_state()
+	if not warbands.has(warband_id):
+		return {}
+	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+	warbands[warband_id] = warband
+	return _warband_combat_stats_from_warband(warband)
+
+func get_army_muster_summary() -> Dictionary:
+	_ensure_warband_state()
+	var rows: Array[Dictionary] = []
+	var total_ready: int = 0
+	var total_injured: int = 0
+	var total_dead: int = 0
+	var total_offence: float = 0.0
+	var total_defence: float = 0.0
+	var active_warbands: int = 0
+	for warband_id_variant: Variant in warbands.keys():
+		var warband_id: String = String(warband_id_variant)
+		var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+		warbands[warband_id] = warband
+		var stats: Dictionary = _warband_combat_stats_from_warband(warband)
+		rows.append(stats)
+		total_ready += int(stats.get("ready", 0))
+		total_injured += int(stats.get("injured", 0))
+		total_dead += int(stats.get("dead_total", 0))
+		total_offence += float(stats.get("effective_offence", 0.0))
+		total_defence += float(stats.get("effective_defence", 0.0))
+		if int(stats.get("ready", 0)) > 0:
+			active_warbands += 1
+	return {
+		"warbands": rows,
+		"warband_count": rows.size(),
+		"active_warband_count": active_warbands,
+		"ready_warriors": total_ready,
+		"injured_not_fighting": total_injured,
+		"dead_suffered": total_dead,
+		"effective_offence": snappedf(total_offence, 0.01),
+		"effective_defence": snappedf(total_defence, 0.01),
+		"skill_web_effects_connected": false,
+		"stats_note": "Combat stats use ready warriors and the doctrine chosen through the Skill Web specialism. Other node effects are not connected to Flower War resolution yet.",
+		"injury_note": "Injured warriors do not fight, cannot be unassigned, and recover on the next Veintena advance."
+	}
+
+func _warband_doctrine_data(doctrine_id: String) -> Dictionary:
+	var cleaned: String = doctrine_id
+	if not FLOWER_WAR_DOCTRINES.has(cleaned):
+		cleaned = "unspecialised"
+	var data: Dictionary = (FLOWER_WAR_DOCTRINES[cleaned] as Dictionary).duplicate(true)
+	data["id"] = cleaned
+	return data
+
+func _warband_combat_stats_from_warband(warband: Dictionary) -> Dictionary:
+	var doctrine_id: String = String(warband.get("doctrine", "unspecialised"))
+	var doctrine: Dictionary = _warband_doctrine_data(doctrine_id)
+	var ready: int = max(0, int(warband.get("ready_warriors", warband.get("ready", 0))))
+	var injured: int = max(0, int(warband.get("injured_warriors", warband.get("injured", 0))))
+	var dead_total: int = max(0, int(warband.get("dead_total", 0)))
+	var total_known: int = ready + injured
+	var offence_mod: float = float(doctrine.get("offence", 1.0))
+	var defence_mod: float = float(doctrine.get("defence", 1.0))
+	return {
+		"id": String(warband.get("id", "")),
+		"name": String(warband.get("name", "Warband")),
+		"doctrine_id": String(doctrine.get("id", "unspecialised")),
+		"doctrine_name": String(doctrine.get("name", "Unspecialised")),
+		"doctrine_role": String(doctrine.get("role", "")),
+		"ready": ready,
+		"injured": injured,
+		"dead_total": dead_total,
+		"total_present": total_known,
+		"offence_modifier": offence_mod,
+		"defence_modifier": defence_mod,
+		"effective_offence": snappedf(float(ready) * offence_mod, 0.01),
+		"effective_defence": snappedf(float(ready) * defence_mod, 0.01),
+		"skill_web_effects_connected": false,
+		"stats_note": "Doctrine preview. The Skill Web specialism sets combat doctrine; other node effects are recorded as prototype data but are not connected to Flower War resolution yet."
+	}
+
+
+func get_player_palace_dedicated_god() -> String:
+	return player_palace_dedicated_god
+
+func set_player_palace_dedicated_god(god_id: String) -> Dictionary:
+	var cleaned: String = god_id.strip_edges().to_lower()
+	if cleaned == "":
+		player_palace_dedicated_god = ""
+		if is_flower_war_palace_gate_enabled():
+			last_report.append("Palace dedication cleared. Flower Wars are locked until the palace is dedicated to Huitzilopochtli.")
+		else:
+			last_report.append("Palace dedication cleared. Flower Wars remain open because the palace gate is not active yet.")
+		emit_signal("state_changed")
+		return {"ok": true, "reason": "Palace dedication cleared."}
+	if not PALACE_GOD_IDS.has(cleaned):
+		return {"ok": false, "reason": "Unknown palace god: " + god_id + "."}
+	player_palace_dedicated_god = cleaned
+	last_report.append("Palace dedicated to " + _god_display_name(cleaned) + ".")
+	emit_signal("state_changed")
+	return {"ok": true, "reason": "Palace dedicated to " + _god_display_name(cleaned) + "."}
+
+func has_war_god_palace() -> bool:
+	# This reports the actual palace dedication state only. It does not bypass the
+	# rule when the temporary gate is disabled. Use flower_war_palace_gate_passed()
+	# for launch permission.
+	return player_palace_dedicated_god == GOD_HUITZILOPOCHTLI
+
+func is_flower_war_palace_gate_enabled() -> bool:
+	return flower_war_palace_gate_enabled
+
+func set_flower_war_palace_gate_enabled(enabled: bool) -> Dictionary:
+	flower_war_palace_gate_enabled = enabled
+	if enabled:
+		last_report.append("Flower War palace gate enabled. Flower Wars now require a Huitzilopochtli-dedicated palace.")
+	else:
+		last_report.append("Flower War palace gate disabled. Flower Wars are open until the Palace system is implemented.")
+	emit_signal("state_changed")
+	return {"ok": true, "enabled": enabled}
+
+func flower_war_palace_gate_passed() -> bool:
+	# Temporary MVP behaviour: the infrastructure exists, but the gate is disabled
+	# until the Palace screen/dedication system is implemented. When enabled, the
+	# existing Huitzilopochtli dedication check becomes active immediately.
+	if not is_flower_war_palace_gate_enabled():
+		return true
+	return has_war_god_palace()
+
+func flower_war_palace_gate_status_text() -> String:
+	if not is_flower_war_palace_gate_enabled():
+		return "Palace gate inactive: Flower Wars are currently open. Future implementation will require a Huitzilopochtli palace."
+	if has_war_god_palace():
+		return "War palace gate open: Palace dedicated to Huitzilopochtli."
+	if player_palace_dedicated_god == "":
+		return "Flower Wars locked: Requires Palace dedicated to Huitzilopochtli."
+	return "Flower Wars locked: current palace dedication is " + _god_display_name(player_palace_dedicated_god) + "; requires Huitzilopochtli."
+
+func _god_display_name(god_id: String) -> String:
+	match god_id:
+		"tlaloc":
+			return "Tlaloc"
+		"huitzilopochtli":
+			return "Huitzilopochtli"
+		"tezcatlipoca":
+			return "Tezcatlipoca"
+		"quetzalcoatl":
+			return "Quetzalcoatl"
+	return god_id.capitalize()
 
 func get_flower_war_options() -> Array[Dictionary]:
 	var rows: Array[Dictionary] = []
@@ -2392,6 +2530,80 @@ func get_flower_war_options() -> Array[Dictionary]:
 		row["can_launch_standard"] = get_warrior_count() >= int(row.get("warriors", 0))
 		rows.append(row)
 	return rows
+
+func get_flower_war_defence_strategies() -> Array[Dictionary]:
+	var rows: Array[Dictionary] = []
+	for strategy_id: String in ["balanced", "depth", "good_offence"]:
+		var data: Dictionary = FLOWER_WAR_DEFENCE_STRATEGIES[strategy_id] as Dictionary
+		var row: Dictionary = data.duplicate(true)
+		row["id"] = strategy_id
+		rows.append(row)
+	return rows
+
+func start_flower_war_attack_event(option_id: String = "standard", source_id: String = "player", context: Dictionary = {}) -> Dictionary:
+	# Event-hook infrastructure only. This does not resolve a Flower War. It returns
+	# a standard payload that UI, rivals, calendar, palace or religion systems can
+	# use to open the attacking Flower War muster later.
+	_ensure_warband_state()
+	if not FLOWER_WAR_OPTIONS.has(option_id):
+		option_id = "standard"
+	var selected_ids: Array[String] = []
+	for warband_id_variant: Variant in warbands.keys():
+		var warband_id: String = String(warband_id_variant)
+		var row: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+		warbands[warband_id] = row
+		if int(row.get("ready_warriors", 0)) > 0:
+			selected_ids.append(warband_id)
+	var preview: Dictionary = get_flower_war_preview_with_selected_warbands(selected_ids, option_id, "standard")
+	return {
+		"ok": true,
+		"event_type": "flower_war_attack_muster",
+		"war_direction": "attack",
+		"source_id": source_id,
+		"context": context.duplicate(true),
+		"option_id": option_id,
+		"default_provisioning_id": "standard",
+		"default_selected_warbands": selected_ids,
+		"preview": preview,
+		"message": "Flower War attack event ready. Open the full-screen muster to choose warbands and provisions."
+	}
+
+func start_flower_war_defence_event(option_id: String = "standard", source_id: String = "rival", context: Dictionary = {}) -> Dictionary:
+	# Event-hook infrastructure only. This does not resolve a Flower War. It returns
+	# a standard payload that UI, rivals, calendar, palace or religion systems can
+	# use to open the defensive Flower War strategy event later.
+	_ensure_warband_state()
+	if not FLOWER_WAR_OPTIONS.has(option_id):
+		option_id = "standard"
+	var preview: Dictionary = get_flower_war_defence_preview(option_id, "balanced")
+	return {
+		"ok": true,
+		"event_type": "flower_war_defence",
+		"war_direction": "defence",
+		"source_id": source_id,
+		"context": context.duplicate(true),
+		"option_id": option_id,
+		"default_strategy_id": "balanced",
+		"preview": preview,
+		"message": "Flower War defence event ready. Open the full-screen defence event to choose a strategy."
+	}
+
+func get_flower_war_event_hook_summary() -> Dictionary:
+	return {
+		"ok": true,
+		"attack_hook": "start_flower_war_attack_event(option_id, source_id, context)",
+		"defence_hook": "start_flower_war_defence_event(option_id, source_id, context)",
+		"possible_sources": ["player", "rival", "calendar", "palace", "religion"],
+		"note": "Hooks prepare event payloads only; they do not add rival AI or new combat rules."
+	}
+
+func _flower_war_defence_strategy_data(strategy_id: String) -> Dictionary:
+	var cleaned: String = strategy_id
+	if not FLOWER_WAR_DEFENCE_STRATEGIES.has(cleaned):
+		cleaned = "balanced"
+	var data: Dictionary = (FLOWER_WAR_DEFENCE_STRATEGIES[cleaned] as Dictionary).duplicate(true)
+	data["id"] = cleaned
+	return data
 
 func get_flower_war_preview(option_id: String = "minor", doctrine_id: String = "unspecialised", provisioning_id: String = "standard") -> Dictionary:
 	if not FLOWER_WAR_OPTIONS.has(option_id):
@@ -2417,6 +2629,7 @@ func get_flower_war_preview(option_id: String = "minor", doctrine_id: String = "
 	var result: String = _flower_war_result_label(net_damage, warriors_committed, enemy_warriors)
 	var captives: int = _flower_war_captives(result, defender_casualties, warriors_committed, doctrine_id)
 	var loot: Dictionary = _flower_war_loot(result, defender_casualties, doctrine_id, float(option.get("base_loot_value", 1.2)))
+	var loot_value: float = _flower_war_loot_display_value(loot)
 	var provisioning_cost: Dictionary = _flower_war_provisioning_cost(warriors_committed, float(provisioning.get("supply_multiplier", 1.0)))
 	return {
 		"ok": true,
@@ -2427,55 +2640,920 @@ func get_flower_war_preview(option_id: String = "minor", doctrine_id: String = "
 		"provisioning_id": provisioning_id,
 		"provisioning_name": String(provisioning.get("name", provisioning_id.capitalize())),
 		"warriors_committed": warriors_committed,
+		"committed_warriors": warriors_committed,
+		"injured_not_fighting": int(get_army_muster_summary().get("injured_not_fighting", 0)),
 		"enemy_warriors": enemy_warriors,
 		"attacker_attack": attacker_attack,
 		"attacker_defence": attacker_defence,
 		"defender_casualties": defender_casualties,
 		"attacker_casualties": attacker_casualties,
+		"attacker_losses": attacker_casualties,
 		"attacker_injured": int(ceil(float(attacker_casualties) * 0.6)),
 		"attacker_dead": int(floor(float(attacker_casualties) * 0.4)),
 		"result": result,
 		"captives": captives,
 		"loot": loot,
+		"loot_value": loot_value,
 		"provisioning_cost": provisioning_cost,
 		"prestige_pending": true,
 		"prestige_text": "Prestige pending calibration."
 	}
 
 func can_launch_flower_war(option_id: String = "minor", doctrine_id: String = "unspecialised", provisioning_id: String = "standard") -> Dictionary:
-	var preview: Dictionary = get_flower_war_preview(option_id, doctrine_id, provisioning_id)
-	if not bool(preview.get("ok", false)):
-		return preview
-	var needed_warriors: int = int(preview.get("warriors_committed", 0))
-	if get_warrior_count() < needed_warriors:
-		return {"ok": false, "reason": "Need " + str(needed_warriors) + " warriors."}
-	return _can_pay_free_stock(preview.get("provisioning_cost", {}) as Dictionary)
+	# Backwards-compatible wrapper. The old generic launch path now sends all
+	# ready warbands, so it cannot bypass warband casualties, XP or the
+	# Temporary palace gate infrastructure is currently disabled. doctrine_id is ignored because each warband
+	# carries its own doctrine once traits/specialisation are connected.
+	return can_launch_flower_war_with_all_warbands(option_id, provisioning_id)
 
 func launch_flower_war(option_id: String = "minor", doctrine_id: String = "unspecialised", provisioning_id: String = "standard") -> Dictionary:
-	var status: Dictionary = can_launch_flower_war(option_id, doctrine_id, provisioning_id)
+	# Backwards-compatible wrapper. All current Flower War launches commit every
+	# ready warband together. doctrine_id is ignored for the all-warband launch.
+	return launch_flower_war_with_all_warbands(option_id, provisioning_id)
+
+func get_last_flower_war_report() -> Dictionary:
+	return last_flower_war_report.duplicate(true)
+
+func get_flower_war_report_archive(limit_count: int = 12) -> Array[Dictionary]:
+	var output: Array[Dictionary] = []
+	var copied: Array[Dictionary] = []
+	for report_variant: Variant in flower_war_report_archive:
+		if report_variant is Dictionary:
+			copied.append((report_variant as Dictionary).duplicate(true))
+	copied.reverse()
+	var limit_value: int = max(0, limit_count)
+	for report: Dictionary in copied:
+		if limit_value > 0 and output.size() >= limit_value:
+			break
+		output.append(report)
+	return output
+
+func _archive_flower_war_report(report: Dictionary) -> void:
+	if report.is_empty() or not bool(report.get("ok", false)):
+		return
+	var stored: Dictionary = report.duplicate(true)
+	stored["archive_index"] = flower_war_report_archive.size() + 1
+	stored["archive_veintena"] = current_veintena
+	stored["archive_title"] = _flower_war_archive_title(stored)
+	flower_war_report_archive.append(stored)
+	while flower_war_report_archive.size() > 20:
+		flower_war_report_archive.pop_front()
+
+func _flower_war_archive_title(report: Dictionary) -> String:
+	var direction: String = String(report.get("war_direction", "attack"))
+	var option_name: String = String(report.get("option_name", "Flower War"))
+	var result: String = String(report.get("result", "Unknown"))
+	if direction == "defence":
+		return "Defence — " + option_name + " — " + result
+	return "Muster — " + option_name + " — " + result
+
+func get_flower_war_preview_with_all_warbands(option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
+	_ensure_warband_state()
+	if not FLOWER_WAR_OPTIONS.has(option_id):
+		return {"ok": false, "reason": "Unknown Flower War option."}
+	if not FLOWER_WAR_PROVISIONING.has(provisioning_id):
+		provisioning_id = "standard"
+	var option: Dictionary = FLOWER_WAR_OPTIONS[option_id] as Dictionary
+	var provisioning: Dictionary = FLOWER_WAR_PROVISIONING[provisioning_id] as Dictionary
+	var participants: Array[Dictionary] = []
+	var warriors_committed: int = 0
+	var weighted_offence: float = 0.0
+	var weighted_defence: float = 0.0
+	var eagle_warriors: int = 0
+	var coyote_warriors: int = 0
+
+	for warband_id_variant: Variant in warbands.keys():
+		var warband_id: String = String(warband_id_variant)
+		var warband: Dictionary = warbands[warband_id] as Dictionary
+		var ready: int = max(0, int(warband.get("ready_warriors", 0)))
+		if ready <= 0:
+			continue
+		var doctrine_id: String = String(warband.get("doctrine", "unspecialised"))
+		if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
+			doctrine_id = "unspecialised"
+		var synced: Dictionary = _sync_warband_progress(warband.duplicate(true))
+		var stats: Dictionary = _warband_combat_stats_from_warband(synced)
+		participants.append({
+			"id": warband_id,
+			"name": String(stats.get("name", "Warband")),
+			"committed": ready,
+			"ready": ready,
+			"injured": int(stats.get("injured", 0)),
+			"level": int(synced.get("level", 1)),
+			"doctrine_id": doctrine_id,
+			"doctrine_name": String(stats.get("doctrine_name", doctrine_id.capitalize())),
+			"offence": float(stats.get("offence_modifier", 1.0)),
+			"defence": float(stats.get("defence_modifier", 1.0)),
+			"effective_offence": float(stats.get("effective_offence", 0.0)),
+			"effective_defence": float(stats.get("effective_defence", 0.0)),
+			"combat_stats": stats
+		})
+		warriors_committed += ready
+		weighted_offence += float(stats.get("effective_offence", 0.0))
+		weighted_defence += float(stats.get("effective_defence", 0.0))
+		if doctrine_id == "eagle":
+			eagle_warriors += ready
+		elif doctrine_id == "coyote":
+			coyote_warriors += ready
+
+	if warriors_committed <= 0:
+		return {"ok": false, "reason": "No ready warriors are assigned to warbands."}
+
+	var enemy_warriors: int = int(option.get("enemy_warriors", option.get("warriors", warriors_committed)))
+	var minimum_warriors: int = int(option.get("warriors", enemy_warriors))
+	var combat_multiplier: float = float(provisioning.get("combat_multiplier", 1.0))
+	var attacker_attack: float = weighted_offence * combat_multiplier
+	var defender_defence: float = float(enemy_warriors) * float(option.get("enemy_defence", 1.0))
+	var defender_casualties: int = clampi(int(round(maxf(0.0, attacker_attack - defender_defence * 0.55))), 0, enemy_warriors)
+	var surviving_defenders: int = max(0, enemy_warriors - defender_casualties)
+	var defender_attack: float = float(surviving_defenders) * float(option.get("enemy_offence", 1.0))
+	var attacker_defence: float = weighted_defence
+	var attacker_casualties: int = clampi(int(round(maxf(0.0, defender_attack - attacker_defence * 0.55))), 0, warriors_committed)
+	var net_damage: int = defender_casualties - attacker_casualties
+	var result: String = _flower_war_result_label(net_damage, warriors_committed, enemy_warriors)
+	var captives: int = _flower_war_captives_for_all_warbands(result, defender_casualties, warriors_committed, eagle_warriors)
+	var loot: Dictionary = _flower_war_loot_for_all_warbands(result, defender_casualties, coyote_warriors, warriors_committed, float(option.get("base_loot_value", 1.2)))
+	var loot_value: float = _flower_war_loot_display_value(loot)
+	var provisioning_cost: Dictionary = _flower_war_provisioning_cost(warriors_committed, float(provisioning.get("supply_multiplier", 1.0)))
+	var xp_gained: int = _flower_war_xp_gain(result, warriors_committed, defender_casualties, captives)
+
+	return {
+		"ok": true,
+		"all_warbands": true,
+		"warband_id": "all_warbands",
+		"warband_name": "All Warbands",
+		"option_id": option_id,
+		"option_name": String(option.get("name", option_id.capitalize())),
+		"option_minimum_warriors": minimum_warriors,
+		"doctrine_id": "combined",
+		"doctrine_name": "Combined Warbands",
+		"provisioning_id": provisioning_id,
+		"provisioning_name": String(provisioning.get("name", provisioning_id.capitalize())),
+		"participants": participants,
+		"participating_warband_count": participants.size(),
+		"warriors_committed": warriors_committed,
+		"committed_warriors": warriors_committed,
+		"injured_not_fighting": int(get_army_muster_summary().get("injured_not_fighting", 0)),
+		"enemy_warriors": enemy_warriors,
+		"attacker_attack": attacker_attack,
+		"attacker_defence": attacker_defence,
+		"defender_casualties": defender_casualties,
+		"attacker_casualties": attacker_casualties,
+		"attacker_losses": attacker_casualties,
+		"attacker_injured": int(ceil(float(attacker_casualties) * 0.6)),
+		"attacker_dead": int(floor(float(attacker_casualties) * 0.4)),
+		"result": result,
+		"captives": captives,
+		"loot": loot,
+		"loot_value": loot_value,
+		"provisioning_cost": provisioning_cost,
+		"xp_gained": xp_gained,
+		"eagle_warriors": eagle_warriors,
+		"coyote_warriors": coyote_warriors,
+		"prestige_pending": true,
+		"prestige_text": "Prestige pending calibration."
+	}
+
+func can_launch_flower_war_with_all_warbands(option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
+	_ensure_warband_state()
+	if not flower_war_palace_gate_passed():
+		return {"ok": false, "reason": flower_war_palace_gate_status_text()}
+	var preview: Dictionary = get_flower_war_preview_with_all_warbands(option_id, provisioning_id)
+	if not bool(preview.get("ok", false)):
+		return preview
+	var committed: int = int(preview.get("warriors_committed", 0))
+	var minimum_warriors: int = int(preview.get("option_minimum_warriors", 0))
+	if committed < minimum_warriors:
+		return {"ok": false, "reason": "This scale needs at least " + str(minimum_warriors) + " ready warriors across all warbands; only " + str(committed) + " ready."}
+	var cost_status: Dictionary = _can_pay_free_stock(preview.get("provisioning_cost", {}) as Dictionary)
+	if not bool(cost_status.get("ok", false)):
+		return cost_status
+	return {"ok": true, "reason": "Ready. All ready warbands will be committed.", "preview": preview}
+
+func launch_flower_war_with_all_warbands(option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
+	var status: Dictionary = can_launch_flower_war_with_all_warbands(option_id, provisioning_id)
 	if not bool(status.get("ok", false)):
-		last_flower_war_report = {"ok": false, "reason": String(status.get("reason", "Flower War cannot launch."))}
+		last_flower_war_report = {"ok": false, "reason": String(status.get("reason", "Flower War cannot launch.")), "warband_id": "all_warbands", "all_warbands": true}
 		last_report.append("Flower War not launched: " + String(last_flower_war_report.get("reason", "blocked")) + ".")
 		emit_signal("state_changed")
 		return last_flower_war_report.duplicate(true)
-	var preview: Dictionary = get_flower_war_preview(option_id, doctrine_id, provisioning_id)
+
+	var preview: Dictionary = status.get("preview", {}) as Dictionary
+	if preview.is_empty():
+		preview = get_flower_war_preview_with_all_warbands(option_id, provisioning_id)
 	_pay_free_stock(preview.get("provisioning_cost", {}) as Dictionary)
+
+	var participants: Array = preview.get("participants", []) as Array
 	var committed: int = int(preview.get("warriors_committed", 0))
-	var dead: int = int(preview.get("attacker_dead", 0))
-	population["yaotequihuaqueh"] = max(0, get_warrior_count() - dead)
+	var casualties: int = int(preview.get("attacker_casualties", 0))
 	var captives: int = int(preview.get("captives", 0))
+	var xp_total: int = int(preview.get("xp_gained", 0))
+	var casualty_alloc: Dictionary = _distribute_integer_by_weights(casualties, participants, "committed", true)
+	var xp_alloc: Dictionary = _distribute_integer_by_weights(xp_total, participants, "committed", false)
+	var total_injured: int = 0
+	var total_dead: int = 0
+	var participant_reports: Array[Dictionary] = []
+	var level_reports: Array[String] = []
+
+	for participant_variant: Variant in participants:
+		var participant: Dictionary = participant_variant as Dictionary
+		var warband_id: String = String(participant.get("id", ""))
+		if not warbands.has(warband_id):
+			continue
+		var warband: Dictionary = warbands[warband_id] as Dictionary
+		var level_before: int = int(_sync_warband_progress(warband.duplicate(true)).get("level", 1))
+		var committed_i: int = int(participant.get("committed", 0))
+		var casualties_i: int = clampi(int(casualty_alloc.get(warband_id, 0)), 0, committed_i)
+		var dead_i: int = int(floor(float(casualties_i) * 0.4))
+		var injured_i: int = max(0, casualties_i - dead_i)
+		var xp_i: int = max(0, int(xp_alloc.get(warband_id, 0)))
+		total_injured += injured_i
+		total_dead += dead_i
+		warband["ready_warriors"] = max(0, int(warband.get("ready_warriors", 0)) - casualties_i)
+		warband["injured_warriors"] = max(0, int(warband.get("injured_warriors", 0)) + injured_i)
+		warband["dead_total"] = max(0, int(warband.get("dead_total", 0)) + dead_i)
+		warband["xp"] = max(0, int(warband.get("xp", 0)) + xp_i)
+		var history: Array = warband.get("battle_history", []) as Array
+		history.append({
+			"veintena": current_veintena,
+			"option_id": option_id,
+			"result": String(preview.get("result", "Unknown")),
+			"committed": committed_i,
+			"casualties": casualties_i,
+			"injured": injured_i,
+			"dead": dead_i,
+			"captives": captives,
+			"xp_gained": xp_i,
+			"all_warbands": true
+		})
+		warband["battle_history"] = history
+		warbands[warband_id] = _sync_warband_progress(warband)
+		var level_after: int = int((warbands[warband_id] as Dictionary).get("level", level_before))
+		if level_after > level_before:
+			level_reports.append(String(warband.get("name", "Warband")) + " reached Level " + str(level_after) + " and gained " + str(max(0, level_after - level_before)) + " skill point(s)")
+		participant_reports.append({
+			"id": warband_id,
+			"name": String(warband.get("name", "Warband")),
+			"committed": committed_i,
+			"casualties": casualties_i,
+			"injured": injured_i,
+			"dead": dead_i,
+			"xp_gained": xp_i,
+			"level_before": level_before,
+			"level_after": level_after
+		})
+
+	if total_dead > 0:
+		population["yaotequihuaqueh"] = max(0, get_warrior_count() - total_dead)
 	if captives > 0:
 		estate_stockpiles["captives"] = float(estate_stockpiles.get("captives", 0.0)) + float(captives)
 	add_looted_goods_bundle(preview.get("loot", {}) as Dictionary)
+
 	last_flower_war_report = preview.duplicate(true)
 	last_flower_war_report["ok"] = true
-	last_flower_war_report["warriors_returned"] = max(0, committed - int(preview.get("attacker_casualties", 0)))
-	var line: String = String(preview.get("option_name", "Flower War")) + " resolved: " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + "; casualties " + str(int(preview.get("attacker_casualties", 0))) + " (dead " + str(dead) + "). Captives gained " + str(captives) + ". Prestige pending calibration."
+	last_flower_war_report["all_warbands"] = true
+	last_flower_war_report["warband_id"] = "all_warbands"
+	last_flower_war_report["warband_name"] = "All Warbands"
+	last_flower_war_report["warriors_returned"] = max(0, committed - casualties)
+	last_flower_war_report["attacker_injured"] = total_injured
+	last_flower_war_report["attacker_dead"] = total_dead
+	last_flower_war_report["participant_reports"] = participant_reports
+	last_flower_war_report["level_reports"] = level_reports
+	_archive_flower_war_report(last_flower_war_report)
+
+	var line: String = "All warbands fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_total) + " shared by participating warbands. Prestige pending calibration."
+	if not level_reports.is_empty():
+		line += " " + "; ".join(level_reports) + "."
 	last_report.append(line)
 	emit_signal("state_changed")
 	return last_flower_war_report.duplicate(true)
 
-func get_last_flower_war_report() -> Dictionary:
+
+func _selected_warband_ids_or_all_ready(warband_ids: Array) -> Array[String]:
+	_ensure_warband_state()
+	var output: Array[String] = []
+	if warband_ids.is_empty():
+		for id_variant: Variant in warbands.keys():
+			var id_value: String = String(id_variant)
+			var warband: Dictionary = warbands[id_value] as Dictionary
+			if int(warband.get("ready_warriors", 0)) > 0:
+				output.append(id_value)
+		return output
+	for id_variant: Variant in warband_ids:
+		var id_value: String = String(id_variant)
+		if id_value == "" or output.has(id_value):
+			continue
+		if warbands.has(id_value):
+			output.append(id_value)
+	return output
+
+func get_flower_war_preview_with_selected_warbands(warband_ids: Array, option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
+	_ensure_warband_state()
+	if not FLOWER_WAR_OPTIONS.has(option_id):
+		return {"ok": false, "reason": "Unknown Flower War option."}
+	if not FLOWER_WAR_PROVISIONING.has(provisioning_id):
+		provisioning_id = "standard"
+	var selected_ids: Array[String] = _selected_warband_ids_or_all_ready(warband_ids)
+	var option: Dictionary = FLOWER_WAR_OPTIONS[option_id] as Dictionary
+	var provisioning: Dictionary = FLOWER_WAR_PROVISIONING[provisioning_id] as Dictionary
+	var participants: Array[Dictionary] = []
+	var warriors_committed: int = 0
+	var weighted_offence: float = 0.0
+	var weighted_defence: float = 0.0
+	var eagle_warriors: int = 0
+	var coyote_warriors: int = 0
+
+	for warband_id: String in selected_ids:
+		if not warbands.has(warband_id):
+			continue
+		var warband: Dictionary = warbands[warband_id] as Dictionary
+		var ready: int = max(0, int(warband.get("ready_warriors", 0)))
+		if ready <= 0:
+			continue
+		var doctrine_id: String = String(warband.get("doctrine", "unspecialised"))
+		if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
+			doctrine_id = "unspecialised"
+		var synced: Dictionary = _sync_warband_progress(warband.duplicate(true))
+		var stats: Dictionary = _warband_combat_stats_from_warband(synced)
+		participants.append({
+			"id": warband_id,
+			"name": String(stats.get("name", "Warband")),
+			"committed": ready,
+			"ready": ready,
+			"injured": int(stats.get("injured", 0)),
+			"level": int(synced.get("level", 1)),
+			"doctrine_id": doctrine_id,
+			"doctrine_name": String(stats.get("doctrine_name", doctrine_id.capitalize())),
+			"offence": float(stats.get("offence_modifier", 1.0)),
+			"defence": float(stats.get("defence_modifier", 1.0)),
+			"effective_offence": float(stats.get("effective_offence", 0.0)),
+			"effective_defence": float(stats.get("effective_defence", 0.0)),
+			"combat_stats": stats
+		})
+		warriors_committed += ready
+		weighted_offence += float(stats.get("effective_offence", 0.0))
+		weighted_defence += float(stats.get("effective_defence", 0.0))
+		if doctrine_id == "eagle":
+			eagle_warriors += ready
+		elif doctrine_id == "coyote":
+			coyote_warriors += ready
+
+	if warriors_committed <= 0:
+		return {"ok": false, "reason": "No selected warbands have ready warriors."}
+
+	var enemy_warriors: int = int(option.get("enemy_warriors", option.get("warriors", warriors_committed)))
+	var minimum_warriors: int = int(option.get("warriors", enemy_warriors))
+	var combat_multiplier: float = float(provisioning.get("combat_multiplier", 1.0))
+	var attacker_attack: float = weighted_offence * combat_multiplier
+	var defender_defence: float = float(enemy_warriors) * float(option.get("enemy_defence", 1.0))
+	var defender_casualties: int = clampi(int(round(maxf(0.0, attacker_attack - defender_defence * 0.55))), 0, enemy_warriors)
+	var surviving_defenders: int = max(0, enemy_warriors - defender_casualties)
+	var defender_attack: float = float(surviving_defenders) * float(option.get("enemy_offence", 1.0))
+	var attacker_defence: float = weighted_defence
+	var attacker_casualties: int = clampi(int(round(maxf(0.0, defender_attack - attacker_defence * 0.55))), 0, warriors_committed)
+	var net_damage: int = defender_casualties - attacker_casualties
+	var result: String = _flower_war_result_label(net_damage, warriors_committed, enemy_warriors)
+	var captives: int = _flower_war_captives_for_all_warbands(result, defender_casualties, warriors_committed, eagle_warriors)
+	var loot: Dictionary = _flower_war_loot_for_all_warbands(result, defender_casualties, coyote_warriors, warriors_committed, float(option.get("base_loot_value", 1.2)))
+	var loot_value: float = _flower_war_loot_display_value(loot)
+	var provisioning_cost: Dictionary = _flower_war_provisioning_cost(warriors_committed, float(provisioning.get("supply_multiplier", 1.0)))
+	var xp_gained: int = _flower_war_xp_gain(result, warriors_committed, defender_casualties, captives)
+
+	return {
+		"ok": true,
+		"event_type": "flower_war_attack",
+		"selected_warbands": true,
+		"selected_warband_ids": selected_ids.duplicate(),
+		"all_warbands": false,
+		"warband_id": "selected_warbands",
+		"warband_name": "Selected Warbands",
+		"option_id": option_id,
+		"option_name": String(option.get("name", option_id.capitalize())),
+		"option_minimum_warriors": minimum_warriors,
+		"doctrine_id": "combined",
+		"doctrine_name": "Combined Warbands",
+		"provisioning_id": provisioning_id,
+		"provisioning_name": String(provisioning.get("name", provisioning_id.capitalize())),
+		"participants": participants,
+		"participating_warband_count": participants.size(),
+		"warriors_committed": warriors_committed,
+		"committed_warriors": warriors_committed,
+		"injured_not_fighting": int(get_army_muster_summary().get("injured_not_fighting", 0)),
+		"enemy_warriors": enemy_warriors,
+		"attacker_attack": attacker_attack,
+		"attacker_defence": attacker_defence,
+		"defender_casualties": defender_casualties,
+		"attacker_casualties": attacker_casualties,
+		"attacker_losses": attacker_casualties,
+		"attacker_injured": int(ceil(float(attacker_casualties) * 0.6)),
+		"attacker_dead": int(floor(float(attacker_casualties) * 0.4)),
+		"result": result,
+		"captives": captives,
+		"loot": loot,
+		"loot_value": loot_value,
+		"provisioning_cost": provisioning_cost,
+		"xp_gained": xp_gained,
+		"eagle_warriors": eagle_warriors,
+		"coyote_warriors": coyote_warriors,
+		"prestige_pending": true,
+		"prestige_text": "Prestige pending calibration."
+	}
+
+func can_launch_flower_war_with_selected_warbands(warband_ids: Array, option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
+	_ensure_warband_state()
+	if not flower_war_palace_gate_passed():
+		return {"ok": false, "reason": flower_war_palace_gate_status_text()}
+	var preview: Dictionary = get_flower_war_preview_with_selected_warbands(warband_ids, option_id, provisioning_id)
+	if not bool(preview.get("ok", false)):
+		return preview
+	var committed: int = int(preview.get("warriors_committed", 0))
+	var minimum_warriors: int = int(preview.get("option_minimum_warriors", 0))
+	if committed < minimum_warriors:
+		return {"ok": false, "reason": "This scale needs at least " + str(minimum_warriors) + " ready warriors; selected warbands provide " + str(committed) + "."}
+	var cost_status: Dictionary = _can_pay_free_stock(preview.get("provisioning_cost", {}) as Dictionary)
+	if not bool(cost_status.get("ok", false)):
+		return cost_status
+	return {"ok": true, "reason": "Ready. Selected warbands will be committed.", "preview": preview}
+
+func launch_flower_war_with_selected_warbands(warband_ids: Array, option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
+	var status: Dictionary = can_launch_flower_war_with_selected_warbands(warband_ids, option_id, provisioning_id)
+	if not bool(status.get("ok", false)):
+		last_flower_war_report = {"ok": false, "reason": String(status.get("reason", "Flower War cannot launch.")), "warband_id": "selected_warbands", "selected_warbands": true}
+		last_report.append("Flower War not launched: " + String(last_flower_war_report.get("reason", "blocked")) + ".")
+		emit_signal("state_changed")
+		return last_flower_war_report.duplicate(true)
+
+	var preview: Dictionary = status.get("preview", {}) as Dictionary
+	if preview.is_empty():
+		preview = get_flower_war_preview_with_selected_warbands(warband_ids, option_id, provisioning_id)
+	_pay_free_stock(preview.get("provisioning_cost", {}) as Dictionary)
+
+	var participants: Array = preview.get("participants", []) as Array
+	var committed: int = int(preview.get("warriors_committed", 0))
+	var casualties: int = int(preview.get("attacker_casualties", 0))
+	var captives: int = int(preview.get("captives", 0))
+	var xp_total: int = int(preview.get("xp_gained", 0))
+	var casualty_alloc: Dictionary = _distribute_integer_by_weights(casualties, participants, "committed", true)
+	var xp_alloc: Dictionary = _distribute_integer_by_weights(xp_total, participants, "committed", false)
+	var total_injured: int = 0
+	var total_dead: int = 0
+	var participant_reports: Array[Dictionary] = []
+	var level_reports: Array[String] = []
+
+	for participant_variant: Variant in participants:
+		var participant: Dictionary = participant_variant as Dictionary
+		var warband_id: String = String(participant.get("id", ""))
+		if not warbands.has(warband_id):
+			continue
+		var warband: Dictionary = warbands[warband_id] as Dictionary
+		var level_before: int = int(_sync_warband_progress(warband.duplicate(true)).get("level", 1))
+		var committed_i: int = int(participant.get("committed", 0))
+		var casualties_i: int = clampi(int(casualty_alloc.get(warband_id, 0)), 0, committed_i)
+		var dead_i: int = int(floor(float(casualties_i) * 0.4))
+		var injured_i: int = max(0, casualties_i - dead_i)
+		var xp_i: int = max(0, int(xp_alloc.get(warband_id, 0)))
+		total_injured += injured_i
+		total_dead += dead_i
+		warband["ready_warriors"] = max(0, int(warband.get("ready_warriors", 0)) - casualties_i)
+		warband["injured_warriors"] = max(0, int(warband.get("injured_warriors", 0)) + injured_i)
+		warband["dead_total"] = max(0, int(warband.get("dead_total", 0)) + dead_i)
+		warband["xp"] = max(0, int(warband.get("xp", 0)) + xp_i)
+		var history: Array = warband.get("battle_history", []) as Array
+		history.append({
+			"veintena": current_veintena,
+			"option_id": option_id,
+			"provisioning_id": provisioning_id,
+			"result": String(preview.get("result", "Unknown")),
+			"committed": committed_i,
+			"casualties": casualties_i,
+			"injured": injured_i,
+			"dead": dead_i,
+			"captives": captives,
+			"xp_gained": xp_i,
+			"selected_warbands": true
+		})
+		warband["battle_history"] = history
+		warbands[warband_id] = _sync_warband_progress(warband)
+		var level_after: int = int((warbands[warband_id] as Dictionary).get("level", level_before))
+		if level_after > level_before:
+			level_reports.append(String(warband.get("name", "Warband")) + " reached Level " + str(level_after) + " and gained " + str(max(0, level_after - level_before)) + " skill point(s)")
+		participant_reports.append({
+			"id": warband_id,
+			"name": String(warband.get("name", "Warband")),
+			"committed": committed_i,
+			"sent": committed_i,
+			"returned_ready": max(0, committed_i - casualties_i),
+			"casualties": casualties_i,
+			"injured": injured_i,
+			"dead": dead_i,
+			"xp_gained": xp_i,
+			"level_before": level_before,
+			"level_after": level_after
+		})
+
+	if total_dead > 0:
+		population["yaotequihuaqueh"] = max(0, get_warrior_count() - total_dead)
+	if captives > 0:
+		estate_stockpiles["captives"] = float(estate_stockpiles.get("captives", 0.0)) + float(captives)
+	add_looted_goods_bundle(preview.get("loot", {}) as Dictionary)
+
+	last_flower_war_report = preview.duplicate(true)
+	last_flower_war_report["ok"] = true
+	last_flower_war_report["event_type"] = "flower_war_return"
+	last_flower_war_report["selected_warbands"] = true
+	last_flower_war_report["all_warbands"] = false
+	last_flower_war_report["warband_id"] = "selected_warbands"
+	last_flower_war_report["warband_name"] = "Selected Warbands"
+	last_flower_war_report["warriors_returned"] = max(0, committed - casualties)
+	last_flower_war_report["attacker_injured"] = total_injured
+	last_flower_war_report["attacker_dead"] = total_dead
+	last_flower_war_report["participant_reports"] = participant_reports
+	last_flower_war_report["level_reports"] = level_reports
+	_archive_flower_war_report(last_flower_war_report)
+
+	var line: String = "Selected warbands fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_total) + " shared by participating warbands. Prestige pending calibration."
+	if not level_reports.is_empty():
+		line += " " + "; ".join(level_reports) + "."
+	last_report.append(line)
+	emit_signal("state_changed")
+	return last_flower_war_report.duplicate(true)
+
+func get_flower_war_defence_preview(option_id: String = "standard", strategy_id: String = "balanced") -> Dictionary:
+	_ensure_warband_state()
+	if not FLOWER_WAR_OPTIONS.has(option_id):
+		return {"ok": false, "reason": "Unknown Flower War option."}
+	var option: Dictionary = FLOWER_WAR_OPTIONS[option_id] as Dictionary
+	var strategy: Dictionary = _flower_war_defence_strategy_data(strategy_id)
+	var participants: Array[Dictionary] = []
+	var warriors_committed: int = 0
+	var weighted_offence: float = 0.0
+	var weighted_defence: float = 0.0
+	for warband_id_variant: Variant in warbands.keys():
+		var warband_id: String = String(warband_id_variant)
+		var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+		warbands[warband_id] = warband
+		var stats: Dictionary = _warband_combat_stats_from_warband(warband)
+		var ready: int = int(stats.get("ready", 0))
+		if ready <= 0:
+			continue
+		participants.append({
+			"id": warband_id,
+			"name": String(warband.get("name", "Warband")),
+			"committed": ready,
+			"ready": ready,
+			"doctrine": String(warband.get("doctrine", "unspecialised")),
+			"doctrine_name": String(stats.get("doctrine_name", "Unspecialised")),
+			"effective_offence": float(stats.get("effective_offence", 0.0)),
+			"effective_defence": float(stats.get("effective_defence", 0.0))
+		})
+		warriors_committed += ready
+		weighted_offence += float(stats.get("effective_offence", 0.0))
+		weighted_defence += float(stats.get("effective_defence", 0.0))
+	if warriors_committed <= 0:
+		return {"ok": false, "reason": "No ready warbands can defend."}
+	var enemy_warriors: int = int(option.get("enemy_warriors", option.get("warriors", 0)))
+	var player_attack: float = weighted_offence * float(strategy.get("offence_multiplier", 1.0))
+	var player_defence: float = weighted_defence * float(strategy.get("defence_multiplier", 1.0))
+	var enemy_attack: float = float(enemy_warriors) * float(option.get("enemy_offence", 1.0))
+	var enemy_defence: float = float(enemy_warriors) * float(option.get("enemy_defence", 1.0))
+	var enemy_casualties: int = clampi(int(round(maxf(0.0, player_attack - enemy_defence * 0.55))), 0, enemy_warriors)
+	var surviving_enemy: int = max(0, enemy_warriors - enemy_casualties)
+	var returning_enemy_attack: float = float(surviving_enemy) * float(option.get("enemy_offence", 1.0))
+	var defender_casualties: int = clampi(int(round(maxf(0.0, returning_enemy_attack - player_defence * 0.55))), 0, warriors_committed)
+	var net_damage: int = enemy_casualties - defender_casualties
+	var result: String = _flower_war_result_label(net_damage, warriors_committed, enemy_warriors)
+	var xp_gained: int = _flower_war_xp_gain(result, warriors_committed, enemy_casualties, 0)
+	return {
+		"ok": true,
+		"event_type": "flower_war_defence_preview",
+		"war_direction": "defence",
+		"option_id": option_id,
+		"option_name": String(option.get("name", option_id.capitalize())),
+		"option_minimum_warriors": int(option.get("warriors", 0)),
+		"defence_strategy_id": String(strategy.get("id", "balanced")),
+		"defence_strategy_name": String(strategy.get("name", "Balanced Defence")),
+		"defence_strategy_description": String(strategy.get("description", "")),
+		"offence_multiplier": float(strategy.get("offence_multiplier", 1.0)),
+		"defence_multiplier": float(strategy.get("defence_multiplier", 1.0)),
+		"participants": participants,
+		"participating_warband_count": participants.size(),
+		"warriors_committed": warriors_committed,
+		"committed_warriors": warriors_committed,
+		"enemy_warriors": enemy_warriors,
+		"attacker_attack": enemy_attack,
+		"attacker_defence": enemy_defence,
+		"defender_attack": player_attack,
+		"defender_defence": player_defence,
+		"enemy_casualties": enemy_casualties,
+		"defender_casualties": defender_casualties,
+		"attacker_casualties": defender_casualties,
+		"attacker_losses": defender_casualties,
+		"attacker_injured": int(ceil(float(defender_casualties) * 0.6)),
+		"attacker_dead": int(floor(float(defender_casualties) * 0.4)),
+		"result": result,
+		"captives": 0,
+		"loot": {},
+		"loot_value": 0.0,
+		"provisioning_cost": {},
+		"xp_gained": xp_gained,
+		"prestige_pending": true,
+		"prestige_text": "Prestige pending calibration. Defensive rewards are not balanced yet."
+	}
+
+func can_resolve_flower_war_defence(option_id: String = "standard", strategy_id: String = "balanced") -> Dictionary:
+	_ensure_warband_state()
+	var preview: Dictionary = get_flower_war_defence_preview(option_id, strategy_id)
+	if not bool(preview.get("ok", false)):
+		return preview
+	var committed: int = int(preview.get("warriors_committed", 0))
+	var minimum_warriors: int = int(preview.get("option_minimum_warriors", 0))
+	if committed < minimum_warriors:
+		return {"ok": false, "reason": "This defence needs at least " + str(minimum_warriors) + " ready warriors; defending warbands provide " + str(committed) + "."}
+	return {"ok": true, "reason": "Ready. Warbands will defend the estate.", "preview": preview}
+
+func resolve_flower_war_defence(option_id: String = "standard", strategy_id: String = "balanced") -> Dictionary:
+	var status: Dictionary = can_resolve_flower_war_defence(option_id, strategy_id)
+	if not bool(status.get("ok", false)):
+		last_flower_war_report = {"ok": false, "reason": String(status.get("reason", "Flower War defence cannot resolve.")), "war_direction": "defence"}
+		last_report.append("Flower War defence not resolved: " + String(last_flower_war_report.get("reason", "blocked")) + ".")
+		emit_signal("state_changed")
+		return last_flower_war_report.duplicate(true)
+
+	var preview: Dictionary = status.get("preview", {}) as Dictionary
+	if preview.is_empty():
+		preview = get_flower_war_defence_preview(option_id, strategy_id)
+	var participants: Array = preview.get("participants", []) as Array
+	var committed: int = int(preview.get("warriors_committed", 0))
+	var casualties: int = int(preview.get("defender_casualties", preview.get("attacker_casualties", 0)))
+	var xp_total: int = int(preview.get("xp_gained", 0))
+	var casualty_alloc: Dictionary = _distribute_integer_by_weights(casualties, participants, "committed", true)
+	var xp_alloc: Dictionary = _distribute_integer_by_weights(xp_total, participants, "committed", false)
+	var total_injured: int = 0
+	var total_dead: int = 0
+	var participant_reports: Array[Dictionary] = []
+	var level_reports: Array[String] = []
+
+	for participant_variant: Variant in participants:
+		var participant: Dictionary = participant_variant as Dictionary
+		var warband_id: String = String(participant.get("id", ""))
+		if not warbands.has(warband_id):
+			continue
+		var warband: Dictionary = warbands[warband_id] as Dictionary
+		var level_before: int = int(_sync_warband_progress(warband.duplicate(true)).get("level", 1))
+		var committed_i: int = int(participant.get("committed", 0))
+		var casualties_i: int = clampi(int(casualty_alloc.get(warband_id, 0)), 0, committed_i)
+		var dead_i: int = int(floor(float(casualties_i) * 0.4))
+		var injured_i: int = max(0, casualties_i - dead_i)
+		var xp_i: int = max(0, int(xp_alloc.get(warband_id, 0)))
+		total_injured += injured_i
+		total_dead += dead_i
+		warband["ready_warriors"] = max(0, int(warband.get("ready_warriors", 0)) - casualties_i)
+		warband["injured_warriors"] = max(0, int(warband.get("injured_warriors", 0)) + injured_i)
+		warband["dead_total"] = max(0, int(warband.get("dead_total", 0)) + dead_i)
+		warband["xp"] = max(0, int(warband.get("xp", 0)) + xp_i)
+		var history: Array = warband.get("battle_history", []) as Array
+		history.append({
+			"veintena": current_veintena,
+			"option_id": option_id,
+			"strategy_id": strategy_id,
+			"result": String(preview.get("result", "Unknown")),
+			"committed": committed_i,
+			"casualties": casualties_i,
+			"injured": injured_i,
+			"dead": dead_i,
+			"captives": 0,
+			"xp_gained": xp_i,
+			"defensive": true
+		})
+		warband["battle_history"] = history
+		warbands[warband_id] = _sync_warband_progress(warband)
+		var level_after: int = int((warbands[warband_id] as Dictionary).get("level", level_before))
+		if level_after > level_before:
+			level_reports.append(String(warband.get("name", "Warband")) + " reached Level " + str(level_after) + " and gained " + str(max(0, level_after - level_before)) + " skill point(s)")
+		participant_reports.append({
+			"id": warband_id,
+			"name": String(warband.get("name", "Warband")),
+			"committed": committed_i,
+			"sent": committed_i,
+			"returned_ready": max(0, committed_i - casualties_i),
+			"casualties": casualties_i,
+			"injured": injured_i,
+			"dead": dead_i,
+			"xp_gained": xp_i,
+			"level_before": level_before,
+			"level_after": level_after
+		})
+
+	if total_dead > 0:
+		population["yaotequihuaqueh"] = max(0, get_warrior_count() - total_dead)
+
+	last_flower_war_report = preview.duplicate(true)
+	last_flower_war_report["ok"] = true
+	last_flower_war_report["event_type"] = "flower_war_return"
+	last_flower_war_report["war_direction"] = "defence"
+	last_flower_war_report["warband_id"] = "defending_warbands"
+	last_flower_war_report["warband_name"] = "Defending Warbands"
+	last_flower_war_report["warriors_returned"] = max(0, committed - casualties)
+	last_flower_war_report["attacker_injured"] = total_injured
+	last_flower_war_report["attacker_dead"] = total_dead
+	last_flower_war_report["participant_reports"] = participant_reports
+	last_flower_war_report["level_reports"] = level_reports
+	_archive_flower_war_report(last_flower_war_report)
+
+	var line: String = "Defending warbands resolved " + String(preview.get("option_name", "Flower War")) + " using " + String(preview.get("defence_strategy_name", "Balanced Defence")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors defending " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Enemy casualties " + str(int(preview.get("enemy_casualties", 0))) + ". XP +" + str(xp_total) + " shared by defending warbands. Prestige pending calibration."
+	if not level_reports.is_empty():
+		line += " " + "; ".join(level_reports) + "."
+	last_report.append(line)
+	emit_signal("state_changed")
+	return last_flower_war_report.duplicate(true)
+
+func _flower_war_captives_for_all_warbands(result: String, defender_casualties: int, warriors_committed: int, eagle_warriors: int) -> int:
+	if defender_casualties <= 0:
+		return 0
+	var rate: float = 0.0
+	match result:
+		"Crushing Victory":
+			rate = 0.45
+		"Victory":
+			rate = 0.30
+		"Marginal Victory":
+			rate = 0.15
+		_:
+			rate = 0.0
+	if eagle_warriors > 0:
+		rate += float(eagle_warriors) * 0.02
+	var raw: float = float(defender_casualties) * rate
+	if raw > 0.0:
+		return mini(defender_casualties, max(1, int(ceil(raw))))
+	return 0
+
+func _flower_war_loot_for_all_warbands(result: String, defender_casualties: int, coyote_warriors: int, warriors_committed: int, base_loot_value: float) -> Dictionary:
+	var multiplier: float = 0.0
+	match result:
+		"Crushing Victory":
+			multiplier = 2.0
+		"Victory":
+			multiplier = 1.2
+		"Marginal Victory":
+			multiplier = 0.6
+		"Stalemate":
+			multiplier = 0.3
+		"Defeat":
+			multiplier = 0.1
+		_:
+			multiplier = 0.0
+	if coyote_warriors > 0 and warriors_committed > 0:
+		multiplier *= 1.0 + 0.5 * (float(coyote_warriors) / float(warriors_committed))
+	var units: float = maxf(0.0, float(defender_casualties) * base_loot_value * multiplier)
+	if units <= 0.0:
+		return {}
+	return {"maize": snappedf(units * 0.50, 0.01), "wood": snappedf(units * 0.25, 0.01), "cloth": snappedf(units * 0.15, 0.01), "obsidian": snappedf(units * 0.10, 0.01)}
+
+func _distribute_integer_by_weights(total: int, participants: Array, weight_key: String = "committed", cap_by_weight: bool = false) -> Dictionary:
+	var result: Dictionary = {}
+	if total <= 0:
+		return result
+	var total_weight: int = 0
+	for participant_variant: Variant in participants:
+		var participant: Dictionary = participant_variant as Dictionary
+		total_weight += max(0, int(participant.get(weight_key, 0)))
+	if total_weight <= 0:
+		return result
+	var remaining: int = total
+	var remainders: Array[Dictionary] = []
+	for participant_variant: Variant in participants:
+		var participant: Dictionary = participant_variant as Dictionary
+		var participant_id: String = String(participant.get("id", ""))
+		var weight: int = max(0, int(participant.get(weight_key, 0)))
+		if participant_id == "" or weight <= 0:
+			continue
+		var raw: float = float(total) * float(weight) / float(total_weight)
+		var base: int = int(floor(raw))
+		var cap_value: int = total
+		if cap_by_weight:
+			cap_value = weight
+		base = mini(base, cap_value)
+		result[participant_id] = base
+		remaining -= base
+		remainders.append({"id": participant_id, "fraction": raw - float(base), "cap": cap_value})
+	remainders.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a.get("fraction", 0.0)) > float(b.get("fraction", 0.0))
+	)
+	var guard: int = 0
+	while remaining > 0 and guard < 1000:
+		var allocated: bool = false
+		for item: Dictionary in remainders:
+			if remaining <= 0:
+				break
+			var participant_id: String = String(item.get("id", ""))
+			var cap_value: int = int(item.get("cap", total))
+			if int(result.get(participant_id, 0)) < cap_value:
+				result[participant_id] = int(result.get(participant_id, 0)) + 1
+				remaining -= 1
+				allocated = true
+		if not allocated:
+			break
+		guard += 1
+	return result
+
+func get_flower_war_preview_with_warband(warband_id: String, option_id: String = "minor", doctrine_id: String = "", provisioning_id: String = "standard") -> Dictionary:
+	_ensure_warband_state()
+	if not warbands.has(warband_id):
+		return {"ok": false, "reason": "Unknown warband."}
+	var warband: Dictionary = warbands[warband_id] as Dictionary
+	var resolved_doctrine: String = doctrine_id
+	if resolved_doctrine == "" or resolved_doctrine == "warband":
+		resolved_doctrine = String(warband.get("doctrine", "unspecialised"))
+	var preview: Dictionary = get_flower_war_preview(option_id, resolved_doctrine, provisioning_id)
+	if not bool(preview.get("ok", false)):
+		return preview
+	preview["warband_id"] = warband_id
+	preview["warband_name"] = String(warband.get("name", "Warband"))
+	preview["warband_ready"] = int(warband.get("ready_warriors", 0))
+	preview["warband_injured"] = int(warband.get("injured_warriors", 0))
+	preview["warband_level"] = int(_sync_warband_progress(warband.duplicate(true)).get("level", 1))
+	preview["xp_gained"] = _flower_war_xp_gain(String(preview.get("result", "Stalemate")), int(preview.get("warriors_committed", 0)), int(preview.get("defender_casualties", 0)), int(preview.get("captives", 0)))
+	return preview
+
+func can_launch_flower_war_with_warband(warband_id: String, option_id: String = "minor", doctrine_id: String = "", provisioning_id: String = "standard") -> Dictionary:
+	_ensure_warband_state()
+	if not flower_war_palace_gate_passed():
+		return {"ok": false, "reason": flower_war_palace_gate_status_text()}
+	if not warbands.has(warband_id):
+		return {"ok": false, "reason": "Unknown warband."}
+	var preview: Dictionary = get_flower_war_preview_with_warband(warband_id, option_id, doctrine_id, provisioning_id)
+	if not bool(preview.get("ok", false)):
+		return preview
+	var needed_warriors: int = int(preview.get("warriors_committed", 0))
+	var warband: Dictionary = warbands[warband_id] as Dictionary
+	var ready: int = int(warband.get("ready_warriors", 0))
+	if ready < needed_warriors:
+		return {"ok": false, "reason": String(warband.get("name", "Warband")) + " needs " + str(needed_warriors) + " ready warriors; only " + str(ready) + " ready."}
+	var cost_status: Dictionary = _can_pay_free_stock(preview.get("provisioning_cost", {}) as Dictionary)
+	if not bool(cost_status.get("ok", false)):
+		return cost_status
+	return {"ok": true, "reason": "Ready.", "preview": preview}
+
+func launch_flower_war_with_warband(warband_id: String, option_id: String = "minor", doctrine_id: String = "", provisioning_id: String = "standard") -> Dictionary:
+	var status: Dictionary = can_launch_flower_war_with_warband(warband_id, option_id, doctrine_id, provisioning_id)
+	if not bool(status.get("ok", false)):
+		last_flower_war_report = {"ok": false, "reason": String(status.get("reason", "Flower War cannot launch.")), "warband_id": warband_id}
+		last_report.append("Flower War not launched: " + String(last_flower_war_report.get("reason", "blocked")) + ".")
+		emit_signal("state_changed")
+		return last_flower_war_report.duplicate(true)
+	var preview: Dictionary = status.get("preview", {}) as Dictionary
+	if preview.is_empty():
+		preview = get_flower_war_preview_with_warband(warband_id, option_id, doctrine_id, provisioning_id)
+	_pay_free_stock(preview.get("provisioning_cost", {}) as Dictionary)
+	var warband: Dictionary = warbands[warband_id] as Dictionary
+	var level_before: int = int(_sync_warband_progress(warband.duplicate(true)).get("level", 1))
+	var committed: int = int(preview.get("warriors_committed", 0))
+	var casualties: int = int(preview.get("attacker_casualties", 0))
+	var injured: int = int(preview.get("attacker_injured", 0))
+	var dead: int = int(preview.get("attacker_dead", 0))
+	var captives: int = int(preview.get("captives", 0))
+	var xp_gain: int = int(preview.get("xp_gained", 0))
+
+	warband["ready_warriors"] = max(0, int(warband.get("ready_warriors", 0)) - casualties)
+	warband["injured_warriors"] = max(0, int(warband.get("injured_warriors", 0)) + injured)
+	warband["dead_total"] = max(0, int(warband.get("dead_total", 0)) + dead)
+	warband["xp"] = max(0, int(warband.get("xp", 0)) + xp_gain)
+	var history: Array = warband.get("battle_history", []) as Array
+	history.append({
+		"veintena": current_veintena,
+		"option_id": option_id,
+		"result": String(preview.get("result", "Unknown")),
+		"committed": committed,
+		"casualties": casualties,
+		"injured": injured,
+		"dead": dead,
+		"captives": captives,
+		"xp_gained": xp_gain
+	})
+	warband["battle_history"] = history
+	warbands[warband_id] = _sync_warband_progress(warband)
+	var level_after: int = int((warbands[warband_id] as Dictionary).get("level", level_before))
+
+	if dead > 0:
+		population["yaotequihuaqueh"] = max(0, get_warrior_count() - dead)
+	if captives > 0:
+		estate_stockpiles["captives"] = float(estate_stockpiles.get("captives", 0.0)) + float(captives)
+	add_looted_goods_bundle(preview.get("loot", {}) as Dictionary)
+
+	last_flower_war_report = preview.duplicate(true)
+	last_flower_war_report["ok"] = true
+	last_flower_war_report["warband_id"] = warband_id
+	last_flower_war_report["warband_name"] = String(warband.get("name", "Warband"))
+	last_flower_war_report["warriors_returned"] = max(0, committed - casualties)
+	last_flower_war_report["xp_gained"] = xp_gain
+	last_flower_war_report["level_before"] = level_before
+	last_flower_war_report["level_after"] = level_after
+
+	var line: String = String(warband.get("name", "Warband")) + " fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + "; casualties " + str(casualties) + " (injured " + str(injured) + ", dead " + str(dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_gain) + ". Prestige pending calibration."
+	if level_after > level_before:
+		line += " " + String(warband.get("name", "Warband")) + " reached Level " + str(level_after) + " and gained " + str(max(0, level_after - level_before)) + " skill point(s)."
+	last_report.append(line)
+	emit_signal("state_changed")
 	return last_flower_war_report.duplicate(true)
 
 func _flower_war_result_label(net_damage: int, attacker_size: int, defender_size: int) -> String:
@@ -2535,6 +3613,34 @@ func _flower_war_loot(result: String, defender_casualties: int, doctrine_id: Str
 		return {}
 	return {"maize": snappedf(units * 0.50, 0.01), "wood": snappedf(units * 0.25, 0.01), "cloth": snappedf(units * 0.15, 0.01), "obsidian": snappedf(units * 0.10, 0.01)}
 
+func _flower_war_loot_display_value(loot: Dictionary) -> float:
+	var total: float = 0.0
+	for resource_variant: Variant in loot.keys():
+		var resource_id: String = String(resource_variant)
+		var base_value: float = 1.0
+		if resources.has(resource_id):
+			var resource_data: Dictionary = resources[resource_id] as Dictionary
+			base_value = float(resource_data.get("base_value", 1.0))
+		total += float(loot[resource_variant]) * base_value
+	return snappedf(total, 0.01)
+
+func _flower_war_xp_gain(result: String, warriors_committed: int, defender_casualties: int, captives: int) -> int:
+	var result_bonus: int = 0
+	match result:
+		"Crushing Victory":
+			result_bonus = 8
+		"Victory":
+			result_bonus = 5
+		"Marginal Victory":
+			result_bonus = 3
+		"Stalemate":
+			result_bonus = 2
+		"Defeat":
+			result_bonus = 1
+		_:
+			result_bonus = 1
+	return max(1, warriors_committed + defender_casualties * 2 + captives * 4 + result_bonus)
+
 func _flower_war_provisioning_cost(warriors_committed: int, supply_multiplier: float) -> Dictionary:
 	return {"maize": float(warriors_committed) * 1.0 * supply_multiplier, "weapons": float(warriors_committed) * 0.2 * supply_multiplier}
 
@@ -2550,3 +3656,2244 @@ func _pay_free_stock(cost: Dictionary) -> void:
 	for resource_variant: Variant in cost.keys():
 		var resource_id: String = String(resource_variant)
 		_add_stock(resource_id, -float(cost[resource_variant]))
+
+
+# -----------------------------------------------------------------------------
+# Warband Roster Backend v0.2 — canonical infrastructure, no launch mutation yet
+# -----------------------------------------------------------------------------
+
+func _ensure_warband_state() -> void:
+	if not warbands.is_empty():
+		return
+	var total_warriors: int = get_warrior_count()
+	var first: int = int(ceil(float(total_warriors) / 3.0))
+	var second: int = int(floor(float(total_warriors) / 3.0))
+	var third: int = max(0, total_warriors - first - second)
+	warbands["first_warband"] = _make_starting_warband("first_warband", "First Warband", "Household Captain", first)
+	warbands["second_warband"] = _make_starting_warband("second_warband", "Second Warband", "Senior Warrior", second)
+	warbands["third_warband"] = _make_starting_warband("third_warband", "Third Warband", "Young Captain", third)
+
+func _make_starting_warband(warband_id: String, name: String, commander: String, ready_warriors: int) -> Dictionary:
+	return {
+		"id": warband_id,
+		"name": name,
+		"commander": commander,
+		"doctrine": "unspecialised",
+		"ready_warriors": max(0, ready_warriors),
+		"injured_warriors": 0,
+		"dead_total": 0,
+		"xp": 0,
+		"level": 1,
+		"total_trait_points": 0,
+		"spent_trait_points": 0,
+		"trait_points": 0,
+		"purchased_traits": ["household_muster"],
+		"traits": ["household_muster"],
+		"skill_effects": {},
+		"specialisation": {},
+		"battle_history": []
+	}
+
+func _sync_warband_progress(warband: Dictionary) -> Dictionary:
+	var xp: int = max(0, int(warband.get("xp", 0)))
+	var level: int = _warband_level_for_xp(xp)
+	warband["xp"] = xp
+	warband["level"] = level
+	warband["xp_to_next"] = _warband_xp_to_next(level)
+	warband["xp_current_level_start"] = _warband_xp_required_for_level(level)
+	warband["xp_next_level"] = _warband_xp_required_for_level(level + 1)
+	warband["xp_in_level"] = xp - int(warband.get("xp_current_level_start", 0))
+	warband["xp_needed_in_level"] = max(1, int(warband.get("xp_next_level", 0)) - int(warband.get("xp_current_level_start", 0)))
+	warband["xp_progress"] = clampf(float(warband.get("xp_in_level", 0)) / float(warband.get("xp_needed_in_level", 1)), 0.0, 1.0)
+	warband = _ensure_warband_skill_defaults(warband)
+	warband["total_trait_points"] = max(0, level - 1)
+	warband["spent_trait_points"] = _warband_spent_trait_points(warband)
+	warband["trait_points"] = max(0, int(warband.get("total_trait_points", 0)) - int(warband.get("spent_trait_points", 0)))
+	warband["skill_effects"] = _warband_trait_effect_totals_from_purchased(_warband_purchased_trait_ids(warband))
+	warband["specialisation"] = _warband_specialisation_summary_for_warband(warband)
+	# Canonical rule: the Skill Web specialism is the warband's doctrine identity.
+	# Unspecialised warbands remain doctrine-neutral until a specialism gateway is bought.
+	warband["doctrine"] = _warband_doctrine_from_specialisation(warband)
+	return warband
+
+func _warband_xp_required_for_level(level: int) -> int:
+	var target: int = max(1, level)
+	return (target - 1) * target * 5
+
+func _warband_xp_to_next(level: int) -> int:
+	return _warband_xp_required_for_level(max(1, level) + 1)
+
+func _warband_level_for_xp(xp: int) -> int:
+	var level: int = 1
+	while xp >= _warband_xp_required_for_level(level + 1):
+		level += 1
+	return level
+
+func _warband_spent_trait_points(warband: Dictionary) -> int:
+	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
+	var spent: int = 0
+	for trait_id: String in purchased:
+		var node: Dictionary = _warband_skill_node_by_id(trait_id)
+		spent += max(0, int(node.get("cost", 0)))
+	return spent
+
+func _warband_doctrine_from_specialisation(warband: Dictionary) -> String:
+	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
+	var chosen_cluster: String = _warband_chosen_specialisation_cluster(purchased)
+	if FLOWER_WAR_DOCTRINES.has(chosen_cluster):
+		return chosen_cluster
+	return "unspecialised"
+
+
+func recover_injured_warriors_now() -> Dictionary:
+	# Test/dev helper. Normal recovery happens automatically when the Veintena advances.
+	_ensure_warband_state()
+	var report: Dictionary = _recover_injured_warriors()
+	emit_signal("state_changed")
+	return report
+
+func _recover_injured_warriors() -> Dictionary:
+	_ensure_warband_state()
+	var recovered_total: int = 0
+	var lines: Array[String] = []
+	for warband_id_variant: Variant in warbands.keys():
+		var warband_id: String = String(warband_id_variant)
+		var warband: Dictionary = warbands[warband_id] as Dictionary
+		var injured: int = max(0, int(warband.get("injured_warriors", 0)))
+		if injured <= 0:
+			continue
+		warband["ready_warriors"] = max(0, int(warband.get("ready_warriors", 0))) + injured
+		warband["injured_warriors"] = 0
+		warbands[warband_id] = _sync_warband_progress(warband)
+		recovered_total += injured
+		var name: String = String(warband.get("name", "Warband"))
+		lines.append(str(injured) + " injured warrior" + ("s" if injured != 1 else "") + " returned to " + name + ".")
+	if recovered_total > 0:
+		last_report.append("Warband recovery: " + " ".join(lines))
+	return {"recovered": recovered_total, "lines": lines}
+
+func get_warband_rows() -> Array[Dictionary]:
+	_ensure_warband_state()
+	var rows: Array[Dictionary] = []
+	for warband_id_variant: Variant in warbands.keys():
+		var warband_id: String = String(warband_id_variant)
+		var row: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+		warbands[warband_id] = row
+		var spec: Dictionary = row.get("specialisation", {}) as Dictionary
+		var combat_stats: Dictionary = _warband_combat_stats_from_warband(row)
+		row["specialisation_name"] = String(spec.get("name", "None"))
+		row["doctrine_name"] = String(combat_stats.get("doctrine_name", _warband_doctrine_name(String(row.get("doctrine", "unspecialised")))))
+		row["combat_stats"] = combat_stats
+		row["offence_modifier"] = float(combat_stats.get("offence_modifier", 1.0))
+		row["defence_modifier"] = float(combat_stats.get("defence_modifier", 1.0))
+		row["effective_offence"] = float(combat_stats.get("effective_offence", 0.0))
+		row["effective_defence"] = float(combat_stats.get("effective_defence", 0.0))
+		row["ready"] = int(row.get("ready_warriors", 0))
+		row["injured"] = int(row.get("injured_warriors", 0))
+		row["total"] = int(row.get("ready_warriors", 0)) + int(row.get("injured_warriors", 0))
+		row["warriors"] = int(row.get("ready_warriors", 0))
+		row["total_warriors"] = int(row.get("total", 0))
+		row["can_launch"] = int(row.get("ready_warriors", 0)) > 0
+		row["injured_recovery_text"] = "Injured warriors recover on the next Veintena advance." if int(row.get("injured_warriors", 0)) > 0 else "No injured warriors awaiting recovery."
+		rows.append(row)
+	return rows
+
+func get_warband_by_id(warband_id: String) -> Dictionary:
+	_ensure_warband_state()
+	if warbands.has(warband_id):
+		var row: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+		warbands[warband_id] = row
+		var spec: Dictionary = row.get("specialisation", {}) as Dictionary
+		var combat_stats: Dictionary = _warband_combat_stats_from_warband(row)
+		row["specialisation_name"] = String(spec.get("name", "None"))
+		row["doctrine_name"] = String(combat_stats.get("doctrine_name", _warband_doctrine_name(String(row.get("doctrine", "unspecialised")))))
+		row["combat_stats"] = combat_stats
+		row["offence_modifier"] = float(combat_stats.get("offence_modifier", 1.0))
+		row["defence_modifier"] = float(combat_stats.get("defence_modifier", 1.0))
+		row["effective_offence"] = float(combat_stats.get("effective_offence", 0.0))
+		row["effective_defence"] = float(combat_stats.get("effective_defence", 0.0))
+		return row
+	return {}
+
+func can_rename_warband(warband_id: String, new_name: String) -> Dictionary:
+	_ensure_warband_state()
+	if not warbands.has(warband_id):
+		return {"ok": false, "reason": "Unknown warband."}
+	var cleaned: String = new_name.strip_edges()
+	if cleaned == "":
+		return {"ok": false, "reason": "Warband name cannot be empty."}
+	if cleaned.length() > 32:
+		return {"ok": false, "reason": "Warband name must be 32 characters or fewer."}
+	for other_id_variant: Variant in warbands.keys():
+		var other_id: String = String(other_id_variant)
+		if other_id == warband_id:
+			continue
+		var other: Dictionary = warbands[other_id] as Dictionary
+		if String(other.get("name", "")).strip_edges().to_lower() == cleaned.to_lower():
+			return {"ok": false, "reason": "Another warband already uses that name."}
+	return {"ok": true, "reason": "Ready.", "clean_name": cleaned}
+
+func rename_warband(warband_id: String, new_name: String) -> Dictionary:
+	var status: Dictionary = can_rename_warband(warband_id, new_name)
+	if not bool(status.get("ok", false)):
+		last_report.append("Warband rename failed: " + String(status.get("reason", "Unknown reason.")))
+		emit_signal("state_changed")
+		return status
+	var warband: Dictionary = warbands[warband_id] as Dictionary
+	var old_name: String = String(warband.get("name", "Warband"))
+	var clean_name: String = String(status.get("clean_name", new_name.strip_edges()))
+	warband["name"] = clean_name
+	warbands[warband_id] = _sync_warband_progress(warband)
+	last_report.append(old_name + " renamed to " + clean_name + ".")
+	emit_signal("state_changed")
+	return {"ok": true, "reason": "Warband renamed.", "warband_id": warband_id, "name": clean_name}
+
+func can_set_warband_name(warband_id: String, new_name: String) -> Dictionary:
+	return can_rename_warband(warband_id, new_name)
+
+func set_warband_name(warband_id: String, new_name: String) -> Dictionary:
+	return rename_warband(warband_id, new_name)
+
+func get_primary_warband() -> Dictionary:
+	return get_warband_by_id("first_warband")
+
+func get_unassigned_warrior_pool() -> int:
+	return _unassigned_warrior_pool()
+
+func can_create_warband(name: String = "New Warband", warriors: int = 0, doctrine_id: String = "unspecialised", commander: String = "Household Captain") -> Dictionary:
+	_ensure_warband_state()
+	if warriors < 0:
+		return {"ok": false, "reason": "Warrior count cannot be negative."}
+	if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
+		return {"ok": false, "reason": "Unknown doctrine."}
+	var available: int = _unassigned_warrior_pool()
+	if warriors > available:
+		return {"ok": false, "reason": "Need " + str(warriors) + " unassigned warriors; only " + str(available) + " available."}
+	return {"ok": true, "reason": "Ready."}
+
+func create_warband(name: String = "New Warband", warriors: int = 0, doctrine_id: String = "unspecialised", commander: String = "Household Captain") -> Dictionary:
+	var status: Dictionary = can_create_warband(name, warriors, doctrine_id, commander)
+	if not bool(status.get("ok", false)):
+		return status
+	var base_id: String = name.strip_edges().to_lower().replace(" ", "_")
+	if base_id == "":
+		base_id = "warband"
+	var warband_id: String = base_id
+	var suffix: int = 2
+	while warbands.has(warband_id):
+		warband_id = base_id + "_" + str(suffix)
+		suffix += 1
+	warbands[warband_id] = _make_starting_warband(warband_id, name, commander, warriors)
+	warbands[warband_id]["doctrine"] = doctrine_id
+	emit_signal("state_changed")
+	return {"ok": true, "reason": "Created warband.", "warband_id": warband_id}
+
+func can_reinforce_warband(warband_id: String, amount: int) -> Dictionary:
+	return can_assign_warriors_to_warband(warband_id, amount)
+
+func reinforce_warband(warband_id: String, amount: int) -> Dictionary:
+	return assign_warriors_to_warband(warband_id, amount)
+
+func can_assign_warriors_to_warband(warband_id: String, amount: int) -> Dictionary:
+	_ensure_warband_state()
+	if not warbands.has(warband_id):
+		return {"ok": false, "reason": "Unknown warband."}
+	if amount <= 0:
+		return {"ok": false, "reason": "Choose at least 1 warrior."}
+	var available: int = _unassigned_warrior_pool()
+	if amount > available:
+		return {"ok": false, "reason": "Need " + str(amount) + " unassigned warriors; only " + str(available) + " available."}
+	return {"ok": true, "reason": "Ready."}
+
+func assign_warriors_to_warband(warband_id: String, amount: int) -> Dictionary:
+	var status: Dictionary = can_assign_warriors_to_warband(warband_id, amount)
+	if not bool(status.get("ok", false)):
+		return status
+	var warband: Dictionary = warbands[warband_id] as Dictionary
+	warband["ready_warriors"] = int(warband.get("ready_warriors", 0)) + amount
+	warbands[warband_id] = _sync_warband_progress(warband)
+	emit_signal("state_changed")
+	return {"ok": true, "reason": "Assigned " + str(amount) + " warriors to " + String(warband.get("name", "warband")) + "."}
+
+func can_unassign_warriors_from_warband(warband_id: String, amount: int) -> Dictionary:
+	_ensure_warband_state()
+	if not warbands.has(warband_id):
+		return {"ok": false, "reason": "Unknown warband."}
+	if amount <= 0:
+		return {"ok": false, "reason": "Choose at least 1 warrior."}
+	var warband: Dictionary = warbands[warband_id] as Dictionary
+	var ready: int = int(warband.get("ready_warriors", 0))
+	if amount > ready:
+		return {"ok": false, "reason": "Only " + str(ready) + " ready warriors can be unassigned."}
+	return {"ok": true, "reason": "Ready."}
+
+func unassign_warriors_from_warband(warband_id: String, amount: int) -> Dictionary:
+	var status: Dictionary = can_unassign_warriors_from_warband(warband_id, amount)
+	if not bool(status.get("ok", false)):
+		return status
+	var warband: Dictionary = warbands[warband_id] as Dictionary
+	warband["ready_warriors"] = max(0, int(warband.get("ready_warriors", 0)) - amount)
+	warbands[warband_id] = _sync_warband_progress(warband)
+	emit_signal("state_changed")
+	return {"ok": true, "reason": "Unassigned " + str(amount) + " warriors from " + String(warband.get("name", "warband")) + "."}
+
+func can_specialise_warband(warband_id: String, doctrine_id: String) -> Dictionary:
+	# Deprecated compatibility hook. Doctrine is no longer chosen through a
+	# separate oath/action; it is derived from the Skill Web specialism gateway.
+	_ensure_warband_state()
+	if not warbands.has(warband_id):
+		return {"ok": false, "reason": "Unknown warband."}
+	return {"ok": false, "reason": "Choose doctrine by purchasing a Skill Web specialism gateway."}
+
+func specialise_warband(warband_id: String, doctrine_id: String) -> Dictionary:
+	# Deprecated compatibility hook. Kept so older UI calls fail safely instead of
+	# silently changing doctrine outside the Skill Web.
+	return can_specialise_warband(warband_id, doctrine_id)
+
+func get_warband_skill_web(warband_id: String = "") -> Dictionary:
+	_ensure_warband_state()
+	var nodes: Array[Dictionary] = _warband_skill_node_definitions()
+	var connections: Array[Dictionary] = _warband_skill_connections()
+	if warband_id == "":
+		return {"ok": true, "nodes": nodes, "connections": connections, "description": "Warband Skill Web backend data. UI drawing comes later."}
+	if not warbands.has(warband_id):
+		return {"ok": false, "reason": "Unknown warband.", "nodes": nodes, "connections": connections}
+	var stored: Dictionary = warbands[warband_id] as Dictionary
+	var warband: Dictionary = _sync_warband_progress(stored.duplicate(true))
+	warbands[warband_id] = warband
+	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
+	var statuses: Dictionary = {}
+	for node: Dictionary in nodes:
+		var trait_id: String = String(node.get("id", ""))
+		if trait_id == "":
+			continue
+		var status: Dictionary = can_purchase_warband_trait(warband_id, trait_id)
+		var requirements_met: bool = _warband_trait_requirements_met(purchased, node)
+		statuses[trait_id] = {
+			"purchased": purchased.has(trait_id),
+			"requirements_met": requirements_met,
+			"can_purchase": bool(status.get("ok", false)),
+			"reason": String(status.get("reason", "")),
+			"cost": int(node.get("cost", 1)),
+			"cluster": String(node.get("cluster", "general"))
+		}
+	return {
+		"ok": true,
+		"warband": warband,
+		"combat_stats": _warband_combat_stats_from_warband(warband),
+		"nodes": nodes,
+		"traits": nodes,
+		"connections": connections,
+		"statuses": statuses,
+		"points_available": int(warband.get("trait_points", 0)),
+		"points_total": int(warband.get("total_trait_points", 0)),
+		"points_spent": int(warband.get("spent_trait_points", 0)),
+		"purchased_traits": purchased,
+		"available_traits": get_warband_available_traits(warband_id),
+		"locked_traits": get_warband_locked_traits(warband_id),
+		"effect_totals": get_warband_trait_effect_totals(warband_id),
+		"specialisation": get_warband_specialisation_summary(warband_id)
+	}
+
+func get_warband_trait_tree(warband_id: String) -> Dictionary:
+	# Backwards-compatible name. The old rigid trait tree is now a Diablo/PoE-style
+	# connected skill web with clusters and mutually exclusive specialism gateways.
+	return get_warband_skill_web(warband_id)
+
+func get_warband_trait_points(warband_id: String) -> int:
+	_ensure_warband_state()
+	if not warbands.has(warband_id):
+		return 0
+	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+	warbands[warband_id] = warband
+	return int(warband.get("trait_points", 0))
+
+func get_warband_purchased_traits(warband_id: String) -> Array[String]:
+	_ensure_warband_state()
+	if not warbands.has(warband_id):
+		return []
+	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+	warbands[warband_id] = warband
+	return _warband_purchased_trait_ids(warband)
+
+func get_warband_available_traits(warband_id: String) -> Array[Dictionary]:
+	_ensure_warband_state()
+	var output: Array[Dictionary] = []
+	if not warbands.has(warband_id):
+		return output
+	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+	warbands[warband_id] = warband
+	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
+	var points: int = int(warband.get("trait_points", 0))
+	for node: Dictionary in _warband_skill_node_definitions():
+		var trait_id: String = String(node.get("id", ""))
+		if trait_id == "" or purchased.has(trait_id):
+			continue
+		if _warband_trait_locked_by_specialisation(purchased, node):
+			continue
+		if not _warband_trait_requirements_met(purchased, node):
+			continue
+		var row: Dictionary = node.duplicate(true)
+		row["can_afford"] = points >= int(node.get("cost", 1))
+		row["status_text"] = "Available" if bool(row.get("can_afford", false)) else "Connected, but needs more skill points"
+		output.append(row)
+	return output
+
+func get_warband_locked_traits(warband_id: String) -> Array[Dictionary]:
+	_ensure_warband_state()
+	var output: Array[Dictionary] = []
+	if not warbands.has(warband_id):
+		return output
+	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+	warbands[warband_id] = warband
+	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
+	for node: Dictionary in _warband_skill_node_definitions():
+		var trait_id: String = String(node.get("id", ""))
+		if trait_id == "" or purchased.has(trait_id):
+			continue
+		if _warband_trait_locked_by_specialisation(purchased, node):
+			var spec_row: Dictionary = node.duplicate(true)
+			spec_row["status_text"] = _warband_specialisation_lock_text(purchased)
+			output.append(spec_row)
+			continue
+		if _warband_trait_requirements_met(purchased, node):
+			continue
+		var row: Dictionary = node.duplicate(true)
+		row["status_text"] = "Locked: requires " + _warband_requirements_text(node)
+		output.append(row)
+	return output
+
+func can_purchase_warband_trait(warband_id: String, trait_id: String) -> Dictionary:
+	_ensure_warband_state()
+	if not warbands.has(warband_id):
+		return {"ok": false, "reason": "Unknown warband."}
+	var node: Dictionary = _warband_skill_node_by_id(trait_id)
+	if node.is_empty():
+		return {"ok": false, "reason": "Unknown skill node."}
+	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+	warbands[warband_id] = warband
+	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
+	if purchased.has(trait_id):
+		return {"ok": false, "reason": "Already purchased."}
+	if _warband_trait_locked_by_specialisation(purchased, node):
+		return {"ok": false, "reason": _warband_specialisation_lock_text(purchased)}
+	if not _warband_trait_requirements_met(purchased, node):
+		return {"ok": false, "reason": "Requires " + _warband_requirements_text(node) + "."}
+	var cost: int = max(0, int(node.get("cost", 1)))
+	var points: int = int(warband.get("trait_points", 0))
+	if points < cost:
+		return {"ok": false, "reason": "Need " + str(cost) + " skill point(s); only " + str(points) + " available."}
+	return {"ok": true, "reason": "Ready.", "cost": cost, "points_available": points, "trait": node.duplicate(true)}
+
+func purchase_warband_trait(warband_id: String, trait_id: String) -> Dictionary:
+	var status: Dictionary = can_purchase_warband_trait(warband_id, trait_id)
+	if not bool(status.get("ok", false)):
+		return status
+	var node: Dictionary = _warband_skill_node_by_id(trait_id)
+	var warband: Dictionary = warbands[warband_id] as Dictionary
+	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
+	purchased.append(trait_id)
+	warband["purchased_traits"] = purchased
+	warband["traits"] = purchased.duplicate()
+	warband = _sync_warband_progress(warband)
+	warbands[warband_id] = warband
+	var spec: Dictionary = warband.get("specialisation", {}) as Dictionary
+	var message: String = String(warband.get("name", "Warband")) + " purchased skill node: " + String(node.get("name", trait_id)) + ". Specialisation: " + String(spec.get("name", "Unspecialised")) + "."
+	if bool(node.get("specialisation", false)):
+		message += " Combat doctrine is now " + _warband_doctrine_name(String(warband.get("doctrine", "unspecialised"))) + "."
+	last_report.append(message)
+	emit_signal("state_changed")
+	return {"ok": true, "reason": message, "warband": warband.duplicate(true), "specialisation": spec}
+
+func get_warband_trait_effect_totals(warband_id: String) -> Dictionary:
+	_ensure_warband_state()
+	if not warbands.has(warband_id):
+		return {}
+	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+	warbands[warband_id] = warband
+	return _warband_trait_effect_totals_from_purchased(_warband_purchased_trait_ids(warband))
+
+func get_warband_specialisation_summary(warband_id: String) -> Dictionary:
+	_ensure_warband_state()
+	if not warbands.has(warband_id):
+		return {"name": "Unknown", "primary": "", "secondary": "", "keystones": [], "points_by_cluster": {}}
+	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+	warbands[warband_id] = warband
+	return (warband.get("specialisation", {}) as Dictionary).duplicate(true)
+
+func _ensure_warband_skill_defaults(warband: Dictionary) -> Dictionary:
+	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
+	if not purchased.has("household_muster"):
+		purchased.insert(0, "household_muster")
+	warband["purchased_traits"] = purchased
+	warband["traits"] = purchased.duplicate()
+	return warband
+
+func _warband_purchased_trait_ids(warband: Dictionary) -> Array[String]:
+	var output: Array[String] = []
+	var raw: Array = []
+	if warband.has("purchased_traits"):
+		raw = warband.get("purchased_traits", []) as Array
+	elif warband.has("traits"):
+		raw = warband.get("traits", []) as Array
+	for item_variant: Variant in raw:
+		var trait_id: String = String(item_variant)
+		if trait_id == "":
+			continue
+		if output.has(trait_id):
+			continue
+		if _warband_skill_node_by_id(trait_id).is_empty():
+			continue
+		output.append(trait_id)
+	if output.is_empty():
+		output.append("household_muster")
+	elif not output.has("household_muster"):
+		output.insert(0, "household_muster")
+	return output
+
+func _warband_trait_effect_totals_from_purchased(purchased: Array[String]) -> Dictionary:
+	var result: Dictionary = {}
+	for trait_id: String in purchased:
+		var node: Dictionary = _warband_skill_node_by_id(trait_id)
+		var effects: Dictionary = node.get("effects", {}) as Dictionary
+		for effect_variant: Variant in effects.keys():
+			var effect_id: String = String(effect_variant)
+			result[effect_id] = float(result.get(effect_id, 0.0)) + float(effects[effect_variant])
+	return result
+
+func _warband_specialisation_summary_for_warband(warband: Dictionary) -> Dictionary:
+	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
+	var point_clusters: Dictionary = {"eagle": 0, "jaguar": 0, "otomi": 0, "coyote": 0, "veteran": 0, "supply": 0, "core": 0}
+	var keystones: Array[String] = _warband_purchased_specialisation_clusters(purchased)
+	for trait_id: String in purchased:
+		var node: Dictionary = _warband_skill_node_by_id(trait_id)
+		var cluster: String = String(node.get("cluster", "core"))
+		var cost: int = max(0, int(node.get("cost", 0)))
+		point_clusters[cluster] = int(point_clusters.get(cluster, 0)) + cost
+	var military_clusters: Array[String] = ["eagle", "jaguar", "otomi", "coyote"]
+	var primary: String = ""
+	var primary_points: int = 0
+	for cluster_id: String in military_clusters:
+		var points: int = int(point_clusters.get(cluster_id, 0))
+		if points > primary_points:
+			primary = cluster_id
+			primary_points = points
+	var name: String = "Unspecialised"
+	var style: String = "none"
+	var locked: bool = false
+	if not keystones.is_empty():
+		primary = keystones[0]
+		locked = true
+		style = "specialised"
+		name = _warband_cluster_display_name(primary) + " Specialist"
+		if keystones.size() > 1:
+			# Legacy safeguard for older test saves made before specialisms locked.
+			name += " (legacy mixed)"
+			style = "legacy_mixed"
+	elif primary != "" and primary_points > 0:
+		name = _warband_cluster_display_name(primary) + "-leaning"
+		style = "leaning"
+	var doctrine_id: String = primary if locked and FLOWER_WAR_DOCTRINES.has(primary) else "unspecialised"
+	return {
+		"name": name,
+		"style": style,
+		"primary": primary,
+		"primary_name": _warband_cluster_display_name(primary),
+		"secondary": "",
+		"secondary_name": "None",
+		"keystones": keystones,
+		"locked_specialism": locked,
+		"specialism_locked": locked,
+		"doctrine_id": doctrine_id,
+		"doctrine_name": _warband_doctrine_name(doctrine_id),
+		"sets_combat_doctrine": locked,
+		"points_by_cluster": point_clusters,
+		"effect_totals": _warband_trait_effect_totals_from_purchased(purchased)
+	}
+
+func _warband_cluster_display_name(cluster_id: String) -> String:
+	match cluster_id:
+		"eagle":
+			return "Eagle"
+		"jaguar":
+			return "Jaguar"
+		"otomi":
+			return "Otomi"
+		"coyote":
+			return "Coyote"
+		"veteran":
+			return "Veteran"
+		"supply":
+			return "Supply"
+		"core":
+			return "Household"
+	return cluster_id.capitalize()
+
+
+func _warband_chosen_specialisation_cluster(purchased: Array[String]) -> String:
+	for trait_id: String in purchased:
+		var node: Dictionary = _warband_skill_node_by_id(trait_id)
+		if bool(node.get("specialisation", false)):
+			return String(node.get("cluster", ""))
+	return ""
+
+func _warband_purchased_specialisation_clusters(purchased: Array[String]) -> Array[String]:
+	var output: Array[String] = []
+	for trait_id: String in purchased:
+		var node: Dictionary = _warband_skill_node_by_id(trait_id)
+		if bool(node.get("specialisation", false)):
+			var cluster_id: String = String(node.get("cluster", ""))
+			if cluster_id != "" and not output.has(cluster_id):
+				output.append(cluster_id)
+	return output
+
+func _warband_trait_locked_by_specialisation(purchased: Array[String], node: Dictionary) -> bool:
+	# A warband may only take one major troop specialism. The approach and
+	# preparation nodes remain open, but once a specialist gateway is bought,
+	# the other specialist gateways are permanently locked.
+	if not bool(node.get("specialisation", false)):
+		return false
+	var chosen_cluster: String = _warband_chosen_specialisation_cluster(purchased)
+	if chosen_cluster == "":
+		return false
+	return String(node.get("cluster", "")) != chosen_cluster
+
+func _warband_specialisation_lock_text(purchased: Array[String]) -> String:
+	var chosen_cluster: String = _warband_chosen_specialisation_cluster(purchased)
+	if chosen_cluster == "":
+		return ""
+	return "Locked by " + _warband_cluster_display_name(chosen_cluster) + " specialism. A warband can only choose one specialism."
+
+func _warband_trait_requirements_met(purchased: Array[String], node: Dictionary) -> bool:
+	var requirements: Array = node.get("requires", []) as Array
+	for req_variant: Variant in requirements:
+		var req_id: String = String(req_variant)
+		if not purchased.has(req_id):
+			return false
+	var any_requirements: Array = node.get("requires_any", []) as Array
+	if not any_requirements.is_empty():
+		var any_met: bool = false
+		for req_variant: Variant in any_requirements:
+			var req_id: String = String(req_variant)
+			if purchased.has(req_id):
+				any_met = true
+				break
+		if not any_met:
+			return false
+	return true
+
+func _warband_requirements_text(node: Dictionary) -> String:
+	var requirements: Array = node.get("requires", []) as Array
+	var any_requirements: Array = node.get("requires_any", []) as Array
+	var names: Array[String] = []
+	for req_variant: Variant in requirements:
+		var req_id: String = String(req_variant)
+		var req_node: Dictionary = _warband_skill_node_by_id(req_id)
+		if req_node.is_empty():
+			names.append(req_id)
+		else:
+			names.append(String(req_node.get("name", req_id)))
+	var any_names: Array[String] = []
+	for req_variant: Variant in any_requirements:
+		var req_id: String = String(req_variant)
+		var req_node: Dictionary = _warband_skill_node_by_id(req_id)
+		if req_node.is_empty():
+			any_names.append(req_id)
+		else:
+			any_names.append(String(req_node.get("name", req_id)))
+	if names.is_empty() and any_names.is_empty():
+		return "no prerequisite"
+	if names.is_empty():
+		return "one of " + ", ".join(any_names)
+	if any_names.is_empty():
+		return ", ".join(names)
+	return ", ".join(names) + " and one of " + ", ".join(any_names)
+
+func _warband_skill_connections() -> Array[Dictionary]:
+	var output: Array[Dictionary] = []
+	for node: Dictionary in _warband_skill_node_definitions():
+		var to_id: String = String(node.get("id", ""))
+		var requirements: Array = node.get("requires", []) as Array
+		for req_variant: Variant in requirements:
+			output.append({"from": String(req_variant), "to": to_id, "type": "required"})
+		var any_requirements: Array = node.get("requires_any", []) as Array
+		for req_variant: Variant in any_requirements:
+			output.append({"from": String(req_variant), "to": to_id, "type": "any"})
+	return output
+
+func _warband_skill_node_by_id(trait_id: String) -> Dictionary:
+	for node: Dictionary in _warband_skill_node_definitions():
+		if String(node.get("id", "")) == trait_id:
+			return node.duplicate(true)
+	return {}
+
+func _warband_skill_node_definitions() -> Array[Dictionary]:
+	# v0.12.11 symmetric branched rejoin web structure.
+	# Each doctrine follows the same symmetric readable pattern:
+	# approach -> preparation -> specialist gateway -> three short branches ->
+	# elite rejoin node -> three advanced branches -> final chosen capstone.
+	# Specialisation gateways are now mutually exclusive: one warband, one major troop specialism.
+	return [
+		{
+			"id": "household_muster",
+			"name": "Household Muster",
+			"cluster": "core",
+			"tier": 0,
+			"x": 0,
+			"y": 0,
+			"cost": 0,
+			"effects": {
+				"readiness_add": 1.0
+			},
+			"description": "The founding muster node. Every warband starts here for free."
+		},
+		{
+			"id": "formation_drill",
+			"name": "Formation Drill",
+			"cluster": "core",
+			"tier": 1,
+			"x": 0,
+			"y": 1,
+			"cost": 1,
+			"requires": [
+				"household_muster"
+			],
+			"effects": {
+				"defence_add": 0.01
+			},
+			"description": "Basic formation practice makes the band steadier in battle."
+		},
+		{
+			"id": "weapon_familiarity",
+			"name": "Weapon Familiarity",
+			"cluster": "core",
+			"tier": 1,
+			"x": 1,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"household_muster"
+			],
+			"effects": {
+				"offence_add": 0.01
+			},
+			"description": "Warriors become more comfortable with house weapons and drill patterns."
+		},
+		{
+			"id": "veteran_captains",
+			"name": "Veteran Captains",
+			"cluster": "veteran",
+			"tier": 1,
+			"x": -1,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"household_muster"
+			],
+			"effects": {
+				"xp_gain_add": 0.02
+			},
+			"description": "Experienced captains help the warband learn from each expedition."
+		},
+		{
+			"id": "battle_rhythm",
+			"name": "Battle Rhythm",
+			"cluster": "veteran",
+			"tier": 2,
+			"x": 0,
+			"y": -1,
+			"cost": 1,
+			"requires": [
+				"household_muster"
+			],
+			"effects": {
+				"offence_add": 0.005,
+				"defence_add": 0.005,
+				"provisioning_discount_add": 0.01
+			},
+			"description": "The company learns how to move, close, withdraw, reform and keep supplies ordered as one body. This now folds in the old Supply Habits support bonus so the centre web stays clean and symmetrical."
+		},
+		{
+			"id": "eagle_approach",
+			"name": "Eagle Approach",
+			"cluster": "eagle",
+			"tier": 1,
+			"x": 0,
+			"y": 3,
+			"cost": 1,
+			"requires": [
+				"formation_drill"
+			],
+			"effects": {
+				"capture_chance_add": 0.01
+			},
+			"description": "The warband begins training toward controlled capture and disciplined advance."
+		},
+		{
+			"id": "eagle_controlled_advance",
+			"name": "Controlled Advance",
+			"cluster": "eagle",
+			"tier": 2,
+			"x": 0,
+			"y": 4,
+			"cost": 1,
+			"requires": [
+				"eagle_approach"
+			],
+			"effects": {
+				"capture_chance_add": 0.015,
+				"defence_add": 0.01
+			},
+			"description": "The band learns to close while preserving valuable enemies alive."
+		},
+		{
+			"id": "eagle_specialisation",
+			"name": "Eagle Specialist",
+			"cluster": "eagle",
+			"tier": 3,
+			"x": 0,
+			"y": 5,
+			"cost": 1,
+			"requires": [
+				"eagle_controlled_advance"
+			],
+			"effects": {
+				"capture_chance_add": 0.025
+			},
+			"description": "A locking specialism gateway into Eagle traditions. Once chosen, other troop specialism gateways are closed to this warband.",
+			"specialisation": true
+		},
+		{
+			"id": "eagle_net_drill",
+			"name": "Net Drill",
+			"cluster": "eagle",
+			"tier": 4,
+			"x": -2,
+			"y": 6,
+			"cost": 1,
+			"requires": [
+				"eagle_specialisation"
+			],
+			"effects": {
+				"capture_chance_add": 0.025
+			},
+			"description": "Capture",
+			"path": "capture"
+		},
+		{
+			"id": "eagle_prisoner_rings",
+			"name": "Prisoner Rings",
+			"cluster": "eagle",
+			"tier": 5,
+			"x": -2,
+			"y": 7,
+			"cost": 1,
+			"requires": [
+				"eagle_net_drill"
+			],
+			"effects": {
+				"capture_chance_add": 0.03
+			},
+			"description": "Capture",
+			"path": "capture"
+		},
+		{
+			"id": "eagle_living_tribute",
+			"name": "Living Tribute",
+			"cluster": "eagle",
+			"tier": 6,
+			"x": -2,
+			"y": 8,
+			"cost": 1,
+			"requires": [
+				"eagle_prisoner_rings"
+			],
+			"effects": {
+				"capture_chance_add": 0.04
+			},
+			"description": "Capture",
+			"path": "capture"
+		},
+		{
+			"id": "eagle_temple_guard",
+			"name": "Temple Guard",
+			"cluster": "eagle",
+			"tier": 4,
+			"x": 0,
+			"y": 6,
+			"cost": 1,
+			"requires": [
+				"eagle_specialisation"
+			],
+			"effects": {
+				"defence_add": 0.025
+			},
+			"description": "Temple",
+			"path": "temple"
+		},
+		{
+			"id": "eagle_sacred_discipline",
+			"name": "Sacred Discipline",
+			"cluster": "eagle",
+			"tier": 5,
+			"x": 0,
+			"y": 7,
+			"cost": 1,
+			"requires": [
+				"eagle_temple_guard"
+			],
+			"effects": {
+				"defence_add": 0.03
+			},
+			"description": "Temple",
+			"path": "temple"
+		},
+		{
+			"id": "eagle_shielded_capture",
+			"name": "Shielded Capture",
+			"cluster": "eagle",
+			"tier": 6,
+			"x": 0,
+			"y": 8,
+			"cost": 1,
+			"requires": [
+				"eagle_sacred_discipline"
+			],
+			"effects": {
+				"defence_add": 0.025,
+				"capture_chance_add": 0.015
+			},
+			"description": "Temple",
+			"path": "temple"
+		},
+		{
+			"id": "eagle_war_banners",
+			"name": "War Banners",
+			"cluster": "eagle",
+			"tier": 4,
+			"x": 2,
+			"y": 6,
+			"cost": 1,
+			"requires": [
+				"eagle_specialisation"
+			],
+			"effects": {
+				"prestige_pending_add": 0.025
+			},
+			"description": "Banner",
+			"path": "banner"
+		},
+		{
+			"id": "eagle_noble_witnesses",
+			"name": "Noble Witnesses",
+			"cluster": "eagle",
+			"tier": 5,
+			"x": 2,
+			"y": 7,
+			"cost": 1,
+			"requires": [
+				"eagle_war_banners"
+			],
+			"effects": {
+				"prestige_pending_add": 0.035
+			},
+			"description": "Banner",
+			"path": "banner"
+		},
+		{
+			"id": "eagle_victory_procession",
+			"name": "Victory Procession",
+			"cluster": "eagle",
+			"tier": 6,
+			"x": 2,
+			"y": 8,
+			"cost": 1,
+			"requires": [
+				"eagle_noble_witnesses"
+			],
+			"effects": {
+				"prestige_pending_add": 0.045
+			},
+			"description": "Banner",
+			"path": "banner"
+		},
+		{
+			"id": "elite_eagle_warriors",
+			"name": "Elite Eagle Warriors",
+			"cluster": "eagle",
+			"tier": 7,
+			"x": 0,
+			"y": 9,
+			"cost": 1,
+			"requires": [
+				"eagle_specialisation"
+			],
+			"requires_any": [
+				"eagle_living_tribute",
+				"eagle_shielded_capture",
+				"eagle_victory_procession"
+			],
+			"effects": {
+				"capture_chance_add": 0.04,
+				"defence_add": 0.02
+			},
+			"description": "The branches rejoin into an elite Eagle company identity. Any completed first Eagle branch can reach this node.",
+			"rejoin": true
+		},
+		{
+			"id": "eagle_captive_masters",
+			"name": "Captive Masters",
+			"cluster": "eagle",
+			"tier": 8,
+			"x": -2,
+			"y": 10,
+			"cost": 1,
+			"requires": [
+				"elite_eagle_warriors"
+			],
+			"effects": {
+				"capture_chance_add": 0.045
+			},
+			"description": "High Captors",
+			"path": "high_capture"
+		},
+		{
+			"id": "eagle_prince_takers",
+			"name": "Prince Takers",
+			"cluster": "eagle",
+			"tier": 9,
+			"x": -2,
+			"y": 11,
+			"cost": 1,
+			"requires": [
+				"eagle_captive_masters"
+			],
+			"effects": {
+				"capture_chance_add": 0.055
+			},
+			"description": "High Captors",
+			"path": "high_capture"
+		},
+		{
+			"id": "eagle_temple_oath",
+			"name": "Temple Oath",
+			"cluster": "eagle",
+			"tier": 8,
+			"x": 0,
+			"y": 10,
+			"cost": 1,
+			"requires": [
+				"elite_eagle_warriors"
+			],
+			"effects": {
+				"defence_add": 0.04
+			},
+			"description": "Honour Guard",
+			"path": "honour"
+		},
+		{
+			"id": "eagle_guarded_return",
+			"name": "Guarded Return",
+			"cluster": "eagle",
+			"tier": 9,
+			"x": 0,
+			"y": 11,
+			"cost": 1,
+			"requires": [
+				"eagle_temple_oath"
+			],
+			"effects": {
+				"defence_add": 0.04,
+				"death_chance_add": -0.01
+			},
+			"description": "Honour Guard",
+			"path": "honour"
+		},
+		{
+			"id": "eagle_procession_songs",
+			"name": "Procession Songs",
+			"cluster": "eagle",
+			"tier": 8,
+			"x": 2,
+			"y": 10,
+			"cost": 1,
+			"requires": [
+				"elite_eagle_warriors"
+			],
+			"effects": {
+				"prestige_pending_add": 0.045
+			},
+			"description": "Public Glory",
+			"path": "public"
+		},
+		{
+			"id": "eagle_radiant_standards",
+			"name": "Radiant Standards",
+			"cluster": "eagle",
+			"tier": 9,
+			"x": 2,
+			"y": 11,
+			"cost": 1,
+			"requires": [
+				"eagle_procession_songs"
+			],
+			"effects": {
+				"prestige_pending_add": 0.06
+			},
+			"description": "Public Glory",
+			"path": "public"
+		},
+		{
+			"id": "chosen_eagles",
+			"name": "Chosen Eagles",
+			"cluster": "eagle",
+			"tier": 10,
+			"x": 0,
+			"y": 12,
+			"cost": 1,
+			"requires": [
+				"elite_eagle_warriors"
+			],
+			"requires_any": [
+				"eagle_prince_takers",
+				"eagle_guarded_return",
+				"eagle_radiant_standards"
+			],
+			"effects": {
+				"capture_chance_add": 0.075,
+				"prestige_pending_add": 0.035
+			},
+			"description": "The advanced branches rejoin into the Chosen Eagles: an elite warband known for living captives, sacred discipline and public honour.",
+			"capstone": true,
+			"rejoin": true,
+			"chosen_capstone": true
+		},
+		{
+			"id": "jaguar_approach",
+			"name": "Jaguar Approach",
+			"cluster": "jaguar",
+			"tier": 1,
+			"x": 3,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"weapon_familiarity"
+			],
+			"effects": {
+				"offence_add": 0.02
+			},
+			"description": "The warband begins training toward shock, killing power and visible martial fame."
+		},
+		{
+			"id": "jaguar_close_drill",
+			"name": "Close Drill",
+			"cluster": "jaguar",
+			"tier": 2,
+			"x": 4,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"jaguar_approach"
+			],
+			"effects": {
+				"offence_add": 0.025
+			},
+			"description": "Close-order fighting makes the band more dangerous once battle is joined."
+		},
+		{
+			"id": "jaguar_specialisation",
+			"name": "Jaguar Specialist",
+			"cluster": "jaguar",
+			"tier": 3,
+			"x": 5,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"jaguar_close_drill"
+			],
+			"effects": {
+				"offence_add": 0.03
+			},
+			"description": "A locking specialism gateway into Jaguar traditions. Once chosen, other troop specialism gateways are closed to this warband.",
+			"specialisation": true
+		},
+		{
+			"id": "jaguar_blooded_charge",
+			"name": "Blooded Charge",
+			"cluster": "jaguar",
+			"tier": 4,
+			"x": 6,
+			"y": 2,
+			"cost": 1,
+			"requires": [
+				"jaguar_specialisation"
+			],
+			"effects": {
+				"offence_add": 0.025
+			},
+			"description": "The Blooded line favours direct assault and decisive melee pressure.",
+			"path": "blooded"
+		},
+		{
+			"id": "jaguar_close_killers",
+			"name": "Close Killers",
+			"cluster": "jaguar",
+			"tier": 5,
+			"x": 7,
+			"y": 2,
+			"cost": 1,
+			"requires": [
+				"jaguar_blooded_charge"
+			],
+			"effects": {
+				"offence_add": 0.03
+			},
+			"description": "The Blooded line favours direct assault and decisive melee pressure.",
+			"path": "blooded"
+		},
+		{
+			"id": "jaguar_red_hands",
+			"name": "Red Hands",
+			"cluster": "jaguar",
+			"tier": 6,
+			"x": 8,
+			"y": 2,
+			"cost": 1,
+			"requires": [
+				"jaguar_close_killers"
+			],
+			"effects": {
+				"offence_add": 0.035
+			},
+			"description": "The Blooded line favours direct assault and decisive melee pressure.",
+			"path": "blooded"
+		},
+		{
+			"id": "jaguar_trophy_display",
+			"name": "Trophy Display",
+			"cluster": "jaguar",
+			"tier": 4,
+			"x": 6,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"jaguar_specialisation"
+			],
+			"effects": {
+				"prestige_pending_add": 0.03
+			},
+			"description": "The Trophy line turns victories into renown and fear.",
+			"path": "trophy"
+		},
+		{
+			"id": "jaguar_war_fame",
+			"name": "War Fame",
+			"cluster": "jaguar",
+			"tier": 5,
+			"x": 7,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"jaguar_trophy_display"
+			],
+			"effects": {
+				"prestige_pending_add": 0.035
+			},
+			"description": "The Trophy line turns victories into renown and fear.",
+			"path": "trophy"
+		},
+		{
+			"id": "jaguar_public_terror",
+			"name": "Public Terror",
+			"cluster": "jaguar",
+			"tier": 6,
+			"x": 8,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"jaguar_war_fame"
+			],
+			"effects": {
+				"prestige_pending_add": 0.04
+			},
+			"description": "The Trophy line turns victories into renown and fear.",
+			"path": "trophy"
+		},
+		{
+			"id": "jaguar_death_oath",
+			"name": "Death-Seeker Oath",
+			"cluster": "jaguar",
+			"tier": 4,
+			"x": 6,
+			"y": -2,
+			"cost": 1,
+			"requires": [
+				"jaguar_specialisation"
+			],
+			"effects": {
+				"offence_add": 0.02,
+				"death_chance_add": 0.005
+			},
+			"description": "The Death-Seeker line trades safety for terrifying commitment.",
+			"path": "death"
+		},
+		{
+			"id": "jaguar_ritual_ferocity",
+			"name": "Ritual Ferocity",
+			"cluster": "jaguar",
+			"tier": 5,
+			"x": 7,
+			"y": -2,
+			"cost": 1,
+			"requires": [
+				"jaguar_death_oath"
+			],
+			"effects": {
+				"offence_add": 0.025,
+				"capture_chance_add": 0.005
+			},
+			"description": "The Death-Seeker line trades safety for terrifying commitment.",
+			"path": "death"
+		},
+		{
+			"id": "jaguar_no_retreat",
+			"name": "No Retreat",
+			"cluster": "jaguar",
+			"tier": 6,
+			"x": 8,
+			"y": -2,
+			"cost": 1,
+			"requires": [
+				"jaguar_ritual_ferocity"
+			],
+			"effects": {
+				"offence_add": 0.035,
+				"defence_add": -0.005
+			},
+			"description": "The Death-Seeker line trades safety for terrifying commitment.",
+			"path": "death"
+		},
+		{
+			"id": "elite_jaguar_warriors",
+			"name": "Elite Jaguar Warriors",
+			"cluster": "jaguar",
+			"tier": 7,
+			"x": 9,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"jaguar_specialisation"
+			],
+			"requires_any": [
+				"jaguar_red_hands",
+				"jaguar_public_terror",
+				"jaguar_no_retreat"
+			],
+			"effects": {
+				"offence_add": 0.05,
+				"defence_add": 0.015
+			},
+			"description": "The branches rejoin into an elite Jaguar company identity. Any completed first Jaguar branch can reach this node.",
+			"rejoin": true
+		},
+		{
+			"id": "jaguar_breaking_strike",
+			"name": "Breaking Strike",
+			"cluster": "jaguar",
+			"tier": 8,
+			"x": 10,
+			"y": 2,
+			"cost": 1,
+			"requires": [
+				"elite_jaguar_warriors"
+			],
+			"effects": {
+				"offence_add": 0.04,
+				"enemy_defence_add": -0.005
+			},
+			"description": "Elite Butchers",
+			"path": "butchers"
+		},
+		{
+			"id": "jaguar_blooded_veterans",
+			"name": "Blooded Veterans",
+			"cluster": "jaguar",
+			"tier": 9,
+			"x": 11,
+			"y": 2,
+			"cost": 1,
+			"requires": [
+				"jaguar_breaking_strike"
+			],
+			"effects": {
+				"offence_add": 0.05
+			},
+			"description": "Elite Butchers",
+			"path": "butchers"
+		},
+		{
+			"id": "jaguar_named_victories",
+			"name": "Named Victories",
+			"cluster": "jaguar",
+			"tier": 8,
+			"x": 10,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"elite_jaguar_warriors"
+			],
+			"effects": {
+				"prestige_pending_add": 0.045
+			},
+			"description": "Fame Bearers",
+			"path": "fame"
+		},
+		{
+			"id": "jaguar_trophy_procession",
+			"name": "Trophy Procession",
+			"cluster": "jaguar",
+			"tier": 9,
+			"x": 11,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"jaguar_named_victories"
+			],
+			"effects": {
+				"prestige_pending_add": 0.06
+			},
+			"description": "Fame Bearers",
+			"path": "fame"
+		},
+		{
+			"id": "jaguar_blood_debt",
+			"name": "Blood Debt",
+			"cluster": "jaguar",
+			"tier": 8,
+			"x": 10,
+			"y": -2,
+			"cost": 1,
+			"requires": [
+				"elite_jaguar_warriors"
+			],
+			"effects": {
+				"capture_chance_add": 0.015,
+				"offence_add": 0.025
+			},
+			"description": "Ritual Killers",
+			"path": "ritual"
+		},
+		{
+			"id": "jaguar_ritual_panic",
+			"name": "Ritual Panic",
+			"cluster": "jaguar",
+			"tier": 9,
+			"x": 11,
+			"y": -2,
+			"cost": 1,
+			"requires": [
+				"jaguar_blood_debt"
+			],
+			"effects": {
+				"offence_add": 0.04,
+				"capture_chance_add": 0.02
+			},
+			"description": "Ritual Killers",
+			"path": "ritual"
+		},
+		{
+			"id": "chosen_jaguars",
+			"name": "Chosen Jaguars",
+			"cluster": "jaguar",
+			"tier": 10,
+			"x": 12,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"elite_jaguar_warriors"
+			],
+			"requires_any": [
+				"jaguar_blooded_veterans",
+				"jaguar_trophy_procession",
+				"jaguar_ritual_panic"
+			],
+			"effects": {
+				"offence_add": 0.08,
+				"prestige_pending_add": 0.04
+			},
+			"description": "The advanced branches rejoin into the Chosen Jaguars: a famous elite warband whose identity is built on fear, trophies and decisive violence.",
+			"capstone": true,
+			"rejoin": true,
+			"chosen_capstone": true
+		},
+		{
+			"id": "otomi_approach",
+			"name": "Otomi Approach",
+			"cluster": "otomi",
+			"tier": 1,
+			"x": -3,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"veteran_captains"
+			],
+			"effects": {
+				"defence_add": 0.02
+			},
+			"description": "The warband begins training toward endurance, formation and survival."
+		},
+		{
+			"id": "otomi_brace_drill",
+			"name": "Brace Drill",
+			"cluster": "otomi",
+			"tier": 2,
+			"x": -4,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"otomi_approach"
+			],
+			"effects": {
+				"defence_add": 0.025
+			},
+			"description": "The band learns to absorb pressure without breaking."
+		},
+		{
+			"id": "otomi_specialisation",
+			"name": "Otomi Specialist",
+			"cluster": "otomi",
+			"tier": 3,
+			"x": -5,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"otomi_brace_drill"
+			],
+			"effects": {
+				"defence_add": 0.035,
+				"death_chance_add": -0.005
+			},
+			"description": "A locking specialism gateway into Otomi traditions. Once chosen, other troop specialism gateways are closed to this warband.",
+			"specialisation": true
+		},
+		{
+			"id": "otomi_shield_wall",
+			"name": "Shield Wall",
+			"cluster": "otomi",
+			"tier": 4,
+			"x": -6,
+			"y": 2,
+			"cost": 1,
+			"requires": [
+				"otomi_specialisation"
+			],
+			"effects": {
+				"defence_add": 0.03
+			},
+			"description": "Shield",
+			"path": "shield"
+		},
+		{
+			"id": "otomi_hold_ground",
+			"name": "Hold Ground",
+			"cluster": "otomi",
+			"tier": 5,
+			"x": -7,
+			"y": 2,
+			"cost": 1,
+			"requires": [
+				"otomi_shield_wall"
+			],
+			"effects": {
+				"defence_add": 0.035
+			},
+			"description": "Shield",
+			"path": "shield"
+		},
+		{
+			"id": "otomi_unbroken_line",
+			"name": "Unbroken Line",
+			"cluster": "otomi",
+			"tier": 6,
+			"x": -8,
+			"y": 2,
+			"cost": 1,
+			"requires": [
+				"otomi_hold_ground"
+			],
+			"effects": {
+				"defence_add": 0.045
+			},
+			"description": "Shield",
+			"path": "shield"
+		},
+		{
+			"id": "otomi_iron_resolve",
+			"name": "Iron Resolve",
+			"cluster": "otomi",
+			"tier": 4,
+			"x": -6,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"otomi_specialisation"
+			],
+			"effects": {
+				"death_chance_add": -0.015
+			},
+			"description": "Survival",
+			"path": "survival"
+		},
+		{
+			"id": "otomi_carry_wounded",
+			"name": "Carry the Wounded",
+			"cluster": "otomi",
+			"tier": 5,
+			"x": -7,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"otomi_iron_resolve"
+			],
+			"effects": {
+				"death_chance_add": -0.015,
+				"injury_recovery_add": 0.02
+			},
+			"description": "Survival",
+			"path": "survival"
+		},
+		{
+			"id": "otomi_death_avoidance",
+			"name": "Death Avoidance",
+			"cluster": "otomi",
+			"tier": 6,
+			"x": -8,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"otomi_carry_wounded"
+			],
+			"effects": {
+				"death_chance_add": -0.025
+			},
+			"description": "Survival",
+			"path": "survival"
+		},
+		{
+			"id": "otomi_hard_march",
+			"name": "Hard March",
+			"cluster": "otomi",
+			"tier": 4,
+			"x": -6,
+			"y": -2,
+			"cost": 1,
+			"requires": [
+				"otomi_specialisation"
+			],
+			"effects": {
+				"provisioning_discount_add": 0.02
+			},
+			"description": "Frontier",
+			"path": "frontier"
+		},
+		{
+			"id": "otomi_lean_camp",
+			"name": "Lean Camp",
+			"cluster": "otomi",
+			"tier": 5,
+			"x": -7,
+			"y": -2,
+			"cost": 1,
+			"requires": [
+				"otomi_hard_march"
+			],
+			"effects": {
+				"provisioning_discount_add": 0.025
+			},
+			"description": "Frontier",
+			"path": "frontier"
+		},
+		{
+			"id": "otomi_rough_ground",
+			"name": "Rough Ground",
+			"cluster": "otomi",
+			"tier": 6,
+			"x": -8,
+			"y": -2,
+			"cost": 1,
+			"requires": [
+				"otomi_lean_camp"
+			],
+			"effects": {
+				"provisioning_discount_add": 0.03,
+				"casualty_chance_add": -0.005
+			},
+			"description": "Frontier",
+			"path": "frontier"
+		},
+		{
+			"id": "elite_otomi_warriors",
+			"name": "Elite Otomi Warriors",
+			"cluster": "otomi",
+			"tier": 7,
+			"x": -9,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"otomi_specialisation"
+			],
+			"requires_any": [
+				"otomi_unbroken_line",
+				"otomi_death_avoidance",
+				"otomi_rough_ground"
+			],
+			"effects": {
+				"defence_add": 0.055,
+				"death_chance_add": -0.01
+			},
+			"description": "The branches rejoin into an elite Otomi company identity. Any completed first Otomi branch can reach this node.",
+			"rejoin": true
+		},
+		{
+			"id": "otomi_braced_veterans",
+			"name": "Braced Veterans",
+			"cluster": "otomi",
+			"tier": 8,
+			"x": -10,
+			"y": 2,
+			"cost": 1,
+			"requires": [
+				"elite_otomi_warriors"
+			],
+			"effects": {
+				"defence_add": 0.045
+			},
+			"description": "Wall Veterans",
+			"path": "wall"
+		},
+		{
+			"id": "otomi_stone_line",
+			"name": "Stone Line",
+			"cluster": "otomi",
+			"tier": 9,
+			"x": -11,
+			"y": 2,
+			"cost": 1,
+			"requires": [
+				"otomi_braced_veterans"
+			],
+			"effects": {
+				"defence_add": 0.06
+			},
+			"description": "Wall Veterans",
+			"path": "wall"
+		},
+		{
+			"id": "otomi_wounded_return",
+			"name": "Wounded Return",
+			"cluster": "otomi",
+			"tier": 8,
+			"x": -10,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"elite_otomi_warriors"
+			],
+			"effects": {
+				"injury_recovery_add": 0.035,
+				"death_chance_add": -0.015
+			},
+			"description": "Recovery Veterans",
+			"path": "recovery"
+		},
+		{
+			"id": "otomi_veteran_recovery",
+			"name": "Veteran Recovery",
+			"cluster": "otomi",
+			"tier": 9,
+			"x": -11,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"otomi_wounded_return"
+			],
+			"effects": {
+				"injury_recovery_add": 0.045,
+				"death_chance_add": -0.02
+			},
+			"description": "Recovery Veterans",
+			"path": "recovery"
+		},
+		{
+			"id": "otomi_route_hardening",
+			"name": "Route Hardening",
+			"cluster": "otomi",
+			"tier": 8,
+			"x": -10,
+			"y": -2,
+			"cost": 1,
+			"requires": [
+				"elite_otomi_warriors"
+			],
+			"effects": {
+				"provisioning_discount_add": 0.045
+			},
+			"description": "Frontier Veterans",
+			"path": "frontier_elite"
+		},
+		{
+			"id": "otomi_low_upkeep_veterans",
+			"name": "Low-Upkeep Veterans",
+			"cluster": "otomi",
+			"tier": 9,
+			"x": -11,
+			"y": -2,
+			"cost": 1,
+			"requires": [
+				"otomi_route_hardening"
+			],
+			"effects": {
+				"provisioning_discount_add": 0.06,
+				"casualty_chance_add": -0.01
+			},
+			"description": "Frontier Veterans",
+			"path": "frontier_elite"
+		},
+		{
+			"id": "unbroken_otomi",
+			"name": "Unbroken Otomi",
+			"cluster": "otomi",
+			"tier": 10,
+			"x": -12,
+			"y": 0,
+			"cost": 1,
+			"requires": [
+				"elite_otomi_warriors"
+			],
+			"requires_any": [
+				"otomi_stone_line",
+				"otomi_veteran_recovery",
+				"otomi_low_upkeep_veterans"
+			],
+			"effects": {
+				"defence_add": 0.08,
+				"death_chance_add": -0.025
+			},
+			"description": "The advanced branches rejoin into the Unbroken Otomi: an elite warband famous for survival, discipline and holding the line.",
+			"capstone": true,
+			"rejoin": true,
+			"chosen_capstone": true
+		},
+		{
+			"id": "coyote_approach",
+			"name": "Coyote Approach",
+			"cluster": "coyote",
+			"tier": 1,
+			"x": 0,
+			"y": -3,
+			"cost": 1,
+			"requires": [
+				"battle_rhythm"
+			],
+			"effects": {
+				"loot_value_add": 0.02
+			},
+			"description": "The warband begins training toward speed, raiding and opportunistic returns."
+		},
+		{
+			"id": "coyote_route_drill",
+			"name": "Route Drill",
+			"cluster": "coyote",
+			"tier": 2,
+			"x": 0,
+			"y": -4,
+			"cost": 1,
+			"requires": [
+				"coyote_approach"
+			],
+			"effects": {
+				"loot_value_add": 0.02,
+				"provisioning_discount_add": 0.005
+			},
+			"description": "Known routes help the band find goods and escape cleanly."
+		},
+		{
+			"id": "coyote_specialisation",
+			"name": "Coyote Specialist",
+			"cluster": "coyote",
+			"tier": 3,
+			"x": 0,
+			"y": -5,
+			"cost": 1,
+			"requires": [
+				"coyote_route_drill"
+			],
+			"effects": {
+				"loot_value_add": 0.035
+			},
+			"description": "A locking specialism gateway into Coyote traditions. Once chosen, other troop specialism gateways are closed to this warband.",
+			"specialisation": true
+		},
+		{
+			"id": "coyote_spoil_takers",
+			"name": "Spoil Takers",
+			"cluster": "coyote",
+			"tier": 4,
+			"x": -2,
+			"y": -6,
+			"cost": 1,
+			"requires": [
+				"coyote_specialisation"
+			],
+			"effects": {
+				"loot_value_add": 0.03
+			},
+			"description": "Raider",
+			"path": "raider"
+		},
+		{
+			"id": "coyote_fast_looting",
+			"name": "Fast Looting",
+			"cluster": "coyote",
+			"tier": 5,
+			"x": -2,
+			"y": -7,
+			"cost": 1,
+			"requires": [
+				"coyote_spoil_takers"
+			],
+			"effects": {
+				"loot_value_add": 0.035
+			},
+			"description": "Raider",
+			"path": "raider"
+		},
+		{
+			"id": "coyote_prize_scouts",
+			"name": "Prize Scouts",
+			"cluster": "coyote",
+			"tier": 6,
+			"x": -2,
+			"y": -8,
+			"cost": 1,
+			"requires": [
+				"coyote_fast_looting"
+			],
+			"effects": {
+				"loot_value_add": 0.045
+			},
+			"description": "Raider",
+			"path": "raider"
+		},
+		{
+			"id": "coyote_light_provisioning",
+			"name": "Light Provisioning",
+			"cluster": "coyote",
+			"tier": 4,
+			"x": 0,
+			"y": -6,
+			"cost": 1,
+			"requires": [
+				"coyote_specialisation"
+			],
+			"effects": {
+				"provisioning_discount_add": 0.025
+			},
+			"description": "Scout",
+			"path": "scout"
+		},
+		{
+			"id": "coyote_route_knowledge",
+			"name": "Route Knowledge",
+			"cluster": "coyote",
+			"tier": 5,
+			"x": 0,
+			"y": -7,
+			"cost": 1,
+			"requires": [
+				"coyote_light_provisioning"
+			],
+			"effects": {
+				"provisioning_discount_add": 0.03,
+				"casualty_chance_add": -0.005
+			},
+			"description": "Scout",
+			"path": "scout"
+		},
+		{
+			"id": "coyote_cheap_campaigns",
+			"name": "Cheap Campaigns",
+			"cluster": "coyote",
+			"tier": 6,
+			"x": 0,
+			"y": -8,
+			"cost": 1,
+			"requires": [
+				"coyote_route_knowledge"
+			],
+			"effects": {
+				"provisioning_discount_add": 0.04
+			},
+			"description": "Scout",
+			"path": "scout"
+		},
+		{
+			"id": "coyote_sudden_strike",
+			"name": "Sudden Strike",
+			"cluster": "coyote",
+			"tier": 4,
+			"x": 2,
+			"y": -6,
+			"cost": 1,
+			"requires": [
+				"coyote_specialisation"
+			],
+			"effects": {
+				"offence_add": 0.025,
+				"defence_add": -0.005
+			},
+			"description": "Ghost",
+			"path": "ghost"
+		},
+		{
+			"id": "coyote_vanishing_line",
+			"name": "Vanishing Line",
+			"cluster": "coyote",
+			"tier": 5,
+			"x": 2,
+			"y": -7,
+			"cost": 1,
+			"requires": [
+				"coyote_sudden_strike"
+			],
+			"effects": {
+				"offence_add": 0.025,
+				"casualty_chance_add": -0.005
+			},
+			"description": "Ghost",
+			"path": "ghost"
+		},
+		{
+			"id": "coyote_fragile_violence",
+			"name": "Fragile Violence",
+			"cluster": "coyote",
+			"tier": 6,
+			"x": 2,
+			"y": -8,
+			"cost": 1,
+			"requires": [
+				"coyote_vanishing_line"
+			],
+			"effects": {
+				"offence_add": 0.04,
+				"defence_add": -0.01
+			},
+			"description": "Ghost",
+			"path": "ghost"
+		},
+		{
+			"id": "elite_coyote_warriors",
+			"name": "Elite Coyote Warriors",
+			"cluster": "coyote",
+			"tier": 7,
+			"x": 0,
+			"y": -9,
+			"cost": 1,
+			"requires": [
+				"coyote_specialisation"
+			],
+			"requires_any": [
+				"coyote_prize_scouts",
+				"coyote_cheap_campaigns",
+				"coyote_fragile_violence"
+			],
+			"effects": {
+				"loot_value_add": 0.055,
+				"provisioning_discount_add": 0.015
+			},
+			"description": "The branches rejoin into an elite Coyote company identity. Any completed first Coyote branch can reach this node.",
+			"rejoin": true
+		},
+		{
+			"id": "coyote_night_plunder",
+			"name": "Night Plunder",
+			"cluster": "coyote",
+			"tier": 8,
+			"x": -2,
+			"y": -10,
+			"cost": 1,
+			"requires": [
+				"elite_coyote_warriors"
+			],
+			"effects": {
+				"loot_value_add": 0.05
+			},
+			"description": "Plunder Veterans",
+			"path": "plunder"
+		},
+		{
+			"id": "coyote_choice_spoils",
+			"name": "Choice Spoils",
+			"cluster": "coyote",
+			"tier": 9,
+			"x": -2,
+			"y": -11,
+			"cost": 1,
+			"requires": [
+				"coyote_night_plunder"
+			],
+			"effects": {
+				"loot_value_add": 0.07
+			},
+			"description": "Plunder Veterans",
+			"path": "plunder"
+		},
+		{
+			"id": "coyote_hidden_paths",
+			"name": "Hidden Paths",
+			"cluster": "coyote",
+			"tier": 8,
+			"x": 0,
+			"y": -10,
+			"cost": 1,
+			"requires": [
+				"elite_coyote_warriors"
+			],
+			"effects": {
+				"provisioning_discount_add": 0.045,
+				"casualty_chance_add": -0.005
+			},
+			"description": "Route Veterans",
+			"path": "routes"
+		},
+		{
+			"id": "coyote_supply_vanish",
+			"name": "Supply Vanish",
+			"cluster": "coyote",
+			"tier": 9,
+			"x": 0,
+			"y": -11,
+			"cost": 1,
+			"requires": [
+				"coyote_hidden_paths"
+			],
+			"effects": {
+				"provisioning_discount_add": 0.06,
+				"casualty_chance_add": -0.01
+			},
+			"description": "Route Veterans",
+			"path": "routes"
+		},
+		{
+			"id": "coyote_ghost_assault",
+			"name": "Ghost Assault",
+			"cluster": "coyote",
+			"tier": 8,
+			"x": 2,
+			"y": -10,
+			"cost": 1,
+			"requires": [
+				"elite_coyote_warriors"
+			],
+			"effects": {
+				"offence_add": 0.045,
+				"loot_value_add": 0.02
+			},
+			"description": "Shadow Veterans",
+			"path": "shadow"
+		},
+		{
+			"id": "coyote_no_tracks",
+			"name": "No Tracks",
+			"cluster": "coyote",
+			"tier": 9,
+			"x": 2,
+			"y": -11,
+			"cost": 1,
+			"requires": [
+				"coyote_ghost_assault"
+			],
+			"effects": {
+				"offence_add": 0.06,
+				"defence_add": -0.01,
+				"loot_value_add": 0.025
+			},
+			"description": "Shadow Veterans",
+			"path": "shadow"
+		},
+		{
+			"id": "shadow_coyotes",
+			"name": "Shadow Coyotes",
+			"cluster": "coyote",
+			"tier": 10,
+			"x": 0,
+			"y": -12,
+			"cost": 1,
+			"requires": [
+				"elite_coyote_warriors"
+			],
+			"requires_any": [
+				"coyote_choice_spoils",
+				"coyote_supply_vanish",
+				"coyote_no_tracks"
+			],
+			"effects": {
+				"loot_value_add": 0.08,
+				"provisioning_discount_add": 0.035,
+				"offence_add": 0.025
+			},
+			"description": "The advanced branches rejoin into the Shadow Coyotes: an elite warband known for plunder, routes and sudden disappearance.",
+			"capstone": true,
+			"rejoin": true,
+			"chosen_capstone": true
+		}
+	]
+
+func _unassigned_warrior_pool() -> int:
+	_ensure_warband_state()
+	var assigned: int = 0
+	for warband_variant: Variant in warbands.values():
+		var warband: Dictionary = warband_variant as Dictionary
+		assigned += int(warband.get("ready_warriors", 0))
+		assigned += int(warband.get("injured_warriors", 0))
+	return max(0, get_warrior_count() - assigned)
+
+func get_warband_flower_war_stability_audit() -> Dictionary:
+	# Non-mechanical audit helper for testing the current canonical warband rules.
+	_ensure_warband_state()
+	var issues: Array[String] = []
+	var rows: Array[Dictionary] = []
+	for warband_id_variant: Variant in warbands.keys():
+		var warband_id: String = String(warband_id_variant)
+		var row: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
+		warbands[warband_id] = row
+		var spec: Dictionary = row.get("specialisation", {}) as Dictionary
+		var doctrine_id: String = String(row.get("doctrine", "unspecialised"))
+		var expected_doctrine: String = String(spec.get("doctrine_id", "unspecialised"))
+		if doctrine_id != expected_doctrine:
+			issues.append(String(row.get("name", warband_id)) + " doctrine mismatch: " + doctrine_id + " vs " + expected_doctrine)
+		rows.append({
+			"id": warband_id,
+			"name": String(row.get("name", "Warband")),
+			"doctrine": doctrine_id,
+			"specialism": String(spec.get("name", "None")),
+			"ready": int(row.get("ready_warriors", 0)),
+			"injured": int(row.get("injured_warriors", 0)),
+			"dead_total_report_only": int(row.get("dead_total", 0))
+		})
+	return {
+		"ok": issues.is_empty(),
+		"issues": issues,
+		"warbands": rows,
+		"specialism_sets_doctrine": true,
+		"other_specialisms_lock": true,
+		"dead_normal_cards": false,
+		"skill_node_effects_connected": false,
+		"event_hooks_ready": true
+	}
+
+func _warband_doctrine_name(doctrine_id: String) -> String:
+	if FLOWER_WAR_DOCTRINES.has(doctrine_id):
+		var data: Dictionary = FLOWER_WAR_DOCTRINES[doctrine_id] as Dictionary
+		return String(data.get("name", doctrine_id.capitalize()))
+	return doctrine_id.capitalize()

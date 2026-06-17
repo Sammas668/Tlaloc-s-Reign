@@ -1,8 +1,7 @@
-[gd_scene load_steps=2 format=3]
+[gd_scene format=3 uid="uid://imbcr28v7iio"]
 
-[ext_resource type="Script" path="res://Scripts/ui/BuildingLedgerRow.gd" id="1_buildingrow"]
+[ext_resource type="Script" uid="uid://dweqrsnx5exto" path="res://Scripts/ui/BuildingLedgerRow.gd" id="1_buildingrow"]
 
-[node name="BuildingLedgerRow" type="PanelContainer"]
+[node name="BuildingLedgerRow" type="PanelContainer" unique_id=2036884383]
 custom_minimum_size = Vector2(0, 214)
-mouse_filter = 0
 script = ExtResource("1_buildingrow")
