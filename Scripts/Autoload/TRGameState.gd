@@ -43,6 +43,12 @@ var initialized: bool = false
 var player_palace_dedicated_god: String = ""
 var palace_built_structures: Dictionary = {}
 var palace_structure_runtime_statuses: Dictionary = {}
+var palace_delivered_ruler_demands: Dictionary = {} # Legacy compatibility only; v0.36 uses donation records.
+var palace_ruler_demand_donations: Array[Dictionary] = []
+var player_prestige: float = 0.0
+var rival_prestige: Dictionary = {}
+var prestige_history: Array[Dictionary] = []
+var sacrifice_prestige_records: Array[Dictionary] = []
 var last_palace_maintenance_report: Array[String] = []
 # Palace gate is now reconnected: player-started attacking Flower Wars require
 # a Palace dedicated to Huitzilopochtli. Defensive Flower Wars can still happen
@@ -69,6 +75,12 @@ func new_game() -> void:
 	_load_market_economy_definitions()
 	_load_start_state()
 	palace_built_structures.clear()
+	palace_delivered_ruler_demands.clear()
+	palace_ruler_demand_donations.clear()
+	player_prestige = 0.0
+	rival_prestige = _default_rival_prestige_values()
+	prestige_history.clear()
+	sacrifice_prestige_records.clear()
 	_ensure_warband_state()
 	last_flower_war_report.clear()
 	flower_war_report_archive.clear()
@@ -1368,6 +1380,9 @@ func advance_veintena() -> void:
 		new_game()
 	last_report.clear()
 	last_report.append("Veintena " + str(current_veintena) + " resolves.")
+	var previous_demand_index: int = _current_palace_ruler_demand_index()
+	var previous_demand_title: String = String(_current_palace_ruler_demand_set().get("title", "Court Need"))
+	var previous_demand_completion: Dictionary = get_palace_ruler_demand_completion_summary()
 	_pay_population_upkeep()
 	_pay_housing_maintenance()
 	_pay_palace_maintenance()
@@ -1377,6 +1392,7 @@ func advance_veintena() -> void:
 	if current_veintena > 18:
 		current_veintena = 1
 		last_report.append("Nemontemi reckoning placeholder: the next Ritual Year begins.")
+	_report_palace_ruler_demand_cycle_transition(previous_demand_index, previous_demand_title, previous_demand_completion)
 	last_report.append("Now entering Veintena " + str(current_veintena) + ".")
 	emit_signal("turn_advanced", last_report)
 	emit_signal("state_changed")
@@ -2328,7 +2344,7 @@ var warbands: Dictionary = {}
 const FLOWER_WAR_DOCTRINES: Dictionary = {
 	"unspecialised": {"name": "Unspecialised", "offence": 1.0, "defence": 1.0, "role": "Balanced household warriors."},
 	"eagle": {"name": "Eagle", "offence": 1.0, "defence": 1.2, "role": "Captive specialists and sustained war fighters."},
-	"jaguar": {"name": "Jaguar", "offence": 1.3, "defence": 1.0, "role": "Elite offensive warriors. Prestige values pending calibration."},
+	"jaguar": {"name": "Jaguar", "offence": 1.3, "defence": 1.0, "role": "Elite offensive warriors. No hidden Prestige bonus; Prestige comes from victories, casualties, captives and loot."},
 	"otomi": {"name": "Otomi", "offence": 0.8, "defence": 1.5, "role": "Defensive veterans who preserve warriors."},
 	"coyote": {"name": "Coyote", "offence": 1.4, "defence": 0.5, "role": "Glass-cannon raiders who favour loot."}
 }
@@ -2531,7 +2547,7 @@ func _god_display_name(god_id: String) -> String:
 # Palace backend probe v0.20.1
 # -----------------------------------------------------------------------------
 # Read-only palace planning data. This deliberately does not add Palace UI,
-# dedication buttons, structure construction, ruler-demand mechanics, or Flower War
+# dedication buttons, structure construction, court-need mechanics, or Flower War
 # gate changes. Palace structures can now be built and can become active/inactive
 # based on upkeep and existing staff availability.
 
@@ -2712,7 +2728,7 @@ func _palace_structure_tree_tiers(god_id: String) -> Array[Dictionary]:
 			return [
 				{"tier": 1, "title": "Level 1 — Feathered Audience Hall", "structures": [
 					_palace_structure_node("quetz_feathered_audience_hall", god_id, 1, "Feathered Audience Hall", "An elegant audience hall where the palace presents orderly, legitimate authority to guests and retainers.", {"wood": 20.0, "cloth": 6.0, "cacao": 1.0}, {"cacao": 0.75, "cloth": 0.25}, {"pipiltin": 1}, [], "Future hook for ruler-facing legitimacy."),
-					_palace_structure_node("quetz_tribute_record_office", god_id, 1, "Tribute Record Office", "A record office for tribute promises, deliveries, stored goods and ruler-facing reliability.", {"wood": 18.0, "cloth": 5.0, "tools": 1.0}, {"cacao": 0.5, "cloth": 0.25}, {"pipiltin": 1}, [], "Future hook for demand delivery clarity."),
+					_palace_structure_node("quetz_tribute_record_office", god_id, 1, "Tribute Record Office", "A record office for tribute promises, deliveries, stored goods and ruler-facing reliability.", {"wood": 18.0, "cloth": 5.0, "tools": 1.0}, {"cacao": 0.5, "cloth": 0.25}, {"pipiltin": 1}, [], "Future hook for court-need donation clarity."),
 					_palace_structure_node("quetz_scribe_mat_court", god_id, 1, "Scribe Mat Court", "A court of mats, painted records and formal speech for orderly palace administration.", {"wood": 18.0, "cloth": 5.0, "cacao": 1.0}, {"cacao": 0.75, "cloth": 0.25}, {"pipiltin": 1}, [], "Future hook for order and palace administration.")
 				]},
 				{"tier": 2, "title": "Level 2 — Diplomatic Reception Wing", "structures": [
@@ -3228,7 +3244,7 @@ func _palace_authority_route_body(god_id: String, active_count: int) -> String:
 		"tezcatlipoca":
 			return "Active Tezcatlipoca structures reveal an information-only scarcity mirror: market pressure, shortage leverage and rival vulnerability hooks. Sabotage and manipulation actions are not implemented yet."
 		"quetzalcoatl":
-			return "Active Quetzalcoatl structures reveal an information-only legitimacy court: ruler-facing credibility, tribute reliability, palace trust and recognition-route hooks. Ruler-demand and prestige mechanics are not implemented yet."
+			return "Active Quetzalcoatl structures reveal an information-only legitimacy court: ruler-facing credibility, tribute reliability, palace trust and recognition-route hooks. Court need donations create prestige by base value; broader recognition systems are not implemented yet."
 	return "Active palace structures are ready, but their route authority has not been defined."
 
 func _palace_authority_structure_row(structure_id: String, status: Dictionary, god_id: String) -> Dictionary:
@@ -3308,7 +3324,7 @@ func get_palace_authority_summary() -> Dictionary:
 		"next_locked_structures": _palace_next_locked_authority_rows(god_id, 4),
 		"mechanics_note": "This tab now reads active palace structures. It does not yet apply route authority effects to gameplay.",
 		"flower_war_gate_status": flower_war_palace_gate_status_text(),
-		"ruler_demand_status": "Ruler demand mechanics remain reserved for a later palace patch."
+		"ruler_demand_status": "Court needs are connected as donation opportunities; donations create prestige by base value."
 	}
 
 func _tlaloc_controlled_natural_pressure_events() -> Array[Dictionary]:
@@ -3748,8 +3764,8 @@ func _quetzalcoatl_legitimacy_rows(detail_tier: int) -> Array[Dictionary]:
 	var raw_rows: Array[Dictionary] = [
 		{"id": "palace_order", "name": "Palace Order", "domain": "Court order and visible authority", "summary": "The palace can present itself as orderly, deliberate and ruler-facing.", "future_hook": "Future hook: improves palace-performance confidence and reduces ambiguity around obligations."},
 		{"id": "tribute_credibility", "name": "Tribute Credibility", "domain": "Demand delivery and tribute reliability", "summary": "The house can make promised goods and delivered goods appear more credible to higher authority.", "future_hook": "Future hook: clearer demand delivery quality and better ruler-facing trust."},
-		{"id": "recognition_route", "name": "Recognition Route", "domain": "Regional legitimacy and public reputation", "summary": "The palace can frame estate success as lawful, civilised and worthy of recognition.", "future_hook": "Future hook: supports prestige/recognition once those systems are designed."},
-		{"id": "court_witness", "name": "Ruler Witness", "domain": "Agents, witnesses and formal reporting", "summary": "The palace is prepared to impress agents of higher authority and make obligations visible.", "future_hook": "Future hook: stronger effect on ruler-demand outcomes and formal recognition."}
+		{"id": "recognition_route", "name": "Recognition Route", "domain": "Regional legitimacy and public reputation", "summary": "The palace can frame estate success as lawful, civilised and worthy of recognition.", "future_hook": "Future hook: supports future formal recognition once that system is designed."},
+		{"id": "court_witness", "name": "Ruler Witness", "domain": "Agents, witnesses and formal reporting", "summary": "The palace is prepared to impress agents of higher authority and make obligations visible.", "future_hook": "Future hook: stronger effect on court presentation and formal recognition."}
 	]
 	var max_rows: int = 1
 	if detail_tier >= 2:
@@ -3781,9 +3797,9 @@ func _quetzalcoatl_obligation_rows(detail_tier: int) -> Array[Dictionary]:
 	if detail_tier <= 0:
 		return rows
 	var raw_rows: Array[Dictionary] = [
-		{"id": "raw_demand", "name": "Raw Demand Credibility", "domain": "Maize, wood, cotton, cacao, obsidian", "summary": "Future ruler demands can be read as material obligations rather than vague court pressure.", "future_hook": "Future hook: improves clarity around the Raw demand slot."},
-		{"id": "processed_demand", "name": "Processed Demand Credibility", "domain": "Tools, weapons, cloth", "summary": "The palace can prepare records that make processed-good delivery more legible.", "future_hook": "Future hook: improves clarity around the Processed demand slot."},
-		{"id": "luxury_special_demand", "name": "Luxury / Special Demand Credibility", "domain": "Fine textiles, captives and high-status goods", "summary": "The palace can frame elite deliveries as legitimate service rather than mere surplus spending.", "future_hook": "Future hook: improves clarity around the Luxury/Special demand slot."}
+		{"id": "raw_demand", "name": "Raw Demand Credibility", "domain": "Maize, wood, cotton, cacao, obsidian", "summary": "Future court needs can be read as material obligations rather than vague court pressure.", "future_hook": "Future hook: improves clarity around the Raw court-need slot."},
+		{"id": "processed_demand", "name": "Processed Demand Credibility", "domain": "Tools, weapons, cloth", "summary": "The palace can prepare records that make processed-good delivery more legible.", "future_hook": "Future hook: improves clarity around the Processed court-need slot."},
+		{"id": "luxury_special_demand", "name": "Luxury / Special Demand Credibility", "domain": "Fine textiles, captives and high-status goods", "summary": "The palace can frame elite deliveries as legitimate service rather than mere surplus spending.", "future_hook": "Future hook: improves clarity around the Luxury/Special court-need slot."}
 	]
 	var max_rows: int = 1
 	if detail_tier >= 2:
@@ -3797,7 +3813,7 @@ func _quetzalcoatl_obligation_rows(detail_tier: int) -> Array[Dictionary]:
 			"name": String(source.get("name", "Obligation")),
 			"domain": "Hidden",
 			"summary": "The palace senses future obligation pressure, but details are not implemented yet.",
-			"future_hook": "Future hook: ruler-demand mechanics will use this route later.",
+			"future_hook": "Future hook: court need donation and presentation hooks can use this route later.",
 			"detail_tier": detail_tier
 		}
 		if detail_tier >= 2:
@@ -3818,7 +3834,7 @@ func get_quetzalcoatl_legitimacy_overview() -> Dictionary:
 		summary_text = "The palace is dedicated to Quetzalcoatl, but no active Quetzalcoatl palace structures are maintained and staffed this Veintena."
 	elif dedicated and detail_tier > 0:
 		headline = "Quetzalcoatl Legitimacy Court — " + _quetzalcoatl_detail_label(detail_tier)
-		summary_text = "Active Quetzalcoatl structures reveal legitimacy, tribute credibility and recognition-route hooks. This is an information-only prototype; it does not create prestige, royal favour, local stability or ruler-demand rewards yet."
+		summary_text = "Active Quetzalcoatl structures reveal legitimacy, tribute credibility and recognition-route hooks. This route is information-only; court-need donations create prestige separately by base value."
 	var legitimacy_rows: Array[Dictionary] = []
 	var obligation_rows: Array[Dictionary] = []
 	if dedicated and detail_tier > 0:
@@ -3836,96 +3852,809 @@ func get_quetzalcoatl_legitimacy_overview() -> Dictionary:
 		"obligation_rows": obligation_rows,
 		"visible_legitimacy_count": legitimacy_rows.size(),
 		"visible_obligation_count": obligation_rows.size(),
-		"mechanics_note": "Quetzalcoatl rows are information-only in v0.30. They do not yet add prestige, recognition, royal favour, local stability, ruler-demand delivery bonuses or diplomacy effects."
+		"mechanics_note": "Quetzalcoatl rows are information-only. They do not add recognition, royal favour, local stability or diplomacy effects; court-need donations create prestige separately by base value."
 	}
 
 
 
 # -----------------------------------------------------------------------------
-# Palace Ruler Demands Prototype v0.31
+# Palace Court Needs / Donation Prestige v0.36
 # -----------------------------------------------------------------------------
-# Information-only demand cycle. This does not deliver goods, award prestige,
-# create royal favour, create local stability, or change palace recognition.
-# It gives the Palace -> Ruler Demands tab a concrete obligation preview using
-# real stockpile/free-stock data so future delivery mechanics can be designed
-# without inventing a currency layer.
+# Court needs are not binary fulfilment quests. They are visible ruler/court needs.
+# Donating a needed good consumes real stock and grants Prestige according to the
+# base value of the donated good. Prestige is a score, never a currency.
 
 func _palace_ruler_demand_sets() -> Array[Dictionary]:
 	return [
 		{
 			"id": "food_and_court_cloth",
-			"title": "Food and Court Cloth Demand",
+			"title": "Food and Court Cloth Need",
 			"veintena_band": "Early cycle",
-			"flavour": "The palace expects reliable food supply and court-facing cloth before deeper obligations are negotiated.",
+			"flavour": "The court is visibly short of basic food, cloth and elite hospitality goods. Donating these goods raises the house's public standing.",
 			"demands": [
-				{"slot": "raw", "slot_name": "Raw / food good", "resource_id": "maize", "amount": 25.0, "note": "Basic food obligation and public reliability."},
-				{"slot": "processed", "slot_name": "Processed good", "resource_id": "cloth", "amount": 6.0, "note": "Visible household order and practical tribute preparation."},
-				{"slot": "luxury_special", "slot_name": "Luxury / special good", "resource_id": "cacao", "amount": 3.0, "note": "Elite court hospitality and status display."}
+				{"slot": "raw", "slot_name": "Raw / food need", "resource_id": "maize", "amount": 25.0, "note": "Basic food support and public reliability."},
+				{"slot": "processed", "slot_name": "Processed need", "resource_id": "cloth", "amount": 6.0, "note": "Visible household order and practical tribute preparation."},
+				{"slot": "luxury_special", "slot_name": "Luxury / special need", "resource_id": "cacao", "amount": 3.0, "note": "Elite court hospitality and status display."}
 			]
 		},
 		{
 			"id": "construction_and_ritual_readiness",
-			"title": "Construction and Ritual Readiness Demand",
+			"title": "Construction and Ritual Need",
 			"veintena_band": "Middle cycle",
-			"flavour": "The palace watches whether the house can support construction, ritual display and practical administration at the same time.",
+			"flavour": "The court values houses that can support construction, ritual display and practical administration at the same time.",
 			"demands": [
-				{"slot": "raw", "slot_name": "Raw good", "resource_id": "wood", "amount": 20.0, "note": "Construction capacity and estate readiness."},
-				{"slot": "processed", "slot_name": "Processed good", "resource_id": "tools", "amount": 4.0, "note": "Administrative and construction competence."},
-				{"slot": "luxury_special", "slot_name": "Luxury / special good", "resource_id": "ritual_goods", "amount": 2.0, "note": "Ritual credibility and visible obligation."}
+				{"slot": "raw", "slot_name": "Raw need", "resource_id": "wood", "amount": 20.0, "note": "Construction capacity and estate readiness."},
+				{"slot": "processed", "slot_name": "Processed need", "resource_id": "tools", "amount": 4.0, "note": "Administrative and construction competence."},
+				{"slot": "luxury_special", "slot_name": "Luxury / special need", "resource_id": "ritual_goods", "amount": 2.0, "note": "Ritual credibility and visible obligation."}
 			]
 		},
 		{
 			"id": "war_and_luxury_pressure",
-			"title": "War and Luxury Pressure Demand",
+			"title": "War and Luxury Need",
 			"veintena_band": "Late cycle",
-			"flavour": "The palace tests whether the house can support martial readiness while still meeting elite expectations.",
+			"flavour": "The court is attentive to martial usefulness, textile strength and high-status presentation.",
 			"demands": [
-				{"slot": "raw", "slot_name": "Raw good", "resource_id": "cotton", "amount": 18.0, "note": "Textile base and household production capacity."},
-				{"slot": "processed", "slot_name": "Processed good", "resource_id": "weapons", "amount": 2.0, "note": "War-route visibility and martial usefulness."},
-				{"slot": "luxury_special", "slot_name": "Luxury / special good", "resource_id": "fine_textiles", "amount": 1.0, "note": "High-status palace presentation."}
+				{"slot": "raw", "slot_name": "Raw need", "resource_id": "cotton", "amount": 18.0, "note": "Textile base and household production capacity."},
+				{"slot": "processed", "slot_name": "Processed need", "resource_id": "weapons", "amount": 2.0, "note": "War-route visibility and martial usefulness."},
+				{"slot": "luxury_special", "slot_name": "Luxury / special need", "resource_id": "fine_textiles", "amount": 1.0, "note": "High-status palace presentation."}
 			]
 		}
 	]
 
 func _current_palace_ruler_demand_index() -> int:
-	# Three controlled demand sets rotate through the ritual year. This is a
+	# Three controlled court-need sets rotate through the ritual year. This is a
 	# prototype display cycle, not a random political system.
 	var index: int = int(floor(float(current_veintena - 1) / 6.0))
 	return clampi(index, 0, _palace_ruler_demand_sets().size() - 1)
 
-func _palace_ruler_demand_quality_label(free_value: float, requested: float) -> String:
-	if requested <= 0.001:
-		return "No request"
-	if free_value >= requested * 1.5:
-		return "Exceptional stock available"
-	if free_value >= requested * 1.15:
-		return "Impressive stock available"
-	if free_value >= requested:
-		return "Adequate stock available"
-	if free_value > 0.0:
-		return "Shortfall"
-	return "Unavailable"
-
-func _palace_ruler_demand_row(raw_row: Dictionary) -> Dictionary:
-	var resource_id: String = String(raw_row.get("resource_id", ""))
-	var requested: float = float(raw_row.get("amount", 0.0))
-	var stored: float = _stock(resource_id)
-	var free_value: float = free_stock_after_reserves(resource_id)
-	var shortfall: float = maxf(0.0, requested - free_value)
-	var ready: bool = free_value + 0.001 >= requested
+func _palace_ruler_demand_cycle_window(index: int) -> Dictionary:
+	var demand_sets: Array[Dictionary] = _palace_ruler_demand_sets()
+	var safe_index: int = clampi(index, 0, maxi(0, demand_sets.size() - 1))
+	var start_veintena: int = safe_index * 6 + 1
+	var end_veintena: int = mini(start_veintena + 5, 18)
 	return {
-		"slot": String(raw_row.get("slot", "")),
-		"slot_name": String(raw_row.get("slot_name", "Demand")),
+		"start_veintena": start_veintena,
+		"end_veintena": end_veintena,
+		"label": "Veintenas " + str(start_veintena) + "–" + str(end_veintena)
+	}
+
+func _palace_ruler_demand_deadline_summary(index: int = -1) -> Dictionary:
+	var selected_index: int = _current_palace_ruler_demand_index() if index < 0 else index
+	var window: Dictionary = _palace_ruler_demand_cycle_window(selected_index)
+	var start_veintena: int = int(window.get("start_veintena", 1))
+	var end_veintena: int = int(window.get("end_veintena", 6))
+	var remaining: int = maxi(0, end_veintena - current_veintena + 1)
+	var urgency: String = "Time remains"
+	if current_veintena < start_veintena:
+		remaining = end_veintena - start_veintena + 1
+		urgency = "Future cycle"
+	elif remaining <= 1:
+		urgency = "Final Veintena"
+	elif remaining <= 2:
+		urgency = "Deadline close"
+	var suffix: String = "s" if remaining != 1 else ""
+	var headline: String = String(window.get("label", "Court need cycle")) + "; " + str(remaining) + " Veintena" + suffix + " including the current turn."
+	return {
+		"cycle_index": selected_index,
+		"start_veintena": start_veintena,
+		"end_veintena": end_veintena,
+		"veintenas_remaining": remaining,
+		"urgency": urgency,
+		"headline": headline
+	}
+
+func _report_palace_ruler_demand_cycle_transition(previous_index: int, previous_title: String, previous_completion: Dictionary) -> void:
+	var new_index: int = _current_palace_ruler_demand_index()
+	if new_index == previous_index:
+		return
+	last_report.append("Court need cycle closed: " + previous_title + ". Donated value: +" + _format_amount(float(previous_completion.get("total_prestige", 0.0))) + " Prestige across " + str(int(previous_completion.get("donation_count", 0))) + " donations.")
+	var new_cycle: Dictionary = _current_palace_ruler_demand_set()
+	if not new_cycle.is_empty():
+		var deadline: Dictionary = _palace_ruler_demand_deadline_summary(new_index)
+		last_report.append("New court need cycle opened: " + String(new_cycle.get("title", "Court Need")) + ". " + String(deadline.get("headline", "")))
+
+func _current_palace_ruler_demand_set() -> Dictionary:
+	var demand_sets: Array[Dictionary] = _palace_ruler_demand_sets()
+	if demand_sets.is_empty():
+		return {}
+	var selected_index: int = _current_palace_ruler_demand_index()
+	return demand_sets[selected_index] if selected_index >= 0 and selected_index < demand_sets.size() else {}
+
+func _palace_ruler_demand_cycle_id() -> String:
+	var selected: Dictionary = _current_palace_ruler_demand_set()
+	return String(selected.get("id", "no_court_need_cycle"))
+
+func _palace_ruler_demand_raw_row_by_slot(slot_id: String) -> Dictionary:
+	var selected: Dictionary = _current_palace_ruler_demand_set()
+	var rows: Array = selected.get("demands", []) as Array
+	for row_variant: Variant in rows:
+		if row_variant is Dictionary:
+			var row: Dictionary = row_variant as Dictionary
+			if String(row.get("slot", "")) == slot_id:
+				return row
+	return {}
+
+func _resource_base_value(resource_id: String) -> float:
+	if resources.has(resource_id):
+		var data: Dictionary = resources[resource_id] as Dictionary
+		return float(data.get("base_value", 1.0))
+	return 1.0
+
+func get_player_prestige() -> float:
+	return player_prestige
+
+func add_player_prestige(amount: float, source_id: String, detail: String, context: Dictionary = {}) -> Dictionary:
+	if absf(amount) <= 0.0001:
+		return {"ok": true, "amount": 0.0, "prestige": player_prestige}
+	var before: float = player_prestige
+	player_prestige += amount
+	var record: Dictionary = {
+		"veintena": current_veintena,
+		"source_id": source_id,
+		"detail": detail,
+		"amount": amount,
+		"prestige_before": before,
+		"prestige_after": player_prestige,
+		"context": context.duplicate(true)
+	}
+	prestige_history.append(record)
+	return {"ok": true, "amount": amount, "prestige": player_prestige, "record": record}
+
+func get_savvy_trade_prestige_scale() -> float:
+	# Economic Prestige should be small, deliberate and tied to good market judgement.
+	# Selling high and buying low produce Prestige from the value advantage over the
+	# good's base value. This is not passive surplus Prestige.
+	return 0.25
+
+func get_savvy_trade_prestige_for_line(resource_id: String, amount: float, average_unit_value: float) -> Dictionary:
+	var traded_amount: float = absf(amount)
+	var base_value: float = _resource_base_value(resource_id)
+	var direction: String = "none"
+	var advantage_per_unit: float = 0.0
+	if amount < -0.001:
+		direction = "sell_high"
+		advantage_per_unit = maxf(0.0, average_unit_value - base_value)
+	elif amount > 0.001:
+		direction = "buy_low"
+		advantage_per_unit = maxf(0.0, base_value - average_unit_value)
+	var prestige_gain: float = snappedf(traded_amount * advantage_per_unit * get_savvy_trade_prestige_scale(), 0.01)
+	var label: String = "No savvy trade Prestige"
+	if prestige_gain > 0.001:
+		if direction == "sell_high":
+			label = "Sold high: " + get_resource_name(resource_id) + " +" + _format_amount(prestige_gain) + " Prestige"
+		elif direction == "buy_low":
+			label = "Bought low: " + get_resource_name(resource_id) + " +" + _format_amount(prestige_gain) + " Prestige"
+	return {
 		"resource_id": resource_id,
 		"resource_name": get_resource_name(resource_id),
-		"requested": requested,
+		"amount": amount,
+		"traded_amount": traded_amount,
+		"direction": direction,
+		"base_value": base_value,
+		"average_unit_value": average_unit_value,
+		"advantage_per_unit": advantage_per_unit,
+		"scale": get_savvy_trade_prestige_scale(),
+		"prestige_gain": prestige_gain,
+		"label": label
+	}
+
+func get_savvy_trade_prestige_preview(trade_lines: Array) -> Dictionary:
+	var lines: Array[Dictionary] = []
+	var total: float = 0.0
+	for line_variant: Variant in trade_lines:
+		if not (line_variant is Dictionary):
+			continue
+		var line: Dictionary = line_variant as Dictionary
+		var resource_id: String = String(line.get("resource_id", ""))
+		if resource_id == "":
+			continue
+		var amount: float = float(line.get("amount", 0.0))
+		var average_unit_value: float = float(line.get("average_unit_value", line.get("average_value", line.get("unit_value", _resource_base_value(resource_id)))))
+		var result: Dictionary = get_savvy_trade_prestige_for_line(resource_id, amount, average_unit_value)
+		lines.append(result)
+		total += float(result.get("prestige_gain", 0.0))
+	total = snappedf(total, 0.01)
+	var positive_lines: Array[String] = []
+	for result: Dictionary in lines:
+		if float(result.get("prestige_gain", 0.0)) > 0.001:
+			positive_lines.append(String(result.get("label", "Savvy trade")))
+	var headline: String = "No savvy trade Prestige."
+	if total > 0.001:
+		headline = "Savvy trade Prestige: +" + _format_amount(total)
+	return {
+		"schema_version": "savvy_trade_prestige_v0_41",
+		"total_prestige": total,
+		"lines": lines,
+		"positive_lines": positive_lines,
+		"headline": headline,
+		"scale": get_savvy_trade_prestige_scale(),
+		"mechanics_note": "Economic Prestige comes from market skill only: sell above base value or buy below base value. No passive surplus, maize stockpile or production-output Prestige is granted."
+	}
+
+func record_savvy_trade_prestige(trade_lines: Array, detail: String = "Savvy market trade") -> Dictionary:
+	var preview: Dictionary = get_savvy_trade_prestige_preview(trade_lines)
+	var amount: float = float(preview.get("total_prestige", 0.0))
+	if amount <= 0.001:
+		return {"ok": true, "amount": 0.0, "prestige": player_prestige, "preview": preview}
+	var result: Dictionary = add_player_prestige(amount, "economic_savvy_trade", detail, preview)
+	last_report.append(detail + ": +" + _format_amount(amount) + " Prestige from savvy trade.")
+	emit_signal("state_changed")
+	return {"ok": true, "amount": amount, "prestige": player_prestige, "preview": preview, "record": result.get("record", {})}
+
+func get_economic_prestige_summary() -> Dictionary:
+	var recent: Array[Dictionary] = []
+	var history: Array[Dictionary] = get_prestige_history()
+	history.reverse()
+	for item: Dictionary in history:
+		if String(item.get("source_id", "")) != "economic_savvy_trade":
+			continue
+		if recent.size() >= 8:
+			break
+		recent.append(item.duplicate(true))
+	return {
+		"schema_version": "economic_prestige_savvy_trade_v0_41",
+		"active": true,
+		"scale": get_savvy_trade_prestige_scale(),
+		"recent_savvy_trades": recent,
+		"headline": "Economic Prestige comes from savvy market trades.",
+		"mechanics_note": "Sell goods above base value or buy goods below base value. Passive surplus, stored maize and production output do not grant economic Prestige."
+	}
+
+func _format_signed_prestige(amount: float) -> String:
+	var prefix: String = "+" if amount >= 0.0 else ""
+	return prefix + _format_amount(amount)
+
+func _flower_war_result_prestige_value(result: String) -> float:
+	match result:
+		"Crushing Victory":
+			return 20.0
+		"Victory":
+			return 12.0
+		"Marginal Victory", "Narrow Victory":
+			return 6.0
+		"Stalemate":
+			return 0.0
+		"Defeat":
+			return -5.0
+		"Crushing Defeat":
+			return -15.0
+	return 0.0
+
+func _flower_war_prestige_breakdown(report: Dictionary) -> Dictionary:
+	var direction: String = String(report.get("war_direction", "attack"))
+	var result: String = String(report.get("result", "Stalemate"))
+	var outcome_prestige: float = _flower_war_result_prestige_value(result)
+	var enemy_casualties: int = 0
+	if direction == "defence":
+		enemy_casualties = int(report.get("enemy_casualties", 0))
+	else:
+		enemy_casualties = int(report.get("defender_casualties", 0))
+	var enemy_casualty_prestige: float = snappedf(float(enemy_casualties) * 0.20, 0.01)
+	var captives: int = 0
+	var captive_prestige: float = 0.0
+	var loot_value: float = 0.0
+	var loot_prestige: float = 0.0
+	if direction != "defence":
+		captives = int(report.get("captives", 0))
+		captive_prestige = snappedf(float(captives) * 2.0, 0.01)
+		loot_value = float(report.get("loot_value", 0.0))
+		loot_prestige = snappedf(maxf(0.0, loot_value) * 0.05, 0.01)
+	var total: float = snappedf(outcome_prestige + enemy_casualty_prestige + captive_prestige + loot_prestige, 0.01)
+	var lines: Array[String] = []
+	lines.append("Outcome " + result + ": " + _format_signed_prestige(outcome_prestige))
+	if enemy_casualties > 0:
+		lines.append("Enemy casualties " + str(enemy_casualties) + ": +" + _format_amount(enemy_casualty_prestige))
+	if captives > 0:
+		lines.append("Captives " + str(captives) + ": +" + _format_amount(captive_prestige))
+	if loot_prestige > 0.0:
+		lines.append("Loot value " + _format_amount(loot_value) + ": +" + _format_amount(loot_prestige))
+	if lines.is_empty():
+		lines.append("No Prestige change.")
+	return {
+		"direction": direction,
+		"result": result,
+		"outcome_prestige": outcome_prestige,
+		"enemy_casualties": enemy_casualties,
+		"enemy_casualty_prestige": enemy_casualty_prestige,
+		"captives": captives,
+		"captive_prestige": captive_prestige,
+		"loot_value": loot_value,
+		"loot_prestige": loot_prestige,
+		"total": total,
+		"lines": lines
+	}
+
+func _flower_war_preview_prestige_for_attack(result: String, defender_casualties: int, captives: int, loot_value: float) -> Dictionary:
+	return _flower_war_prestige_breakdown({
+		"war_direction": "attack",
+		"result": result,
+		"defender_casualties": defender_casualties,
+		"captives": captives,
+		"loot_value": loot_value
+	})
+
+func _flower_war_preview_prestige_for_defence(result: String, enemy_casualties: int) -> Dictionary:
+	return _flower_war_prestige_breakdown({
+		"war_direction": "defence",
+		"result": result,
+		"enemy_casualties": enemy_casualties
+	})
+
+func get_flower_war_prestige_preview(report: Dictionary) -> Dictionary:
+	return _flower_war_prestige_breakdown(report)
+
+func _prestige_text_from_breakdown(breakdown: Dictionary) -> String:
+	return "Prestige " + _format_signed_prestige(float(breakdown.get("total", 0.0)))
+
+func _apply_flower_war_prestige_to_report(report: Dictionary) -> Dictionary:
+	var breakdown: Dictionary = _flower_war_prestige_breakdown(report)
+	var amount: float = float(breakdown.get("total", 0.0))
+	var direction: String = String(report.get("war_direction", "attack"))
+	var result: String = String(report.get("result", "Stalemate"))
+	var source_id: String = "flower_war_defence" if direction == "defence" else "flower_war_attack"
+	var detail: String = "Flower War " + ("defence" if direction == "defence" else "muster") + ": " + result
+	if absf(amount) > 0.0001:
+		add_player_prestige(amount, source_id, detail, breakdown)
+	report["prestige_pending"] = false
+	report["prestige_gain"] = amount
+	report["prestige_breakdown"] = breakdown
+	report["prestige_text"] = _prestige_text_from_breakdown(breakdown)
+	return report
+
+func get_prestige_history() -> Array[Dictionary]:
+	var output: Array[Dictionary] = []
+	for item: Dictionary in prestige_history:
+		output.append(item.duplicate(true))
+	return output
+
+func _default_rival_prestige_values() -> Dictionary:
+	# Prototype leaderboard placeholders. Rival prestige is displayed so the player
+	# understands that Prestige is relative, but rival gain/loss logic is not
+	# implemented yet. Future Rival AI patches should replace these with real values.
+	return {
+		"war_rival": 30.0,
+		"cunning_rival": 24.0,
+		"diplomatic_rival": 36.0
+	}
+
+func _prestige_house_name(house_id: String) -> String:
+	match house_id:
+		"player":
+			return "Player House"
+		"war_rival":
+			return "War Rival"
+		"cunning_rival":
+			return "Cunning Rival"
+		"diplomatic_rival":
+			return "Diplomatic Rival"
+	return house_id.capitalize()
+
+func get_rival_prestige() -> Dictionary:
+	if rival_prestige.is_empty():
+		rival_prestige = _default_rival_prestige_values()
+	return rival_prestige.duplicate(true)
+
+func set_rival_prestige(house_id: String, value: float) -> Dictionary:
+	# Debug/prototype helper for later rival tests. It does not spend or transfer Prestige.
+	if rival_prestige.is_empty():
+		rival_prestige = _default_rival_prestige_values()
+	rival_prestige[house_id] = value
+	emit_signal("state_changed")
+	return {"ok": true, "house_id": house_id, "prestige": value}
+
+func get_prestige_leaderboard() -> Array[Dictionary]:
+	if rival_prestige.is_empty():
+		rival_prestige = _default_rival_prestige_values()
+	var rows: Array[Dictionary] = []
+	rows.append({"house_id": "player", "name": _prestige_house_name("player"), "prestige": player_prestige, "is_player": true, "source": "live"})
+	for rival_id_variant: Variant in rival_prestige.keys():
+		var rival_id: String = String(rival_id_variant)
+		rows.append({"house_id": rival_id, "name": _prestige_house_name(rival_id), "prestige": float(rival_prestige[rival_id_variant]), "is_player": false, "source": "placeholder"})
+	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var a_value: float = float(a.get("prestige", 0.0))
+		var b_value: float = float(b.get("prestige", 0.0))
+		if is_equal_approx(a_value, b_value):
+			return String(a.get("name", "")) < String(b.get("name", ""))
+		return a_value > b_value
+	)
+	var rank: int = 1
+	for index: int in range(rows.size()):
+		var row: Dictionary = rows[index]
+		if index > 0:
+			var previous: Dictionary = rows[index - 1] as Dictionary
+			if not is_equal_approx(float(row.get("prestige", 0.0)), float(previous.get("prestige", 0.0))):
+				rank = index + 1
+		row["rank"] = rank
+		rows[index] = row
+	return rows
+
+func get_player_prestige_rank() -> Dictionary:
+	for row: Dictionary in get_prestige_leaderboard():
+		if bool(row.get("is_player", false)):
+			return row.duplicate(true)
+	return {"rank": 0, "name": "Player House", "prestige": player_prestige, "is_player": true}
+
+func get_prestige_summary() -> Dictionary:
+	var leaderboard: Array[Dictionary] = get_prestige_leaderboard()
+	var player_rank: Dictionary = get_player_prestige_rank()
+	var history_rows: Array[Dictionary] = get_prestige_history()
+	history_rows.reverse()
+	var latest_history: Array[Dictionary] = []
+	for item: Dictionary in history_rows:
+		if latest_history.size() >= 8:
+			break
+		latest_history.append(item.duplicate(true))
+	return {
+		"schema_version": "prestige_core_v0_37",
+		"player_prestige": player_prestige,
+		"rival_prestige": get_rival_prestige(),
+		"leaderboard": leaderboard,
+		"player_rank": player_rank,
+		"player_rank_number": int(player_rank.get("rank", 0)),
+		"prestige_history": get_prestige_history(),
+		"recent_history": latest_history,
+		"mechanics_note": "Prestige is the main score. It is earned, lost, displayed and compared against rivals. It is never spent. Court-need donations, Flower War outcomes, rituals, shrine levels, sacrifices and savvy market trades currently add Prestige."
+	}
+
+
+# -----------------------------------------------------------------------------
+# Religious Sacrifice Prestige + Favour v0.40.1
+# -----------------------------------------------------------------------------
+
+func _sacrifice_prestige_option_definitions() -> Array[Dictionary]:
+	# Prototype values follow the agreed hierarchy: Captive > Priest > Slave/Tlacotin.
+	# Sacrifice Prestige is public religious fame. It is score only and is never spent.
+	return [
+		{
+			"id": "captive",
+			"name": "Captive",
+			"source_type": "resource",
+			"resource_id": "captives",
+			"population_group": "",
+			"prestige_each": 8.0,
+			"favour_each": 8.0,
+			"description": "Highest-prestige sacrifice. Captives are the central ritual prize of Flower Wars."
+		},
+		{
+			"id": "priest",
+			"name": "Priest",
+			"source_type": "population",
+			"resource_id": "",
+			"population_group": "tlamacazqueh",
+			"prestige_each": 4.0,
+			"favour_each": 4.0,
+			"description": "Moderate-prestige sacrifice. This is costly because it removes a trained priest from the estate."
+		},
+		{
+			"id": "tlacotin",
+			"name": "Tlacotin Labourer",
+			"source_type": "population",
+			"resource_id": "",
+			"population_group": "tlacotin",
+			"prestige_each": 1.0,
+			"favour_each": 1.0,
+			"description": "Small-prestige sacrifice. This uses bonded labour and should remain much less prestigious than captive sacrifice."
+		}
+	]
+
+func get_sacrifice_prestige_options() -> Array[Dictionary]:
+	var output: Array[Dictionary] = []
+	for option: Dictionary in _sacrifice_prestige_option_definitions():
+		var source_type: String = String(option.get("source_type", ""))
+		var available: int = 0
+		if source_type == "resource":
+			available = int(floor(_stock(String(option.get("resource_id", "")))))
+		elif source_type == "population":
+			available = _active_population_for_group(String(option.get("population_group", "")))
+		var row: Dictionary = option.duplicate(true)
+		row["available"] = available
+		row["can_sacrifice_one"] = available >= 1
+		row["prestige_preview_one"] = float(row.get("prestige_each", 0.0))
+		row["favour_preview_one"] = float(row.get("favour_each", row.get("prestige_each", 0.0)))
+		output.append(row)
+	return output
+
+func _sacrifice_prestige_option_by_id(sacrifice_id: String) -> Dictionary:
+	for option: Dictionary in _sacrifice_prestige_option_definitions():
+		if String(option.get("id", "")) == sacrifice_id:
+			return option.duplicate(true)
+	return {}
+
+func can_sacrifice_for_prestige(sacrifice_id: String, amount: int = 1) -> Dictionary:
+	var option: Dictionary = _sacrifice_prestige_option_by_id(sacrifice_id)
+	if option.is_empty():
+		return {"ok": false, "reason": "Unknown sacrifice type."}
+	var count: int = max(0, amount)
+	if count <= 0:
+		return {"ok": false, "reason": "Choose at least 1 sacrifice."}
+	var source_type: String = String(option.get("source_type", ""))
+	var available: int = 0
+	if source_type == "resource":
+		available = int(floor(_stock(String(option.get("resource_id", "")))))
+	elif source_type == "population":
+		available = _active_population_for_group(String(option.get("population_group", "")))
+	else:
+		return {"ok": false, "reason": "Sacrifice source is not configured."}
+	if available < count:
+		return {"ok": false, "reason": "Only " + str(available) + " available."}
+	return {"ok": true, "reason": "Ready.", "available": available}
+
+func sacrifice_for_prestige(sacrifice_id: String, amount: int = 1, god_id: String = "") -> Dictionary:
+	var status: Dictionary = can_sacrifice_for_prestige(sacrifice_id, amount)
+	if not bool(status.get("ok", false)):
+		return status
+	var option: Dictionary = _sacrifice_prestige_option_by_id(sacrifice_id)
+	var count: int = max(1, amount)
+	var source_type: String = String(option.get("source_type", ""))
+	if source_type == "resource":
+		_add_stock(String(option.get("resource_id", "")), -float(count))
+	elif source_type == "population":
+		var group_id: String = String(option.get("population_group", ""))
+		population[group_id] = max(0, int(population.get(group_id, 0)) - count)
+		_ensure_active_housing_counts()
+		_ensure_labour_assignments()
+	var prestige_gain: float = snappedf(float(count) * float(option.get("prestige_each", 0.0)), 0.01)
+	var favour_gain: float = snappedf(float(count) * float(option.get("favour_each", option.get("prestige_each", 0.0))), 0.01)
+	var god_text: String = ""
+	if god_id != "":
+		god_text = " to " + get_palace_route_name(god_id)
+	var detail: String = "Sacrificed " + str(count) + " " + String(option.get("name", "sacrifice")) + god_text + "."
+	var record: Dictionary = {
+		"source_id": "religion_sacrifice",
+		"sacrifice_id": sacrifice_id,
+		"name": String(option.get("name", "Sacrifice")),
+		"amount": count,
+		"god_id": god_id,
+		"prestige_each": float(option.get("prestige_each", 0.0)),
+		"favour_each": float(option.get("favour_each", option.get("prestige_each", 0.0))),
+		"prestige_gain": prestige_gain,
+		"favour_gain": favour_gain,
+		"veintena": current_veintena,
+		"detail": detail
+	}
+	add_player_prestige(prestige_gain, "religion_sacrifice", detail, record)
+	sacrifice_prestige_records.append(record.duplicate(true))
+	last_report.append(detail + " Prestige +" + _format_amount(prestige_gain) + "; favour +" + _format_amount(favour_gain) + ".")
+	emit_signal("state_changed")
+	return {"ok": true, "reason": "Sacrifice recorded.", "record": record, "prestige_gain": prestige_gain, "favour_gain": favour_gain, "message": detail + " Prestige +" + _format_amount(prestige_gain) + "; favour +" + _format_amount(favour_gain) + "."}
+
+func get_sacrifice_prestige_records() -> Array[Dictionary]:
+	var output: Array[Dictionary] = []
+	for record: Dictionary in sacrifice_prestige_records:
+		output.append(record.duplicate(true))
+	return output
+
+func _palace_donation_records_for_cycle(cycle_id: String = "") -> Array[Dictionary]:
+	var target_cycle: String = _palace_ruler_demand_cycle_id() if cycle_id == "" else cycle_id
+	var output: Array[Dictionary] = []
+	for record: Dictionary in palace_ruler_demand_donations:
+		if String(record.get("cycle_id", "")) == target_cycle:
+			output.append(record.duplicate(true))
+	return output
+
+func _palace_donation_records_for_cycle_slot(cycle_id: String, slot_id: String) -> Array[Dictionary]:
+	var output: Array[Dictionary] = []
+	for record: Dictionary in _palace_donation_records_for_cycle(cycle_id):
+		if String(record.get("slot", "")) == slot_id:
+			output.append(record.duplicate(true))
+	return output
+
+func _palace_donation_total_for_cycle(cycle_id: String = "") -> Dictionary:
+	var records: Array[Dictionary] = _palace_donation_records_for_cycle(cycle_id)
+	var total_amount: float = 0.0
+	var total_prestige: float = 0.0
+	var by_resource: Dictionary = {}
+	var by_slot: Dictionary = {}
+	for record: Dictionary in records:
+		var amount: float = float(record.get("amount", 0.0))
+		var prestige_gain: float = float(record.get("prestige_gain", 0.0))
+		var resource_id: String = String(record.get("resource_id", ""))
+		var slot_id: String = String(record.get("slot", ""))
+		total_amount += amount
+		total_prestige += prestige_gain
+		by_resource[resource_id] = float(by_resource.get(resource_id, 0.0)) + amount
+		by_slot[slot_id] = float(by_slot.get(slot_id, 0.0)) + amount
+	return {
+		"donation_count": records.size(),
+		"total_amount": total_amount,
+		"total_prestige": total_prestige,
+		"by_resource": by_resource,
+		"by_slot": by_slot,
+		"records": records
+	}
+
+func _palace_donation_total_for_slot(cycle_id: String, slot_id: String) -> Dictionary:
+	var records: Array[Dictionary] = _palace_donation_records_for_cycle_slot(cycle_id, slot_id)
+	var total_amount: float = 0.0
+	var total_prestige: float = 0.0
+	for record: Dictionary in records:
+		total_amount += float(record.get("amount", 0.0))
+		total_prestige += float(record.get("prestige_gain", 0.0))
+	return {"donation_count": records.size(), "amount": total_amount, "prestige": total_prestige, "records": records}
+
+func can_donate_palace_need(slot_id: String, amount: float) -> Dictionary:
+	var raw_row: Dictionary = _palace_ruler_demand_raw_row_by_slot(slot_id)
+	if raw_row.is_empty():
+		return {"ok": false, "reason": "Unknown court-need slot: " + slot_id + "."}
+	var resource_id: String = String(raw_row.get("resource_id", ""))
+	if resource_id == "":
+		return {"ok": false, "reason": "Court need row is missing a valid resource."}
+	if amount <= 0.001:
+		return {"ok": false, "reason": "Choose a positive donation amount."}
+	var free_value: float = free_stock_after_reserves(resource_id)
+	if free_value + 0.001 < amount:
+		return {"ok": false, "reason": "Need " + _format_amount(amount - free_value) + " more free " + get_resource_name(resource_id) + " after reserves."}
+	var base_value: float = _resource_base_value(resource_id)
+	return {"ok": true, "reason": "Ready to donate " + _format_amount(amount) + " " + get_resource_name(resource_id) + " for +" + _format_amount(amount * base_value) + " Prestige.", "prestige_gain": amount * base_value}
+
+func donate_palace_need(slot_id: String, amount: float) -> Dictionary:
+	var status: Dictionary = can_donate_palace_need(slot_id, amount)
+	if not bool(status.get("ok", false)):
+		last_report.append("Court need donation failed: " + String(status.get("reason", "Unknown reason.")))
+		emit_signal("state_changed")
+		return status
+	var raw_row: Dictionary = _palace_ruler_demand_raw_row_by_slot(slot_id)
+	var resource_id: String = String(raw_row.get("resource_id", ""))
+	var base_value: float = _resource_base_value(resource_id)
+	var prestige_gain: float = amount * base_value
+	var free_before: float = free_stock_after_reserves(resource_id)
+	var stored_before: float = _stock(resource_id)
+	_add_stock(resource_id, -amount)
+	var record: Dictionary = {
+		"slot": slot_id,
+		"slot_name": String(raw_row.get("slot_name", "Court need")),
+		"cycle_id": _palace_ruler_demand_cycle_id(),
+		"resource_id": resource_id,
+		"resource_name": get_resource_name(resource_id),
+		"amount": amount,
+		"base_value": base_value,
+		"prestige_gain": prestige_gain,
+		"donated_veintena": current_veintena,
+		"free_before_donation": free_before,
+		"stored_before_donation": stored_before
+	}
+	palace_ruler_demand_donations.append(record)
+	add_player_prestige(prestige_gain, "court_need_donation", "Donated " + _format_amount(amount) + " " + get_resource_name(resource_id) + " to a court need.", record)
+	last_report.append("Donated " + _format_amount(amount) + " " + get_resource_name(resource_id) + " to the current court need. Prestige +" + _format_amount(prestige_gain) + ".")
+	emit_signal("state_changed")
+	return {"ok": true, "reason": "Donated.", "record": record, "prestige_gain": prestige_gain}
+
+# Compatibility wrappers retained so older UI/debug calls fail safely or donate the
+# visible need marker amount. New UI should use can_donate_palace_need/donate_palace_need.
+func is_palace_ruler_demand_delivered(slot_id: String) -> bool:
+	return float(_palace_donation_total_for_slot(_palace_ruler_demand_cycle_id(), slot_id).get("amount", 0.0)) > 0.001
+
+func can_deliver_palace_ruler_demand(slot_id: String) -> Dictionary:
+	var raw_row: Dictionary = _palace_ruler_demand_raw_row_by_slot(slot_id)
+	if raw_row.is_empty():
+		return {"ok": false, "reason": "Unknown court-need slot: " + slot_id + "."}
+	return can_donate_palace_need(slot_id, float(raw_row.get("amount", 0.0)))
+
+func deliver_palace_ruler_demand(slot_id: String) -> Dictionary:
+	var raw_row: Dictionary = _palace_ruler_demand_raw_row_by_slot(slot_id)
+	if raw_row.is_empty():
+		return {"ok": false, "reason": "Unknown court-need slot: " + slot_id + "."}
+	return donate_palace_need(slot_id, float(raw_row.get("amount", 0.0)))
+
+func get_palace_ruler_demand_delivery_records() -> Array[Dictionary]:
+	return _palace_donation_records_for_cycle()
+
+func _palace_ruler_demand_archive_row(raw_row: Dictionary, cycle_id: String) -> Dictionary:
+	var slot_id: String = String(raw_row.get("slot", ""))
+	var donation: Dictionary = _palace_donation_total_for_slot(cycle_id, slot_id)
+	var donated_amount: float = float(donation.get("amount", 0.0))
+	return {
+		"slot": slot_id,
+		"slot_name": String(raw_row.get("slot_name", "Court need")),
+		"resource_id": String(raw_row.get("resource_id", "")),
+		"resource_name": get_resource_name(String(raw_row.get("resource_id", ""))),
+		"needed_marker": float(raw_row.get("amount", 0.0)),
+		"donated": donated_amount > 0.001,
+		"donated_amount": donated_amount,
+		"donated_prestige": float(donation.get("prestige", 0.0)),
+		"donation_count": int(donation.get("donation_count", 0)),
+		"status": "Donated" if donated_amount > 0.001 else "No donation"
+	}
+
+func _palace_ruler_demand_records_for_cycle(cycle_id: String) -> Array[Dictionary]:
+	return _palace_donation_records_for_cycle(cycle_id)
+
+func get_palace_ruler_demand_cycle_archive() -> Array[Dictionary]:
+	var archive: Array[Dictionary] = []
+	var demand_sets: Array[Dictionary] = _palace_ruler_demand_sets()
+	var current_cycle_id: String = _palace_ruler_demand_cycle_id()
+	for index: int in range(demand_sets.size()):
+		var cycle: Dictionary = demand_sets[index] as Dictionary
+		var cycle_id: String = String(cycle.get("id", ""))
+		var window: Dictionary = _palace_ruler_demand_cycle_window(index)
+		var rows: Array[Dictionary] = []
+		for row_variant: Variant in (cycle.get("demands", []) as Array):
+			if row_variant is Dictionary:
+				rows.append(_palace_ruler_demand_archive_row(row_variant as Dictionary, cycle_id))
+		var donation_summary: Dictionary = _palace_need_donation_summary_for_cycle(cycle_id, rows)
+		archive.append({
+			"cycle_id": cycle_id,
+			"title": String(cycle.get("title", "Court Need Cycle")),
+			"veintena_band": String(cycle.get("veintena_band", "Prototype cycle")),
+			"cycle_window": String(window.get("label", "Court need cycle")),
+			"start_veintena": int(window.get("start_veintena", 1)),
+			"end_veintena": int(window.get("end_veintena", 6)),
+			"flavour": String(cycle.get("flavour", "")),
+			"is_current": cycle_id == current_cycle_id,
+			"rows": rows,
+			"records": _palace_ruler_demand_records_for_cycle(cycle_id),
+			"donation_count": int(donation_summary.get("donation_count", 0)),
+			"donated_prestige": float(donation_summary.get("total_prestige", 0.0)),
+			"donated_slots": int(donation_summary.get("donated_slots", 0)),
+			"total_slots": int(donation_summary.get("total_slots", rows.size()))
+		})
+	return archive
+
+func _palace_need_donation_summary_for_cycle(cycle_id: String, rows: Array[Dictionary] = []) -> Dictionary:
+	var total: Dictionary = _palace_donation_total_for_cycle(cycle_id)
+	var donated_slots: int = 0
+	var total_slots: int = rows.size()
+	for row: Dictionary in rows:
+		if bool(row.get("donated", false)):
+			donated_slots += 1
+	return {
+		"label": "Prestige +" + _format_amount(float(total.get("total_prestige", 0.0))),
+		"detail": str(int(total.get("donation_count", 0))) + " donations made across " + str(donated_slots) + " / " + str(total_slots) + " visible court needs.",
+		"donation_count": int(total.get("donation_count", 0)),
+		"total_amount": float(total.get("total_amount", 0.0)),
+		"total_prestige": float(total.get("total_prestige", 0.0)),
+		"donated_slots": donated_slots,
+		"total_slots": total_slots,
+		"records": total.get("records", []) as Array
+	}
+
+func get_palace_ruler_demand_completion_summary() -> Dictionary:
+	# Compatibility name. This is now a donation/prestige summary, not a completion
+	# or quality score.
+	var rows: Array[Dictionary] = []
+	for row_variant: Variant in (_current_palace_ruler_demand_set().get("demands", []) as Array):
+		if row_variant is Dictionary:
+			rows.append(_palace_ruler_demand_row(row_variant as Dictionary))
+	return _palace_need_donation_summary_for_cycle(_palace_ruler_demand_cycle_id(), rows)
+
+func _palace_ruler_demand_row(raw_row: Dictionary) -> Dictionary:
+	var slot_id: String = String(raw_row.get("slot", ""))
+	var resource_id: String = String(raw_row.get("resource_id", ""))
+	var need_marker: float = float(raw_row.get("amount", 0.0))
+	var stored: float = _stock(resource_id)
+	var free_value: float = free_stock_after_reserves(resource_id)
+	var base_value: float = _resource_base_value(resource_id)
+	var donation: Dictionary = _palace_donation_total_for_slot(_palace_ruler_demand_cycle_id(), slot_id)
+	var donated_amount: float = float(donation.get("amount", 0.0))
+	var donated_prestige: float = float(donation.get("prestige", 0.0))
+	var can_donate_status: Dictionary = can_donate_palace_need(slot_id, minf(maxf(1.0, need_marker), free_value)) if free_value > 0.001 else {"ok": false, "reason": "No free stock available after reserves."}
+	return {
+		"slot": slot_id,
+		"slot_name": String(raw_row.get("slot_name", "Court need")),
+		"resource_id": resource_id,
+		"resource_name": get_resource_name(resource_id),
+		"requested": need_marker, # Legacy UI field; now means visible need marker, not a completion requirement.
+		"needed_marker": need_marker,
 		"stored": stored,
 		"free_after_reserves": free_value,
-		"shortfall": shortfall,
-		"ready": ready,
-		"status": "Ready" if ready else "Shortfall",
-		"quality_hint": _palace_ruler_demand_quality_label(free_value, requested),
-		"note": String(raw_row.get("note", "Palace-facing obligation."))
+		"shortfall": 0.0,
+		"ready": free_value > 0.001,
+		"delivered": donated_amount > 0.001, # Legacy field; means donated at least once.
+		"can_deliver": free_value > 0.001,
+		"can_donate": free_value > 0.001,
+		"delivery_status": String(can_donate_status.get("reason", "")),
+		"donation_status": String(can_donate_status.get("reason", "")),
+		"delivered_amount": donated_amount,
+		"donated_amount": donated_amount,
+		"delivered_veintena": 0,
+		"delivery_quality": "",
+		"donated_prestige": donated_prestige,
+		"base_value": base_value,
+		"prestige_for_need_marker": need_marker * base_value,
+		"max_donation": free_value,
+		"status": "Donated " + _format_amount(donated_amount) if donated_amount > 0.001 else ("Open need" if free_value > 0.001 else "No free stock"),
+		"quality_hint": "Prestige = donated amount × base value (" + _format_amount(base_value) + ").",
+		"note": String(raw_row.get("note", "Court-facing need."))
 	}
 
 func get_palace_ruler_demands_summary() -> Dictionary:
@@ -3933,10 +4662,11 @@ func get_palace_ruler_demands_summary() -> Dictionary:
 	var selected_index: int = _current_palace_ruler_demand_index()
 	var selected: Dictionary = demand_sets[selected_index] if demand_sets.size() > 0 else {}
 	var rows: Array[Dictionary] = []
-	var ready_count: int = 0
+	var open_count: int = 0
+	var donated_slot_count: int = 0
 	var total_count: int = 0
-	var total_requested_value: float = 0.0
-	var total_free_value: float = 0.0
+	var total_need_marker_value: float = 0.0
+	var total_free_matching_value: float = 0.0
 	var raw_rows: Array = selected.get("demands", []) as Array
 	for row_variant: Variant in raw_rows:
 		if not (row_variant is Dictionary):
@@ -3944,31 +4674,56 @@ func get_palace_ruler_demands_summary() -> Dictionary:
 		var row: Dictionary = _palace_ruler_demand_row(row_variant as Dictionary)
 		rows.append(row)
 		total_count += 1
-		if bool(row.get("ready", false)):
-			ready_count += 1
-		total_requested_value += float(row.get("requested", 0.0))
-		total_free_value += minf(float(row.get("free_after_reserves", 0.0)), float(row.get("requested", 0.0)))
-	var headline: String = "Ruler demands prototype: " + str(ready_count) + " / " + str(total_count) + " requested categories currently covered by free stock."
+		if bool(row.get("delivered", false)):
+			donated_slot_count += 1
+		if bool(row.get("can_donate", false)):
+			open_count += 1
+		total_need_marker_value += float(row.get("prestige_for_need_marker", 0.0))
+		total_free_matching_value += float(row.get("free_after_reserves", 0.0)) * float(row.get("base_value", 1.0))
+	var donation_summary: Dictionary = _palace_need_donation_summary_for_cycle(String(selected.get("id", "")), rows)
+	var deadline: Dictionary = _palace_ruler_demand_deadline_summary(selected_index)
+	var donated_prestige: float = float(donation_summary.get("total_prestige", 0.0))
+	var headline: String = "Court needs: " + str(open_count) + " goods available to donate; this cycle has generated +" + _format_amount(donated_prestige) + " Prestige. Deadline: " + String(deadline.get("urgency", "Time remains")) + "."
 	if total_count <= 0:
-		headline = "Ruler demands prototype has no active demand rows."
+		headline = "Court needs have no active rows."
 	return {
-		"schema_version": "palace_ruler_demands_v0_31",
+		"schema_version": "palace_court_needs_v0_36",
 		"active": true,
+		"donation_enabled": true,
 		"delivery_enabled": false,
 		"current_veintena": current_veintena,
 		"cycle_index": selected_index,
 		"cycle_id": String(selected.get("id", "")),
-		"title": String(selected.get("title", "Current Palace Demand")),
+		"title": String(selected.get("title", "Current Court Needs")),
 		"veintena_band": String(selected.get("veintena_band", "Prototype cycle")),
-		"flavour": String(selected.get("flavour", "The ruler's agents watch whether the estate can meet palace-facing obligations.")),
+		"cycle_window": String(deadline.get("headline", "Court need cycle")),
+		"cycle_start_veintena": int(deadline.get("start_veintena", 1)),
+		"cycle_end_veintena": int(deadline.get("end_veintena", 6)),
+		"veintenas_remaining": int(deadline.get("veintenas_remaining", 0)),
+		"urgency_label": String(deadline.get("urgency", "Time remains")),
+		"deadline_summary": deadline,
+		"flavour": String(selected.get("flavour", "The court needs goods; donating needed goods creates public prestige.")),
 		"rows": rows,
-		"ready_count": ready_count,
+		"ready_count": open_count,
+		"delivered_count": donated_slot_count,
+		"donated_slot_count": donated_slot_count,
 		"total_count": total_count,
 		"headline": headline,
-		"completion_label": str(ready_count) + " / " + str(total_count) + " categories ready",
-		"total_requested_value": total_requested_value,
-		"total_free_matching_value": total_free_value,
-		"mechanics_note": "v0.31 is display/infrastructure only. Goods cannot be delivered yet, and no prestige, royal favour, recognition, local stability or ruler-demand reward is created."
+		"completion_label": str(donated_slot_count) + " / " + str(total_count) + " needs donated to",
+		"donation_label": str(donated_slot_count) + " / " + str(total_count) + " needs donated to",
+		"completion_quality": "Prestige +" + _format_amount(donated_prestige),
+		"donation_prestige_label": "Prestige +" + _format_amount(donated_prestige),
+		"completion_detail": String(donation_summary.get("detail", "No donations yet.")),
+		"completion_summary": donation_summary,
+		"readiness_label": str(open_count) + " needs have free stock available",
+		"delivery_records": get_palace_ruler_demand_delivery_records(),
+		"donation_records": get_palace_ruler_demand_delivery_records(),
+		"cycle_archive": get_palace_ruler_demand_cycle_archive(),
+		"total_requested_value": total_need_marker_value,
+		"total_free_matching_value": total_free_matching_value,
+		"total_donated_prestige": donated_prestige,
+		"player_prestige": player_prestige,
+		"mechanics_note": "v0.36 reframes court needs as court needs. Donating a needed good grants Prestige equal to donated amount × that good's base value. Prestige is score only and is never spent. No royal favour, local stability or palace-route credit is created."
 	}
 
 func get_palace_summary() -> Dictionary:
@@ -3980,7 +4735,7 @@ func get_palace_summary() -> Dictionary:
 		route_name = get_palace_route_name(dedicated_god)
 		god_name = _god_display_name(dedicated_god)
 	return {
-		"schema_version": "palace_ruler_demands_v0_31",
+		"schema_version": "palace_court_needs_v0_36",
 		"palace_level": get_palace_level(),
 		"dedicated": dedicated,
 		"dedicated_god": dedicated_god,
@@ -4007,11 +4762,12 @@ func get_palace_summary() -> Dictionary:
 		"quetzalcoatl_legitimacy": get_quetzalcoatl_legitimacy_overview(),
 		"ruler_demands": get_palace_ruler_demands_summary(),
 		"authority_status": String(get_palace_authority_summary().get("headline", "Palace authority not connected.")),
-		"ruler_demand_status": String(get_palace_ruler_demands_summary().get("headline", "Ruler demands prototype active.")),
+		"ruler_demand_status": String(get_palace_ruler_demands_summary().get("headline", "Court needs donation prototype active.")),
+		"prestige_summary": get_prestige_summary(),
 		"flower_war_gate_enabled": is_flower_war_palace_gate_enabled(),
 		"flower_war_gate_passed": flower_war_palace_gate_passed(),
 		"flower_war_gate_status": flower_war_palace_gate_status_text(),
-		"implementation_note": "v0.31 adds a display-only ruler demands prototype: one Raw, one Processed, and one Luxury/Special request with free-stock readiness. No delivery rewards, prestige, royal favour or local stability are implemented."
+		"implementation_note": "v0.36 reframes court needs as court needs. Donating needed goods grants Prestige based on donated amount × resource base value. Prestige is score only and is never spent."
 	}
 
 func get_flower_war_options() -> Array[Dictionary]:
@@ -4159,8 +4915,10 @@ func get_flower_war_preview(option_id: String = "minor", doctrine_id: String = "
 		"loot": loot,
 		"loot_value": loot_value,
 		"provisioning_cost": provisioning_cost,
-		"prestige_pending": true,
-		"prestige_text": "Prestige pending calibration."
+		"prestige_pending": false,
+		"prestige_breakdown": _flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value),
+		"prestige_gain": float(_flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value).get("total", 0.0)),
+		"prestige_text": _prestige_text_from_breakdown(_flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value))
 	}
 
 func can_launch_flower_war(option_id: String = "minor", doctrine_id: String = "unspecialised", provisioning_id: String = "standard") -> Dictionary:
@@ -4314,8 +5072,10 @@ func get_flower_war_preview_with_all_warbands(option_id: String = "minor", provi
 		"xp_gained": xp_gained,
 		"eagle_warriors": eagle_warriors,
 		"coyote_warriors": coyote_warriors,
-		"prestige_pending": true,
-		"prestige_text": "Prestige pending calibration."
+		"prestige_pending": false,
+		"prestige_breakdown": _flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value),
+		"prestige_gain": float(_flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value).get("total", 0.0)),
+		"prestige_text": _prestige_text_from_breakdown(_flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value))
 	}
 
 func can_launch_flower_war_with_all_warbands(option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
@@ -4423,9 +5183,10 @@ func launch_flower_war_with_all_warbands(option_id: String = "minor", provisioni
 	last_flower_war_report["attacker_dead"] = total_dead
 	last_flower_war_report["participant_reports"] = participant_reports
 	last_flower_war_report["level_reports"] = level_reports
+	last_flower_war_report = _apply_flower_war_prestige_to_report(last_flower_war_report)
 	_archive_flower_war_report(last_flower_war_report)
 
-	var line: String = "All warbands fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_total) + " shared by participating warbands. Prestige pending calibration."
+	var line: String = "All warbands fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_total) + " shared by participating warbands. " + String(last_flower_war_report.get("prestige_text", "Prestige +0")) + "."
 	if not level_reports.is_empty():
 		line += " " + "; ".join(level_reports) + "."
 	last_report.append(line)
@@ -4559,8 +5320,10 @@ func get_flower_war_preview_with_selected_warbands(warband_ids: Array, option_id
 		"xp_gained": xp_gained,
 		"eagle_warriors": eagle_warriors,
 		"coyote_warriors": coyote_warriors,
-		"prestige_pending": true,
-		"prestige_text": "Prestige pending calibration."
+		"prestige_pending": false,
+		"prestige_breakdown": _flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value),
+		"prestige_gain": float(_flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value).get("total", 0.0)),
+		"prestige_text": _prestige_text_from_breakdown(_flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value))
 	}
 
 func can_launch_flower_war_with_selected_warbands(warband_ids: Array, option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
@@ -4673,9 +5436,10 @@ func launch_flower_war_with_selected_warbands(warband_ids: Array, option_id: Str
 	last_flower_war_report["attacker_dead"] = total_dead
 	last_flower_war_report["participant_reports"] = participant_reports
 	last_flower_war_report["level_reports"] = level_reports
+	last_flower_war_report = _apply_flower_war_prestige_to_report(last_flower_war_report)
 	_archive_flower_war_report(last_flower_war_report)
 
-	var line: String = "Selected warbands fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_total) + " shared by participating warbands. Prestige pending calibration."
+	var line: String = "Selected warbands fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_total) + " shared by participating warbands. " + String(last_flower_war_report.get("prestige_text", "Prestige +0")) + "."
 	if not level_reports.is_empty():
 		line += " " + "; ".join(level_reports) + "."
 	last_report.append(line)
@@ -4760,8 +5524,10 @@ func get_flower_war_defence_preview(option_id: String = "standard", strategy_id:
 		"loot_value": 0.0,
 		"provisioning_cost": {},
 		"xp_gained": xp_gained,
-		"prestige_pending": true,
-		"prestige_text": "Prestige pending calibration. Defensive rewards are not balanced yet."
+		"prestige_pending": false,
+		"prestige_breakdown": _flower_war_preview_prestige_for_defence(result, enemy_casualties),
+		"prestige_gain": float(_flower_war_preview_prestige_for_defence(result, enemy_casualties).get("total", 0.0)),
+		"prestige_text": _prestige_text_from_breakdown(_flower_war_preview_prestige_for_defence(result, enemy_casualties))
 	}
 
 func can_resolve_flower_war_defence(option_id: String = "standard", strategy_id: String = "balanced") -> Dictionary:
@@ -4862,9 +5628,10 @@ func resolve_flower_war_defence(option_id: String = "standard", strategy_id: Str
 	last_flower_war_report["attacker_dead"] = total_dead
 	last_flower_war_report["participant_reports"] = participant_reports
 	last_flower_war_report["level_reports"] = level_reports
+	last_flower_war_report = _apply_flower_war_prestige_to_report(last_flower_war_report)
 	_archive_flower_war_report(last_flower_war_report)
 
-	var line: String = "Defending warbands resolved " + String(preview.get("option_name", "Flower War")) + " using " + String(preview.get("defence_strategy_name", "Balanced Defence")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors defending " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Enemy casualties " + str(int(preview.get("enemy_casualties", 0))) + ". XP +" + str(xp_total) + " shared by defending warbands. Prestige pending calibration."
+	var line: String = "Defending warbands resolved " + String(preview.get("option_name", "Flower War")) + " using " + String(preview.get("defence_strategy_name", "Balanced Defence")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors defending " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Enemy casualties " + str(int(preview.get("enemy_casualties", 0))) + ". XP +" + str(xp_total) + " shared by defending warbands. " + String(last_flower_war_report.get("prestige_text", "Prestige +0")) + "."
 	if not level_reports.is_empty():
 		line += " " + "; ".join(level_reports) + "."
 	last_report.append(line)
@@ -5052,8 +5819,9 @@ func launch_flower_war_with_warband(warband_id: String, option_id: String = "min
 	last_flower_war_report["xp_gained"] = xp_gain
 	last_flower_war_report["level_before"] = level_before
 	last_flower_war_report["level_after"] = level_after
+	last_flower_war_report = _apply_flower_war_prestige_to_report(last_flower_war_report)
 
-	var line: String = String(warband.get("name", "Warband")) + " fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + "; casualties " + str(casualties) + " (injured " + str(injured) + ", dead " + str(dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_gain) + ". Prestige pending calibration."
+	var line: String = String(warband.get("name", "Warband")) + " fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + "; casualties " + str(casualties) + " (injured " + str(injured) + ", dead " + str(dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_gain) + ". " + String(last_flower_war_report.get("prestige_text", "Prestige +0")) + "."
 	if level_after > level_before:
 		line += " " + String(warband.get("name", "Warband")) + " reached Level " + str(level_after) + " and gained " + str(max(0, level_after - level_before)) + " skill point(s)."
 	last_report.append(line)

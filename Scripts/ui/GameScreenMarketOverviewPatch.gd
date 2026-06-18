@@ -65,6 +65,10 @@ var _flower_war_event_provisioning_id: String = "standard"
 var _flower_war_event_selected_warbands: Dictionary = {}
 var _flower_war_event_report: Dictionary = {}
 var _flower_war_defence_strategy_id: String = "balanced"
+var _active_trade_basket_view: Control = null
+var _trade_basket_savvy_preview_label: RichTextLabel = null
+var _last_trade_basket_savvy_lines: Array = []
+var _last_trade_basket_savvy_preview: Dictionary = {}
 var _selected_palace_route_id: String = ""
 var _pending_palace_dedication_confirm_id: String = ""
 
@@ -886,7 +890,7 @@ func _setup_palace_navigation_probe() -> void:
 		{"id": "overview", "label": "Overview"},
 		{"id": "divine_seat", "label": "Divine Seat"},
 		{"id": "authority", "label": "Authority"},
-		{"id": "ruler_demands", "label": "Ruler Demands"}
+		{"id": "ruler_demands", "label": "Court Needs"}
 	]
 	profile["reports"] = []
 	_screen_profiles["palace"] = profile
@@ -1040,6 +1044,58 @@ func _refresh_main_content() -> void:
 		return
 	super._refresh_main_content()
 
+func _refresh_house_claim() -> void:
+	# v0.37.3: The persistent corner/claim panel belongs in the Palace area,
+	# not on every screen. Estate Overview has its own compact Prestige summary
+	# in the normal report list.
+	if current_location_id != "palace":
+		if house_claim_panel:
+			house_claim_panel.visible = false
+		return
+	if house_claim_panel:
+		house_claim_panel.visible = true
+	var state: Node = _state()
+	var prestige: Dictionary = {}
+	if state != null and state.has_method("get_prestige_summary"):
+		prestige = state.call("get_prestige_summary") as Dictionary
+	var player_value: float = float(prestige.get("player_prestige", 0.0))
+	var player_rank: Dictionary = prestige.get("player_rank", {}) as Dictionary
+	var rank_number: int = int(player_rank.get("rank", 0))
+	if prestige_glyph_label:
+		prestige_glyph_label.text = "PRE"
+	if prestige_title_label:
+		prestige_title_label.text = "Prestige Standing"
+	if prestige_value_label:
+		prestige_value_label.text = _format_religion_amount(player_value) + " Prestige"
+	if prestige_standing_label:
+		var rank_text: String = "Rank pending"
+		if rank_number > 0:
+			rank_text = _ordinal_number(rank_number) + " of 4 houses"
+		prestige_standing_label.text = rank_text
+	if prestige_recognition_label:
+		prestige_recognition_label.text = "Main score. Never spent."
+	if prestige_recent_label:
+		var recent: Array = prestige.get("recent_history", []) as Array
+		if recent.is_empty():
+			prestige_recent_label.text = "No prestige gains recorded yet."
+		else:
+			var last_record: Dictionary = recent[0] as Dictionary
+			var amount: float = float(last_record.get("amount", 0.0))
+			prestige_recent_label.text = "Recent: " + ("+" if amount >= 0.0 else "") + _format_religion_amount(amount) + " — " + String(last_record.get("detail", "Prestige changed"))
+
+func _ordinal_number(value: int) -> String:
+	var suffix: String = "th"
+	var mod_100: int = value % 100
+	if mod_100 < 11 or mod_100 > 13:
+		match value % 10:
+			1:
+				suffix = "st"
+			2:
+				suffix = "nd"
+			3:
+				suffix = "rd"
+	return str(value) + suffix
+
 func _refresh_right_panel() -> void:
 	_clear_children(notification_list)
 	var profile: Dictionary = _profile(current_location_id)
@@ -1115,7 +1171,7 @@ func _report_title_for_current_focus(profile: Dictionary) -> String:
 			"authority":
 				return "Palace Authority"
 			"ruler_demands":
-				return "Ruler Demands"
+				return "Court Needs"
 		return "Palace Reports"
 	if current_location_id == "warriors":
 		match _current_focus_id():
@@ -1208,23 +1264,24 @@ func _build_palace_ruler_demands_main_view() -> void:
 	root.add_theme_constant_override("separation", 12)
 	margin.add_child(root)
 
-	var title_label: Label = _palace_label("RULER DEMANDS", 33, Color(1.0, 0.86, 0.50, 1.0))
+	var title_label: Label = _palace_label("COURT NEEDS", 33, Color(1.0, 0.86, 0.50, 1.0))
 	title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	root.add_child(title_label)
 	if demands.is_empty():
-		root.add_child(_palace_wrapped_label("Ruler-demand backend data is not connected yet.", 18, Color(0.86, 0.80, 0.68, 1.0)))
+		root.add_child(_palace_wrapped_label("Court-needs backend data is not connected yet.", 18, Color(0.86, 0.80, 0.68, 1.0)))
 		return
-	root.add_child(_palace_wrapped_label(String(demands.get("title", "Current Palace Demand")), 22, Color(0.96, 0.78, 0.46, 1.0)))
-	root.add_child(_palace_wrapped_label(String(demands.get("flavour", "The ruler's agents watch whether the estate can meet palace-facing obligations.")), 16, Color(0.82, 0.84, 0.76, 1.0)))
-	root.add_child(_palace_wrapped_label(String(demands.get("headline", "Ruler demand prototype active.")), 15, Color(0.74, 0.94, 0.72, 1.0)))
+	root.add_child(_palace_wrapped_label(String(demands.get("title", "Current Court Needs")), 22, Color(0.96, 0.78, 0.46, 1.0)))
+	root.add_child(_palace_wrapped_label(String(demands.get("flavour", "The court currently needs these goods. Donating them creates public prestige.")), 16, Color(0.82, 0.84, 0.76, 1.0)))
+	root.add_child(_palace_wrapped_label(String(demands.get("headline", "Court needs donation prototype active.")), 15, Color(0.74, 0.94, 0.72, 1.0)))
 
 	var status_row: HBoxContainer = HBoxContainer.new()
 	status_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	status_row.add_theme_constant_override("separation", 10)
 	root.add_child(status_row)
-	_add_palace_summary_card(status_row, "Cycle", String(demands.get("veintena_band", "Prototype")), "Veintena " + str(int(demands.get("current_veintena", 1))) + ". Controlled test demand, not random politics.", Color(0.88, 0.70, 0.40, 1.0))
-	_add_palace_summary_card(status_row, "Readiness", String(demands.get("completion_label", "0 / 3 categories ready")), "Uses free stock after reserves, not total stockpile.", Color(0.72, 0.92, 0.70, 1.0))
-	_add_palace_summary_card(status_row, "Delivery", "Disabled", "Display-only prototype; no goods are handed in yet.", Color(0.92, 0.70, 0.46, 1.0))
+	_add_palace_summary_card(status_row, "Cycle", String(demands.get("veintena_band", "Prototype")), String(demands.get("cycle_window", "Controlled test need, not random politics.")), Color(0.88, 0.70, 0.40, 1.0))
+	_add_palace_summary_card(status_row, "Deadline", String(demands.get("urgency_label", "Time remains")), str(int(demands.get("veintenas_remaining", 0))) + " Veintena" + ("s" if int(demands.get("veintenas_remaining", 0)) != 1 else "") + " remaining including the current turn.", Color(0.92, 0.64, 0.42, 1.0))
+	_add_palace_summary_card(status_row, "Donated", String(demands.get("donation_label", "0 / 3 needs donated to")), "Donation is optional and can be partial; prestige comes from value donated.", Color(0.72, 0.92, 0.70, 1.0))
+	_add_palace_summary_card(status_row, "Prestige", "+" + _format_religion_amount(float(demands.get("total_donated_prestige", 0.0))) + " this cycle", "Player Prestige: " + _format_religion_amount(float(demands.get("player_prestige", 0.0))) + ". Prestige is score only, never spent.", Color(0.96, 0.80, 0.52, 1.0))
 
 	var scroll: ScrollContainer = ScrollContainer.new()
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -1238,6 +1295,7 @@ func _build_palace_ruler_demands_main_view() -> void:
 	for row_variant: Variant in rows:
 		if row_variant is Dictionary:
 			_add_palace_ruler_demand_row_card(list, row_variant as Dictionary)
+	_add_palace_ruler_demand_cycle_archive_panel(list, demands.get("cycle_archive", []) as Array)
 	var note_panel: PanelContainer = PanelContainer.new()
 	note_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	note_panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.018, 0.020, 0.018, 0.88), Color(0.42, 0.42, 0.34, 0.50), 10))
@@ -1248,11 +1306,43 @@ func _build_palace_ruler_demands_main_view() -> void:
 	note_margin.add_theme_constant_override("margin_right", 12)
 	note_margin.add_theme_constant_override("margin_bottom", 8)
 	note_panel.add_child(note_margin)
-	note_margin.add_child(_palace_wrapped_label(String(demands.get("mechanics_note", "Display-only. No rewards are created.")), 14, Color(0.74, 0.76, 0.68, 1.0)))
+	note_margin.add_child(_palace_wrapped_label(String(demands.get("mechanics_note", "Donations create prestige by base value. Prestige is score only.")), 14, Color(0.74, 0.76, 0.68, 1.0)))
+
+func _add_palace_ruler_demand_cycle_archive_panel(parent: VBoxContainer, archive_rows: Array) -> void:
+	if archive_rows.is_empty():
+		return
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.026, 0.026, 0.022, 0.92), Color(0.66, 0.55, 0.34, 0.58), 12))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 10)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 10)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 7)
+	margin.add_child(stack)
+	stack.add_child(_palace_label("Court Need Donation Record", 20, Color(0.96, 0.78, 0.46, 1.0)))
+	stack.add_child(_palace_wrapped_label("A compact record of visible court-need cycles and the prestige generated by donations.", 14, Color(0.76, 0.80, 0.70, 1.0)))
+	for cycle_variant: Variant in archive_rows:
+		if not (cycle_variant is Dictionary):
+			continue
+		var cycle: Dictionary = cycle_variant as Dictionary
+		var line_colour: Color = Color(0.74, 0.76, 0.68, 1.0)
+		if bool(cycle.get("is_current", false)):
+			line_colour = Color(0.92, 0.86, 0.56, 1.0)
+		var prefix: String = "Current — " if bool(cycle.get("is_current", false)) else "Record — "
+		var line: String = prefix + String(cycle.get("title", "Court Need Cycle")) + " (" + String(cycle.get("cycle_window", cycle.get("veintena_band", "Prototype"))) + "): " + str(int(cycle.get("donation_count", 0))) + " donations; +" + _format_religion_amount(float(cycle.get("donated_prestige", 0.0))) + " Prestige."
+		stack.add_child(_palace_wrapped_label(line, 14, line_colour))
 
 func _add_palace_ruler_demand_row_card(parent: VBoxContainer, row: Dictionary) -> void:
-	var ready: bool = bool(row.get("ready", false))
-	var border: Color = Color(0.54, 0.90, 0.58, 0.80) if ready else Color(1.0, 0.58, 0.34, 0.82)
+	var can_donate: bool = bool(row.get("can_donate", false))
+	var donated: bool = bool(row.get("delivered", false))
+	var border: Color = Color(0.54, 0.90, 0.58, 0.80) if can_donate else Color(1.0, 0.58, 0.34, 0.82)
+	if donated:
+		border = Color(0.96, 0.78, 0.42, 0.90)
 	var card: PanelContainer = PanelContainer.new()
 	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	card.add_theme_stylebox_override("panel", _make_panel_style(Color(0.022, 0.024, 0.022, 0.92), border, 11))
@@ -1270,23 +1360,141 @@ func _add_palace_ruler_demand_row_card(parent: VBoxContainer, row: Dictionary) -
 	top.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_theme_constant_override("separation", 8)
 	stack.add_child(top)
-	var title: Label = _palace_label(String(row.get("slot_name", "Demand")) + " — " + String(row.get("resource_name", "Good")), 19, border.lightened(0.20))
+	var title: Label = _palace_label(String(row.get("slot_name", "Court need")) + " — " + String(row.get("resource_name", "Good")), 19, border.lightened(0.20))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(title)
 	var status: Label = _palace_label(String(row.get("status", "Unknown")), 15, border.lightened(0.10))
 	status.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
-	status.custom_minimum_size = Vector2(120, 0)
+	status.custom_minimum_size = Vector2(150, 0)
 	top.add_child(status)
-	stack.add_child(_palace_wrapped_label(String(row.get("note", "Palace-facing obligation.")), 14, Color(0.82, 0.84, 0.76, 1.0)))
-	var requested: float = float(row.get("requested", 0.0))
+	stack.add_child(_palace_wrapped_label(String(row.get("note", "Court-facing need.")), 14, Color(0.82, 0.84, 0.76, 1.0)))
+	var need_marker: float = float(row.get("needed_marker", row.get("requested", 0.0)))
 	var stored: float = float(row.get("stored", 0.0))
 	var free_value: float = float(row.get("free_after_reserves", 0.0))
-	var shortfall: float = float(row.get("shortfall", 0.0))
-	stack.add_child(_palace_wrapped_label("Requested: " + _format_religion_amount(requested) + " | Stored: " + _format_religion_amount(stored) + " | Free after reserves: " + _format_religion_amount(free_value), 14, Color(0.76, 0.82, 0.74, 1.0)))
-	if ready:
-		stack.add_child(_palace_wrapped_label(String(row.get("quality_hint", "Adequate stock available")) + ". Delivery is not enabled yet.", 13, Color(0.66, 0.92, 0.68, 1.0)))
+	var base_value: float = float(row.get("base_value", 1.0))
+	var donated_amount: float = float(row.get("donated_amount", row.get("delivered_amount", 0.0)))
+	var donated_prestige: float = float(row.get("donated_prestige", 0.0))
+	stack.add_child(_palace_wrapped_label("Visible need marker: " + _format_religion_amount(need_marker) + " | Stored: " + _format_religion_amount(stored) + " | Free after reserves: " + _format_religion_amount(free_value), 14, Color(0.76, 0.82, 0.74, 1.0)))
+	stack.add_child(_palace_wrapped_label("Prestige formula: donated amount × base value. Base value of " + String(row.get("resource_name", "Good")) + ": " + _format_religion_amount(base_value) + ". Need marker value: +" + _format_religion_amount(float(row.get("prestige_for_need_marker", 0.0))) + " Prestige.", 13, Color(0.84, 0.82, 0.66, 1.0)))
+	if donated_amount > 0.001:
+		stack.add_child(_palace_wrapped_label("Donated this cycle: " + _format_religion_amount(donated_amount) + " " + String(row.get("resource_name", "Good")) + " → +" + _format_religion_amount(donated_prestige) + " Prestige.", 13, Color(0.96, 0.82, 0.48, 1.0)))
+	elif can_donate:
+		stack.add_child(_palace_wrapped_label("You may donate any free amount of this needed good. More value donated creates more prestige.", 13, Color(0.66, 0.92, 0.68, 1.0)))
 	else:
-		stack.add_child(_palace_wrapped_label("Shortfall: " + _format_religion_amount(shortfall) + " " + String(row.get("resource_name", "Good")) + ".", 13, Color(1.0, 0.72, 0.45, 1.0)))
+		stack.add_child(_palace_wrapped_label("No free stock is available for this needed good after reserves.", 13, Color(1.0, 0.72, 0.45, 1.0)))
+
+	var max_donation: float = maxf(0.0, float(row.get("max_donation", free_value)))
+	var starting_amount: float = 0.0
+	if max_donation > 0.001:
+		starting_amount = minf(maxf(1.0, need_marker), max_donation)
+
+	var donate_box: VBoxContainer = VBoxContainer.new()
+	donate_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	donate_box.add_theme_constant_override("separation", 4)
+	stack.add_child(donate_box)
+
+	var control_row: HBoxContainer = HBoxContainer.new()
+	control_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	control_row.add_theme_constant_override("separation", 8)
+	donate_box.add_child(control_row)
+
+	var slider: HSlider = HSlider.new()
+	slider.min_value = 0.0
+	slider.max_value = max_donation
+	slider.step = 1.0
+	slider.value = starting_amount
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	slider.custom_minimum_size = Vector2(220, 34)
+	slider.editable = can_donate
+	slider.focus_mode = Control.FOCUS_NONE
+	control_row.add_child(slider)
+
+	var amount_box: LineEdit = LineEdit.new()
+	amount_box.text = _format_religion_amount(starting_amount)
+	amount_box.placeholder_text = "0"
+	amount_box.custom_minimum_size = Vector2(118, 38)
+	amount_box.editable = can_donate
+	amount_box.focus_mode = Control.FOCUS_CLICK
+	amount_box.tooltip_text = "Type a donation amount. Mouse-wheel scrolling will not alter this value."
+	control_row.add_child(amount_box)
+
+	var button: Button = Button.new()
+	button.text = "Donate"
+	button.custom_minimum_size = Vector2(120, 38)
+	button.add_theme_font_size_override("font_size", 16)
+	button.disabled = (not can_donate) or starting_amount <= 0.001
+	button.tooltip_text = String(row.get("donation_status", row.get("delivery_status", "")))
+	control_row.add_child(button)
+
+	var preview_label: Label = _palace_label("", 14, Color(0.96, 0.82, 0.48, 1.0))
+	preview_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	donate_box.add_child(preview_label)
+
+	var donation_input_state: Dictionary = {"amount": starting_amount, "syncing": false}
+
+	var update_preview := func(value: float, sync_text: bool) -> void:
+		var clamped_value: float = clampf(value, 0.0, max_donation)
+		donation_input_state["amount"] = clamped_value
+		donation_input_state["syncing"] = true
+		if not is_equal_approx(float(slider.value), clamped_value):
+			slider.value = clamped_value
+		if sync_text:
+			amount_box.text = _format_religion_amount(clamped_value)
+		donation_input_state["syncing"] = false
+		var prestige_preview: float = clamped_value * base_value
+		preview_label.text = "Donate " + _format_religion_amount(clamped_value) + " / " + _format_religion_amount(max_donation) + " free " + String(row.get("resource_name", "Good")) + "  →  Prestige +" + _format_religion_amount(prestige_preview)
+		button.disabled = (not can_donate) or clamped_value <= 0.001
+
+	var apply_typed_amount := func(finalise_text: bool) -> void:
+		if bool(donation_input_state.get("syncing", false)):
+			return
+		var raw_text: String = amount_box.text.strip_edges()
+		if raw_text == "":
+			update_preview.call(0.0, finalise_text)
+			return
+		if not raw_text.is_valid_float():
+			if finalise_text:
+				amount_box.text = _format_religion_amount(float(donation_input_state.get("amount", 0.0)))
+			return
+		update_preview.call(float(raw_text), finalise_text)
+
+	# Godot Range controls can respond to mouse-wheel input when hovered/focused.
+	# This row deliberately ignores wheel events on the donation slider so normal
+	# page scrolling cannot silently change the planned tribute amount. The amount
+	# can still be changed by dragging the slider or typing in the box.
+	slider.gui_input.connect(func(event: InputEvent) -> void:
+		if event is InputEventMouseButton:
+			var mouse_event: InputEventMouseButton = event as InputEventMouseButton
+			if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP or mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN or mouse_event.button_index == MOUSE_BUTTON_WHEEL_LEFT or mouse_event.button_index == MOUSE_BUTTON_WHEEL_RIGHT:
+				slider.accept_event()
+				update_preview.call(float(donation_input_state.get("amount", 0.0)), true)
+	)
+
+	slider.value_changed.connect(func(value: float) -> void:
+		if bool(donation_input_state.get("syncing", false)):
+			return
+		update_preview.call(value, true)
+	)
+	amount_box.text_changed.connect(func(_new_text: String) -> void:
+		apply_typed_amount.call(false)
+	)
+	amount_box.text_submitted.connect(func(_submitted_text: String) -> void:
+		apply_typed_amount.call(true)
+	)
+	amount_box.focus_exited.connect(func() -> void:
+		apply_typed_amount.call(true)
+	)
+	update_preview.call(starting_amount, true)
+
+	var slot_id: String = String(row.get("slot", ""))
+	button.pressed.connect(func() -> void:
+		var state: Node = _state()
+		if state != null and state.has_method("donate_palace_need"):
+			state.call("donate_palace_need", slot_id, float(donation_input_state.get("amount", 0.0)))
+		elif state != null and state.has_method("deliver_palace_ruler_demand"):
+			state.call("deliver_palace_ruler_demand", slot_id)
+		_refresh_all()
+	)
 
 
 func _build_palace_authority_main_view() -> void:
@@ -1667,7 +1875,7 @@ func _build_palace_overview_main_view() -> void:
 	note_margin.add_theme_constant_override("margin_right", 12)
 	note_margin.add_theme_constant_override("margin_bottom", 9)
 	note_panel.add_child(note_margin)
-	note_margin.add_child(_palace_wrapped_label("Palace structures consume maintenance and reserve existing active staff when the Veintena resolves. The Authority tab reads active structures; Huitzilopochtli gates attacking Flower Wars, Tlaloc shows natural foresight, Tezcatlipoca shows scarcity pressure, and Quetzalcoatl shows legitimacy hooks. Ruler demands remain future patches.", 15, Color(0.74, 0.78, 0.70, 1.0)))
+	note_margin.add_child(_palace_wrapped_label("Palace structures consume maintenance and reserve existing active staff when the Veintena resolves. The Authority tab reads active structures; Huitzilopochtli gates attacking Flower Wars, Tlaloc shows natural foresight, Tezcatlipoca shows scarcity pressure, and Quetzalcoatl shows legitimacy hooks. Court needs can now be delivered, but prestige is generated by donation value.", 15, Color(0.74, 0.78, 0.70, 1.0)))
 
 func _add_palace_summary_card(parent: HBoxContainer, heading: String, value: String, detail: String, colour: Color) -> void:
 	var card: PanelContainer = PanelContainer.new()
@@ -2262,6 +2470,7 @@ func _build_palace_navigation_probe_reports() -> void:
 			_build_palace_overview_probe_reports()
 
 func _build_palace_overview_probe_reports() -> void:
+	_add_prestige_estate_score_card()
 	var summary: Dictionary = _palace_probe_summary()
 	_add_notification("Palace Overview. Level " + str(int(summary.get("palace_level", 1))) + ". Dedication: " + String(summary.get("dedicated_god_name", "None")) + ".")
 	_add_notification("Route: " + String(summary.get("route_name", "No dedication")) + ". " + String(summary.get("power_summary", "No palace route has been chosen yet.")))
@@ -2269,7 +2478,7 @@ func _build_palace_overview_probe_reports() -> void:
 	_add_notification("Structures: " + str(int(summary.get("built_structure_count", 0))) + " built; " + str(int(summary.get("active_structure_count", 0))) + " active; " + str(int(summary.get("inactive_structure_count", 0))) + " inactive.")
 	var staff_summary: Dictionary = summary.get("staff_summary", {}) as Dictionary
 	_add_notification(String(staff_summary.get("headline", "No palace staff required yet.")))
-	_add_notification("Palace upkeep and staff now resolve on Veintena advance. Huitzilopochtli dedication now gates attacking Flower Wars; other authority effects and ruler demands now show a display-only readiness prototype.")
+	_add_notification("Palace upkeep and staff now resolve on Veintena advance. Huitzilopochtli dedication now gates attacking Flower Wars; other authority effects and court needs now show a display-only readiness prototype.")
 
 func _build_palace_divine_seat_probe_reports() -> void:
 	var summary: Dictionary = _palace_probe_summary()
@@ -2394,20 +2603,22 @@ func _build_palace_ruler_demands_probe_reports() -> void:
 		if state != null and state.has_method("get_palace_ruler_demands_summary"):
 			demands = state.call("get_palace_ruler_demands_summary") as Dictionary
 	if demands.is_empty():
-		_add_notification("Ruler Demands. Backend data is not connected yet.")
+		_add_notification("Court Needs. Backend data is not connected yet.")
 		return
-	_add_notification(String(demands.get("title", "Current Palace Demand")) + ". " + String(demands.get("headline", "Ruler demand prototype active.")))
-	_add_notification(String(demands.get("flavour", "The ruler's agents watch whether the estate can meet palace-facing obligations.")))
+	_add_notification(String(demands.get("title", "Current Court Needs")) + ". " + String(demands.get("headline", "Court needs donation prototype active.")))
+	_add_notification("Deadline: " + String(demands.get("cycle_window", "Court need cycle timing unavailable.")) + " Urgency: " + String(demands.get("urgency_label", "Time remains")) + ".")
+	_add_notification("Prestige from court-need donations this cycle: +" + _format_religion_amount(float(demands.get("total_donated_prestige", 0.0))) + ". Player Prestige: " + _format_religion_amount(float(demands.get("player_prestige", 0.0))) + ".")
+	_add_notification(String(demands.get("flavour", "The court needs goods; donations create public prestige.")))
 	var rows: Array = demands.get("rows", []) as Array
 	for row_variant: Variant in rows:
 		if not (row_variant is Dictionary):
 			continue
 		var row: Dictionary = row_variant as Dictionary
-		var line: String = String(row.get("slot_name", "Demand")) + ": " + String(row.get("resource_name", "Good")) + " " + _format_religion_amount(float(row.get("requested", 0.0))) + " — " + String(row.get("status", "Unknown"))
-		if not bool(row.get("ready", false)):
-			line += "; short " + _format_religion_amount(float(row.get("shortfall", 0.0)))
+		var line: String = String(row.get("slot_name", "Need")) + ": " + String(row.get("resource_name", "Good")) + " need marker " + _format_religion_amount(float(row.get("needed_marker", row.get("requested", 0.0)))) + "; free " + _format_religion_amount(float(row.get("free_after_reserves", 0.0))) + "; base value " + _format_religion_amount(float(row.get("base_value", 1.0)))
+		if float(row.get("donated_amount", 0.0)) > 0.001:
+			line += "; donated " + _format_religion_amount(float(row.get("donated_amount", 0.0))) + " for +" + _format_religion_amount(float(row.get("donated_prestige", 0.0))) + " Prestige"
 		_add_notification(line + ".")
-	_add_notification(String(demands.get("mechanics_note", "Display-only. No delivery or rewards are implemented.")))
+	_add_notification(String(demands.get("mechanics_note", "Donations create prestige by base value. Prestige is score only and never spent.")))
 
 func _palace_probe_summary() -> Dictionary:
 	var state: Node = _state()
@@ -2476,20 +2687,163 @@ func _show_trade_basket_view() -> void:
 	trade_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	trade_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	dynamic_view_host.add_child(trade_view)
+	_active_trade_basket_view = trade_view
+	_trade_basket_savvy_preview_label = null
 	if trade_view.has_signal("trade_accepted"):
 		trade_view.connect("trade_accepted", Callable(self, "_on_trade_basket_accepted"))
 	if trade_view.has_signal("trade_changed"):
 		trade_view.connect("trade_changed", Callable(self, "_on_trade_basket_changed"))
 	if trade_view.has_method("setup"):
 		trade_view.call("setup", _state())
+	_ensure_trade_basket_savvy_preview_label()
+	_capture_trade_basket_savvy_preview()
+	_update_trade_basket_savvy_summary_display()
 
 func _on_trade_basket_accepted() -> void:
+	# TradeBasketView clears its internal plan before emitting trade_accepted, so the
+	# last captured trade_changed preview is used to award Economic Prestige safely.
+	var state: Node = _state()
+	if state != null and state.has_method("record_savvy_trade_prestige") and not _last_trade_basket_savvy_lines.is_empty():
+		state.call("record_savvy_trade_prestige", _last_trade_basket_savvy_lines, "Savvy market trade")
+	_last_trade_basket_savvy_lines.clear()
+	_last_trade_basket_savvy_preview.clear()
+	_trade_basket_savvy_preview_label = null
 	selected_market_good_id = ""
 	_refresh_main_content()
 	_refresh_right_panel()
 
 func _on_trade_basket_changed() -> void:
+	_capture_trade_basket_savvy_preview()
+	_update_trade_basket_savvy_summary_display()
 	_refresh_right_panel()
+
+func _capture_trade_basket_savvy_preview() -> void:
+	_last_trade_basket_savvy_lines.clear()
+	_last_trade_basket_savvy_preview.clear()
+	if _active_trade_basket_view == null:
+		return
+	var plan_variant: Variant = _active_trade_basket_view.get("trade_plan")
+	if not (plan_variant is Dictionary):
+		return
+	var plan: Dictionary = plan_variant as Dictionary
+	for key_variant: Variant in plan.keys():
+		var resource_id: String = String(key_variant)
+		var amount: float = float(plan[key_variant])
+		if absf(amount) <= 0.001:
+			continue
+		var average_value: float = 0.0
+		if _active_trade_basket_view.has_method("_trade_pricing"):
+			var pricing_variant: Variant = _active_trade_basket_view.call("_trade_pricing", resource_id, amount)
+			if pricing_variant is Dictionary:
+				var pricing: Dictionary = pricing_variant as Dictionary
+				average_value = float(pricing.get("average_value", 0.0))
+		if average_value <= 0.001:
+			var state_for_base: Node = _state()
+			if state_for_base != null and state_for_base.has_method("get_market_goods"):
+				for good_variant: Variant in (state_for_base.call("get_market_goods") as Array):
+					if good_variant is Dictionary and String((good_variant as Dictionary).get("id", "")) == resource_id:
+						average_value = float((good_variant as Dictionary).get("current_value", (good_variant as Dictionary).get("base_value", 1.0)))
+						break
+		_last_trade_basket_savvy_lines.append({"resource_id": resource_id, "amount": amount, "average_unit_value": average_value})
+	var state: Node = _state()
+	if state != null and state.has_method("get_savvy_trade_prestige_preview"):
+		var preview_variant: Variant = state.call("get_savvy_trade_prestige_preview", _last_trade_basket_savvy_lines)
+		if preview_variant is Dictionary:
+			_last_trade_basket_savvy_preview = preview_variant as Dictionary
+
+func _trade_basket_summary_label() -> RichTextLabel:
+	if _active_trade_basket_view == null:
+		return null
+	var label_variant: Variant = _active_trade_basket_view.get("summary_label")
+	if label_variant is RichTextLabel:
+		return label_variant as RichTextLabel
+	return _find_trade_basket_summary_label(_active_trade_basket_view)
+
+func _find_trade_basket_summary_label(node: Node) -> RichTextLabel:
+	if node == null:
+		return null
+	if node is RichTextLabel:
+		var candidate: RichTextLabel = node as RichTextLabel
+		var candidate_text: String = candidate.text.to_lower()
+		if candidate_text.contains("sold") or candidate_text.contains("bought") or candidate_text.contains("selected") or candidate_text.contains("value"):
+			return candidate
+	for child_index: int in range(node.get_child_count()):
+		var child: Node = node.get_child(child_index)
+		var found: RichTextLabel = _find_trade_basket_summary_label(child)
+		if found != null:
+			return found
+	return null
+
+func _ensure_trade_basket_savvy_preview_label() -> RichTextLabel:
+	if _active_trade_basket_view == null:
+		return null
+	if _trade_basket_savvy_preview_label != null and is_instance_valid(_trade_basket_savvy_preview_label) and _trade_basket_savvy_preview_label.get_parent() != null:
+		return _trade_basket_savvy_preview_label
+
+	var summary_label: RichTextLabel = _trade_basket_summary_label()
+	var target_parent: Node = _active_trade_basket_view
+	var insert_index: int = -1
+	if summary_label != null and summary_label.get_parent() != null:
+		target_parent = summary_label.get_parent()
+		insert_index = summary_label.get_index() + 1
+
+	var preview_label: RichTextLabel = RichTextLabel.new()
+	preview_label.name = "SavvyTradePrestigePreview"
+	preview_label.bbcode_enabled = true
+	preview_label.fit_content = true
+	preview_label.scroll_active = false
+	preview_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	preview_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	preview_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	preview_label.add_theme_color_override("default_color", COLOR_TEXT)
+	preview_label.add_theme_font_size_override("normal_font_size", 15)
+	target_parent.add_child(preview_label)
+	if insert_index >= 0:
+		target_parent.move_child(preview_label, min(insert_index, target_parent.get_child_count() - 1))
+	_trade_basket_savvy_preview_label = preview_label
+	return preview_label
+
+func _trade_basket_savvy_preview_bbcode() -> String:
+	var total: float = 0.0
+	if not _last_trade_basket_savvy_preview.is_empty():
+		total = float(_last_trade_basket_savvy_preview.get("total_prestige", 0.0))
+	var preview_text: String = "[b]Savvy Trade Prestige if accepted[/b]: "
+	if total > 0.001:
+		preview_text += "[color=#7AF09D][b]+" + _format_float(total) + "[/b][/color]"
+		var positive_lines: Array = _last_trade_basket_savvy_preview.get("positive_lines", []) as Array
+		if not positive_lines.is_empty():
+			var line_parts: Array[String] = []
+			for line_variant: Variant in positive_lines:
+				if line_parts.size() >= 3:
+					break
+				line_parts.append(String(line_variant))
+			preview_text += "\n[color=#CDEFD5]" + "; ".join(line_parts) + "[/color]"
+	else:
+		preview_text += "[color=#9AA69B]0[/color]"
+		if not _last_trade_basket_savvy_lines.is_empty():
+			preview_text += "\n[color=#9AA69B]No selected good is currently being bought below base value or sold above base value.[/color]"
+		else:
+			preview_text += "\n[color=#9AA69B]Move a trade slider to preview market-skill Prestige.[/color]"
+	return preview_text
+
+func _strip_trade_basket_savvy_from_summary_label() -> void:
+	var trade_summary: RichTextLabel = _trade_basket_summary_label()
+	if trade_summary == null:
+		return
+	var marker: String = "\n\n[b]Savvy Trade Prestige[/b]:"
+	var marker_index: int = trade_summary.text.find(marker)
+	if marker_index >= 0:
+		trade_summary.text = trade_summary.text.substr(0, marker_index)
+
+func _update_trade_basket_savvy_summary_display() -> void:
+	if _active_trade_basket_view == null:
+		return
+	_strip_trade_basket_savvy_from_summary_label()
+	var preview_label: RichTextLabel = _ensure_trade_basket_savvy_preview_label()
+	if preview_label == null:
+		return
+	preview_label.text = _trade_basket_savvy_preview_bbcode()
+	preview_label.visible = true
 
 func _build_market_overview() -> void:
 	var goods: Array[Dictionary] = _market_goods()
@@ -2554,6 +2908,13 @@ func _build_market_overview() -> void:
 func _build_market_trade_summary() -> void:
 	_add_notification("Trade Basket is a barter interface. Drag a good left to sell estate free stock, or right to buy from the market.")
 	_add_notification("Accept Trade is enabled only when sold value covers bought value. Positive surplus is lost as barter inefficiency; it is not stored as Wealth or credit.")
+	_add_notification("Economic Prestige now comes from savvy trade only: selling above base value or buying below base value. No passive surplus, maize stockpile or production-output Prestige is granted.")
+	if not _last_trade_basket_savvy_preview.is_empty():
+		_add_notification(String(_last_trade_basket_savvy_preview.get("headline", "No savvy trade Prestige.")))
+	var state: Node = _state()
+	if state != null and state.has_method("get_economic_prestige_summary"):
+		var economic: Dictionary = state.call("get_economic_prestige_summary") as Dictionary
+		_add_notification("Savvy trade scale: " + _format_float(float(economic.get("scale", 0.25))) + " × value advantage. Recent savvy trades: " + str((economic.get("recent_savvy_trades", []) as Array).size()) + ".")
 	_add_notification("Sell caps use Storehouse free stock after reserves. Buy caps use current market stock.")
 	_add_notification("This connects Storehouse and Market directly without creating a currency resource.")
 
@@ -2790,6 +3151,35 @@ func _add_favour_bar(parent: VBoxContainer, god_id: String) -> void:
 	bar.add_theme_stylebox_override("fill", _make_panel_style(_god_colour(god_id).darkened(0.15), _god_colour(god_id), 6))
 	parent.add_child(bar)
 
+func _religion_ritual_prestige_value(tier_id: String) -> float:
+	match tier_id:
+		"minor":
+			return 1.0
+		"medium":
+			return 3.0
+		"large":
+			return 8.0
+	return 0.0
+
+func _religion_shrine_level_prestige_value(level: int) -> float:
+	match level:
+		2:
+			return 5.0
+		3:
+			return 15.0
+		4:
+			return 30.0
+	return 0.0
+
+func _award_religion_prestige(amount: float, source_id: String, detail: String, context: Dictionary = {}) -> float:
+	if amount <= 0.0001:
+		return 0.0
+	var state: Node = _state()
+	if state != null and state.has_method("add_player_prestige"):
+		state.call("add_player_prestige", amount, source_id, detail, context)
+		return amount
+	return 0.0
+
 func _build_shrine_level_panel(parent: VBoxContainer, god_id: String) -> void:
 	var level: int = _shrine_level(god_id)
 	var panel: PanelContainer = PanelContainer.new()
@@ -2814,7 +3204,8 @@ func _build_shrine_level_panel(parent: VBoxContainer, god_id: String) -> void:
 	var next_level: int = level + 1
 	var cost: Dictionary = _shrine_level_cost(next_level)
 	var status: Dictionary = _can_upgrade_shrine_level(god_id)
-	stack.add_child(_religion_wrapped_label("Upgrade to Level " + str(next_level) + " cost: " + _format_cost(cost) + ". Requires " + str(_shrine_level_priest_requirement(next_level)) + " active priests.", 17, COLOR_MUTED))
+	var level_prestige: float = _religion_shrine_level_prestige_value(next_level)
+	stack.add_child(_religion_wrapped_label("Upgrade to Level " + str(next_level) + " cost: " + _format_cost(cost) + ". Requires " + str(_shrine_level_priest_requirement(next_level)) + " active priests. Prestige on upgrade: +" + _format_religion_amount(level_prestige) + ".", 17, COLOR_MUTED))
 	var button: Button = Button.new()
 	button.text = "Upgrade Shrine to Level " + str(next_level)
 	button.custom_minimum_size = Vector2(0, 46)
@@ -2831,7 +3222,7 @@ func _build_shrine_level_panel(parent: VBoxContainer, god_id: String) -> void:
 func _build_shrine_upgrade_cards(parent: VBoxContainer, god_id: String) -> void:
 	var heading: Label = _religion_label("Shrine Upgrades", 24, COLOR_TEXT)
 	parent.add_child(heading)
-	parent.add_child(_religion_wrapped_label("Upgrades make a shrine more powerful. They cost goods, require shrine level, and need enough active priests to function. Their mechanical effects are deliberately small now, but they already improve ritual rolls and favour decay.", 17, COLOR_MUTED))
+	parent.add_child(_religion_wrapped_label("Shrine levels and rituals now create Prestige as public signs of devotion. Individual shrine upgrades still improve ritual rolls and favour decay, but do not create separate hidden Prestige bonuses.", 17, COLOR_MUTED))
 	for upgrade: Dictionary in _god_upgrade_definitions(god_id):
 		_add_single_upgrade_card(parent, god_id, upgrade)
 
@@ -2914,6 +3305,7 @@ func _add_ritual_tier_card(parent: VBoxContainer, god_id: String, tier_id: Strin
 	stack.add_child(_religion_wrapped_label(String(data.get("description", "")), 16, COLOR_MUTED))
 	stack.add_child(_religion_wrapped_label("Requires Shrine L" + str(int(data.get("level", 1))) + ". Cost: " + _format_cost(data.get("cost", {}) as Dictionary) + ". Priest capacity: " + _format_religion_amount(float(data.get("capacity", 0.0))) + ".", 15, COLOR_MUTED))
 	stack.add_child(_religion_wrapped_label("Favour roll: +" + str(int(range[0])) + " to +" + str(int(range[1])) + ". Current favour: " + _format_religion_amount(float(_divine_favour.get(god_id, RELIGION_STARTING_FAVOUR))) + "/100.", 16, COLOR_TEAL))
+	stack.add_child(_religion_wrapped_label("Prestige on successful ritual: +" + _format_religion_amount(_religion_ritual_prestige_value(tier_id)) + ". Prestige is score only and is never spent.", 15, Color(0.96, 0.82, 0.48, 1.0)))
 	var button: Button = Button.new()
 	button.text = "Perform " + String(data.get("title", "Ritual"))
 	button.custom_minimum_size = Vector2(0, 44)
@@ -2926,6 +3318,87 @@ func _add_ritual_tier_card(parent: VBoxContainer, god_id: String, tier_id: Strin
 	stack.add_child(button)
 	if not bool(status.get("ok", false)):
 		stack.add_child(_religion_wrapped_label("Blocked: " + String(status.get("reason", "")), 15, Color(1.0, 0.74, 0.40, 1.0)))
+
+
+func _build_sacrifice_prestige_cards(parent: VBoxContainer, god_id: String) -> void:
+	var heading: Label = _religion_label("Sacrifices", 24, COLOR_TEXT)
+	parent.add_child(heading)
+	parent.add_child(_religion_wrapped_label("Sacrifices create religious Prestige and favour with the selected god. Prestige is score only and is never spent. Captives remain far more important than sacrificing priests or Tlacotin.", 17, COLOR_MUTED))
+	var state: Node = _state()
+	if state == null or not state.has_method("get_sacrifice_prestige_options"):
+		parent.add_child(_religion_wrapped_label("Sacrifice Prestige backend is not connected.", 18, Color(1.0, 0.74, 0.40, 1.0)))
+		return
+	var raw_options: Variant = state.call("get_sacrifice_prestige_options")
+	if not (raw_options is Array):
+		parent.add_child(_religion_wrapped_label("No sacrifice options are available.", 18, COLOR_MUTED))
+		return
+	var options: Array = raw_options as Array
+	for option_variant: Variant in options:
+		if option_variant is Dictionary:
+			_add_sacrifice_prestige_card(parent, god_id, option_variant as Dictionary)
+
+func _add_sacrifice_prestige_card(parent: VBoxContainer, god_id: String, option: Dictionary) -> void:
+	var option_id: String = String(option.get("id", ""))
+	var available: int = int(option.get("available", 0))
+	var prestige_each: float = float(option.get("prestige_each", 0.0))
+	var favour_each: float = float(option.get("favour_each", option.get("favour_preview_one", prestige_each)))
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	var border: Color = _god_colour(god_id)
+	if available <= 0:
+		border = Color(0.55, 0.55, 0.50, 0.45)
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.02, 0.045, 0.045, 0.76), border, 9))
+	parent.add_child(panel)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 5)
+	margin.add_child(stack)
+	stack.add_child(_religion_label(String(option.get("name", "Sacrifice")), 21, COLOR_TEXT))
+	stack.add_child(_religion_wrapped_label(String(option.get("description", "")), 16, COLOR_MUTED))
+	stack.add_child(_religion_wrapped_label("Available: " + str(available) + ". Prestige per sacrifice: +" + _format_religion_amount(prestige_each) + ". Favour with " + _god_name(god_id) + ": +" + _format_religion_amount(favour_each) + ".", 16, COLOR_TEAL))
+	var button: Button = Button.new()
+	button.text = "Sacrifice 1 " + String(option.get("name", ""))
+	button.custom_minimum_size = Vector2(0, 42)
+	button.add_theme_font_size_override("font_size", 18)
+	button.disabled = available <= 0
+	button.tooltip_text = "Sacrifice one for +" + _format_religion_amount(prestige_each) + " Prestige and +" + _format_religion_amount(favour_each) + " favour with " + _god_name(god_id) + "."
+	button.pressed.connect(func() -> void:
+		_sacrifice_one_for_prestige(god_id, option_id)
+	)
+	stack.add_child(button)
+	if available <= 0:
+		stack.add_child(_religion_wrapped_label("Blocked: none available.", 15, Color(1.0, 0.74, 0.40, 1.0)))
+
+func _sacrifice_one_for_prestige(god_id: String, sacrifice_id: String) -> void:
+	var state: Node = _state()
+	_last_offering_report.clear()
+	if state == null or not state.has_method("sacrifice_for_prestige"):
+		_last_offering_report.append("Sacrifice failed: backend is not connected.")
+		_refresh_all()
+		return
+	var result_variant: Variant = state.call("sacrifice_for_prestige", sacrifice_id, 1, god_id)
+	if result_variant is Dictionary:
+		var result: Dictionary = result_variant as Dictionary
+		if bool(result.get("ok", false)):
+			var favour_gain: float = float(result.get("favour_gain", 0.0))
+			if favour_gain > 0.0001 and god_id != "":
+				var before: float = float(_divine_favour.get(god_id, RELIGION_STARTING_FAVOUR))
+				var after: float = clampf(before + favour_gain, 0.0, 100.0)
+				_divine_favour[god_id] = after
+				_last_offering_report.append(String(result.get("message", result.get("reason", "Sacrifice resolved."))) + " " + _god_name(god_id) + " favour " + _format_religion_amount(before) + " → " + _format_religion_amount(after) + ".")
+			else:
+				_last_offering_report.append(String(result.get("message", result.get("reason", "Sacrifice resolved."))))
+		else:
+			_last_offering_report.append(String(result.get("reason", "Sacrifice failed.")))
+	else:
+		_last_offering_report.append("Sacrifice resolved.")
+	_emit_religion_state_changed()
+	_refresh_all()
 
 func _shrine_level(god_id: String) -> int:
 	_ensure_religion_state()
@@ -3002,8 +3475,20 @@ func _upgrade_shrine_level(god_id: String) -> void:
 	var next_level: int = _shrine_level(god_id) + 1
 	_pay_religion_cost(_shrine_level_cost(next_level))
 	_shrine_levels[god_id] = next_level
+	var prestige_gain: float = _religion_shrine_level_prestige_value(next_level)
+	var report_line: String = _god_name(god_id) + " Shrine upgraded to Level " + str(next_level) + ". " + _shrine_level_description(next_level)
+	if prestige_gain > 0.0001:
+		_award_religion_prestige(prestige_gain, "religion_shrine_level", _god_name(god_id) + " Shrine Level " + str(next_level), {"god_id": god_id, "shrine_level": next_level})
+		report_line += " Prestige +" + _format_religion_amount(prestige_gain) + "."
 	_last_offering_report.clear()
-	_last_offering_report.append(_god_name(god_id) + " Shrine upgraded to Level " + str(next_level) + ". " + _shrine_level_description(next_level))
+	_last_offering_report.append(report_line)
+	var state: Node = _state()
+	if state != null:
+		var report_variant: Variant = state.get("last_report")
+		if report_variant is Array:
+			var report: Array = report_variant as Array
+			report.append(report_line)
+			state.set("last_report", report)
 	_emit_religion_state_changed()
 	_refresh_all()
 
@@ -3216,6 +3701,10 @@ func _perform_ritual(god_id: String, tier_id: String) -> void:
 		report_line += " Festival focus improved the ritual roll."
 	if _ritual_favour_bonus(god_id, tier_id) > 0:
 		report_line += " Shrine level/upgrades contributed to the result."
+	var prestige_gain: float = _religion_ritual_prestige_value(tier_id)
+	if prestige_gain > 0.0001:
+		_award_religion_prestige(prestige_gain, "religion_ritual", String(data.get("title", "Ritual")) + " for " + _god_name(god_id), {"god_id": god_id, "tier_id": tier_id, "favour_gain": gain})
+		report_line += " Prestige +" + _format_religion_amount(prestige_gain) + "."
 	_last_offering_report.clear()
 	_last_offering_report.append(report_line)
 	var state: Node = _state()
@@ -3281,6 +3770,7 @@ func _build_shrine_reports() -> void:
 		_add_shrine_report_card("god|" + god_id + "|level", "Shrine Level", "Level " + str(_shrine_level(god_id)) + ". Unlocks: " + _unlocked_ritual_text(god_id) + ".", god_id)
 		_add_shrine_report_card("god|" + god_id + "|upgrades", "Shrine Upgrades", str(_purchased_upgrade_ids(god_id).size()) + "/" + str(_god_upgrade_definitions(god_id).size()) + " built. Upgrade the shrine to strengthen rituals.", god_id)
 		_add_shrine_report_card("god|" + god_id + "|rituals", "Ritual Tiers", "Minor, Medium and Large rites with fixed costs and random favour rolls.", god_id)
+		_add_shrine_report_card("god|" + god_id + "|sacrifices", "Sacrifices", "Captives, priests and Tlacotin can be sacrificed for religious Prestige and favour.", god_id)
 		_add_shrine_report_card("god|" + god_id + "|boons", "Boons", "Future favour-spending powers unlocked by higher shrine development.", god_id)
 
 	if _last_offering_report.is_empty():
@@ -3427,6 +3917,8 @@ func _build_god_shrine_panel(parent: VBoxContainer, god_id: String, section: Str
 			_build_shrine_upgrade_cards(parent, god_id)
 		"rituals":
 			_build_ritual_tier_cards(parent, god_id)
+		"sacrifices":
+			_build_sacrifice_prestige_cards(parent, god_id)
 		"boons":
 			_build_god_boons_placeholder(parent, god_id)
 		_:
@@ -3722,6 +4214,11 @@ func _show_barracks_content() -> void:
 		_:
 			_build_barracks_overview_panel(root)
 
+
+func _format_signed_prestige_ui(amount: float) -> String:
+	var prefix: String = "+" if amount >= 0.0 else ""
+	return prefix + _format_religion_amount(amount)
+
 func _build_barracks_reports() -> void:
 	var focus_id: String = _current_focus_id()
 	if focus_id == "flower_wars":
@@ -3734,7 +4231,7 @@ func _build_barracks_reports() -> void:
 		_add_notification("All-warband muster: " + str(ready_total) + " ready warriors across " + str(rows.size()) + " warbands.")
 		for option: Dictionary in _barracks_flower_options():
 			var preview: Dictionary = _barracks_preview_for_all_warbands_option(option)
-			_add_notification(String(option.get("name", "War")) + ": " + String(preview.get("result", "Preview unavailable")) + "; committed " + str(int(preview.get("committed_warriors", preview.get("warriors_committed", 0)))) + "; captives " + str(int(preview.get("captives", 0))) + "; losses " + str(int(preview.get("attacker_losses", preview.get("attacker_casualties", 0)))) + "; XP +" + str(int(preview.get("xp_gained", 0))) + ".")
+			_add_notification(String(option.get("name", "War")) + ": " + String(preview.get("result", "Preview unavailable")) + "; committed " + str(int(preview.get("committed_warriors", preview.get("warriors_committed", 0)))) + "; captives " + str(int(preview.get("captives", 0))) + "; losses " + str(int(preview.get("attacker_losses", preview.get("attacker_casualties", 0)))) + "; XP +" + str(int(preview.get("xp_gained", 0))) + "; Prestige " + _format_signed_prestige_ui(float(preview.get("prestige_gain", 0.0))) + ".")
 		return
 	if focus_id == "returns":
 		for line: String in _barracks_last_report_lines():
@@ -3756,7 +4253,7 @@ func _build_barracks_reports() -> void:
 	_add_notification("Warriors: " + str(int(summary.get("warriors", 0))) + " / capacity " + str(int(summary.get("capacity", 0))) + ".")
 	_add_notification("Free warrior capacity: " + str(int(summary.get("free_capacity", 0))) + ".")
 	_add_notification("Weapons available: " + _format_float(float(summary.get("weapons", 0.0))) + ".")
-	_add_notification("Prestige from Flower Wars is pending calibration; no invented values are applied.")
+	_add_notification("Flower War Prestige is active: outcome, enemy casualties, captives and a small share of loot value create Prestige. Doctrine has no hidden Prestige bonus.")
 
 func _build_barracks_overview_panel(parent: VBoxContainer) -> void:
 	var summary: Dictionary = _barracks_summary()
@@ -3764,7 +4261,7 @@ func _build_barracks_overview_panel(parent: VBoxContainer) -> void:
 	parent.add_child(_barracks_wrapped_label("The Barracks now manages persistent warbands. Flower Wars commit every ready warband together, distribute casualties and XP across participating warbands. Palace-gate infrastructure exists, but the gate is temporarily inactive until the Palace screen is implemented.", 20, COLOR_MUTED))
 	parent.add_child(_barracks_wrapped_label("Warriors: " + str(int(summary.get("warriors", 0))) + " / " + str(int(summary.get("capacity", 0))) + " capacity. Free capacity: " + str(int(summary.get("free_capacity", 0))) + ".", 22, COLOR_TEAL))
 	parent.add_child(_barracks_wrapped_label("Weapons in Storehouse: " + _format_float(float(summary.get("weapons", 0.0))) + ". Captives held: " + str(int(summary.get("captives", 0))) + ".", 20, COLOR_MUTED))
-	parent.add_child(_barracks_wrapped_label("Use Flower Wars to choose the scale, selected warbands and provisions. Injured warriors do not fight and recover on the next Veintena advance. Prestige remains pending calibration.", 19, COLOR_MUTED))
+	parent.add_child(_barracks_wrapped_label("Use Flower Wars to choose the scale, selected warbands and provisions. Injured warriors do not fight and recover on the next Veintena advance. Prestige now comes from outcome, enemy casualties, captives and small loot value.", 19, COLOR_MUTED))
 
 func _build_barracks_warbands_panel(parent: VBoxContainer) -> void:
 	if _selected_warband_skill_web_id != "":
@@ -4722,9 +5219,9 @@ func _show_flower_war_return_event_overlay(report: Dictionary) -> void:
 		return
 	root.add_child(_barracks_label(String(report.get("result", "Unknown")).to_upper(), 30, COLOR_TEAL))
 	if direction == "defence":
-		root.add_child(_barracks_wrapped_label("Strategy: " + String(report.get("defence_strategy_name", "Balanced Defence")) + " | Enemy casualties: " + str(int(report.get("enemy_casualties", 0))) + " | Warriors defending: " + str(int(report.get("warriors_committed", 0))) + " | Returned ready: " + str(int(report.get("warriors_returned", 0))), 18, COLOR_MUTED))
+		root.add_child(_barracks_wrapped_label("Strategy: " + String(report.get("defence_strategy_name", "Balanced Defence")) + " | Enemy casualties: " + str(int(report.get("enemy_casualties", 0))) + " | Prestige " + _format_signed_prestige_ui(float(report.get("prestige_gain", 0.0))) + " | Warriors defending: " + str(int(report.get("warriors_committed", 0))) + " | Returned ready: " + str(int(report.get("warriors_returned", 0))), 18, COLOR_MUTED))
 	else:
-		root.add_child(_barracks_wrapped_label("Captives taken: " + str(int(report.get("captives", 0))) + " | Loot value: " + _format_float(float(report.get("loot_value", 0.0))) + " | Warriors sent: " + str(int(report.get("warriors_committed", 0))) + " | Returned ready: " + str(int(report.get("warriors_returned", 0))), 18, COLOR_MUTED))
+		root.add_child(_barracks_wrapped_label("Captives taken: " + str(int(report.get("captives", 0))) + " | Loot value: " + _format_float(float(report.get("loot_value", 0.0))) + " | Prestige " + _format_signed_prestige_ui(float(report.get("prestige_gain", 0.0))) + " | Warriors sent: " + str(int(report.get("warriors_committed", 0))) + " | Returned ready: " + str(int(report.get("warriors_returned", 0))), 18, COLOR_MUTED))
 
 	var body: HBoxContainer = HBoxContainer.new()
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -4809,6 +5306,11 @@ func _build_flower_war_return_spoils_panel(parent: HBoxContainer, report: Dictio
 	stack.add_child(_barracks_wrapped_label("Captives: " + str(int(report.get("captives", 0))), 18, COLOR_TEAL))
 	stack.add_child(_barracks_wrapped_label("Loot: " + _flower_war_event_loot_text(report.get("loot", {}) as Dictionary), 16, COLOR_MUTED))
 	stack.add_child(_barracks_wrapped_label("Total injured: ✚ " + str(int(report.get("attacker_injured", 0))) + ". Dead: " + str(int(report.get("attacker_dead", 0))) + ".", 16, COLOR_MUTED))
+	stack.add_child(_barracks_wrapped_label("Prestige: " + _format_signed_prestige_ui(float(report.get("prestige_gain", 0.0))), 18, Color(1.0, 0.82, 0.44, 1.0)))
+	var prestige_breakdown: Dictionary = report.get("prestige_breakdown", {}) as Dictionary
+	var prestige_lines: Array = prestige_breakdown.get("lines", []) as Array
+	for prestige_line_variant: Variant in prestige_lines:
+		stack.add_child(_barracks_wrapped_label("• " + String(prestige_line_variant), 14, COLOR_MUTED))
 	var level_reports: Array = report.get("level_reports", []) as Array
 	if not level_reports.is_empty():
 		for line_variant: Variant in level_reports:
@@ -4948,7 +5450,7 @@ func _add_flower_war_all_warbands_option_card(parent: VBoxContainer, option: Dic
 	stack.add_child(_barracks_wrapped_label(String(option.get("description", "A sanctioned Flower War scale.")), 17, COLOR_MUTED))
 	stack.add_child(_barracks_wrapped_label("Default muster preview: " + String(preview.get("result", "Preview unavailable")) + ". Ready warriors " + str(int(preview.get("committed_warriors", preview.get("warriors_committed", 0)))) + " across " + str(int(preview.get("participating_warband_count", 0))) + " warbands.", 18, COLOR_TEAL))
 	stack.add_child(_barracks_wrapped_label("Expected losses " + str(int(preview.get("attacker_losses", preview.get("attacker_casualties", 0)))) + "; captives " + str(int(preview.get("captives", 0))) + "; XP +" + str(int(preview.get("xp_gained", 0))) + "; loot value " + _format_float(float(preview.get("loot_value", 0.0))) + ".", 17, COLOR_MUTED))
-	stack.add_child(_barracks_wrapped_label("Prestige: pending calibration. Skill Web specialism sets doctrine; other node effects are not connected to combat yet.", 15, Color(1.0, 0.74, 0.40, 1.0)))
+	stack.add_child(_barracks_wrapped_label("Prestige preview: " + _format_signed_prestige_ui(float(preview.get("prestige_gain", 0.0))) + ". Skill Web specialism sets doctrine; other node effects are not connected to combat yet.", 15, Color(1.0, 0.74, 0.40, 1.0)))
 	var button: Button = Button.new()
 	button.text = "Open Flower War Muster"
 	button.custom_minimum_size = Vector2(0, 42)
@@ -5089,7 +5591,7 @@ func _add_war_return_archive_card(parent: VBoxContainer, report: Dictionary) -> 
 		_add_war_return_chip(summary, "Captives", str(int(report.get("captives", 0))), COLOR_TEAL)
 		_add_war_return_chip(summary, "Loot", _flower_war_event_loot_text(report.get("loot", {}) as Dictionary), COLOR_MUTED)
 	_add_war_return_chip(summary, "XP", "+" + str(int(report.get("xp_gained", 0))), COLOR_TEAL)
-	_add_war_return_chip(summary, "Prestige", "pending", Color(1.0, 0.74, 0.40, 1.0))
+	_add_war_return_chip(summary, "Prestige", _format_signed_prestige_ui(float(report.get("prestige_gain", 0.0))), Color(1.0, 0.82, 0.44, 1.0))
 
 	var participants: Array = report.get("participant_reports", []) as Array
 	if not participants.is_empty():
@@ -5150,7 +5652,7 @@ func _add_flower_war_option_card(parent: VBoxContainer, row: Dictionary, option:
 	stack.add_child(_barracks_wrapped_label(String(option.get("description", "Auto-resolved Flower War.")), 16, COLOR_MUTED))
 	stack.add_child(_barracks_wrapped_label("Doctrine: " + String(preview.get("doctrine_name", doctrine_id.capitalize())) + ". Provisioning: Standard. Result preview: " + String(preview.get("result", "Unknown")) + ".", 17, COLOR_TEAL))
 	stack.add_child(_barracks_wrapped_label("Committed warriors: " + str(int(preview.get("committed_warriors", preview.get("warriors_committed", 0)))) + "; expected losses: " + str(int(preview.get("attacker_losses", preview.get("attacker_casualties", 0)))) + "; captives: " + str(int(preview.get("captives", 0))) + "; XP: +" + str(int(preview.get("xp_gained", 0))) + "; loot value: " + _format_float(float(preview.get("loot_value", 0.0))) + ".", 16, COLOR_MUTED))
-	stack.add_child(_barracks_wrapped_label("Prestige: pending calibration. No prestige value is awarded by this patch.", 15, Color(1.0, 0.74, 0.40, 1.0)))
+	stack.add_child(_barracks_wrapped_label("Prestige preview: " + _format_signed_prestige_ui(float(preview.get("prestige_gain", 0.0))) + ".", 15, Color(1.0, 0.74, 0.40, 1.0)))
 	var button: Button = Button.new()
 	button.text = "Launch with " + String(row.get("name", "Warband"))
 	button.custom_minimum_size = Vector2(0, 42)
@@ -6039,7 +6541,7 @@ func _barracks_last_report_lines() -> Array[String]:
 				lines.append(String(level_variant) + ".")
 			if int(report.get("level_after", 0)) > int(report.get("level_before", 0)):
 				lines.append(String(report.get("warband_name", "Warband")) + " reached Level " + str(int(report.get("level_after", 0))) + ".")
-			lines.append("Loot value " + _format_float(float(report.get("loot_value", 0.0))) + ". Prestige pending calibration.")
+			lines.append("Loot value " + _format_float(float(report.get("loot_value", 0.0))) + ". Prestige " + _format_signed_prestige_ui(float(report.get("prestige_gain", 0.0))) + ".")
 			return lines
 		if raw is Array:
 			var output: Array[String] = []
@@ -6288,7 +6790,7 @@ func _calendar_tooltip_for_veintena(veintena_number: int) -> String:
 		17:
 			return "Tezcatlipoca governs end-of-year intrigue, omens, hidden pressure and reckoning danger."
 		18:
-			return "Quetzalcoatl closes the ordinary year through transition, order, legitimacy and ceremonial completion."
+			return "Quetzalcoatl closes the ordinary year through transition, order, legitimacy and ceremonial donation."
 	return "Calendar planning pressure."
 
 func _on_calendar_card_pressed(report_id: String) -> void:
@@ -6296,15 +6798,112 @@ func _on_calendar_card_pressed(report_id: String) -> void:
 	show_location("estate")
 
 func _build_estate_reports() -> void:
-	# Palace v0.20.2: safe Estate-screen display card only.
-	# This deliberately avoids adding a Palace navigation tab after the previous
-	# Palace shell broke the screen profile setup. It only proves the UI can read
-	# the palace backend data from the stable Estate report area.
+	# v0.37.6: Estate report bar keeps clickable report cards, while Prestige
+	# is shown as a fixed summary card at the bottom rather than a pop-out report.
 	super._build_estate_reports()
-	var focus_id: String = _current_focus_id()
-	if focus_id != "" and focus_id != "overview":
+	_add_estate_prestige_bottom_card()
+
+func _add_estate_prestige_bottom_card() -> void:
+	if notification_list == null:
 		return
-	_add_palace_estate_probe_card()
+	var state: Node = _state()
+	var prestige: Dictionary = {}
+	if state != null and state.has_method("get_prestige_summary"):
+		prestige = state.call("get_prestige_summary") as Dictionary
+	var player_value: float = float(prestige.get("player_prestige", 0.0))
+	var player_rank: Dictionary = prestige.get("player_rank", {}) as Dictionary
+	var rank_number: int = int(player_rank.get("rank", 0))
+	var leaderboard: Array = prestige.get("leaderboard", []) as Array
+	var rank_text: String = "Rank pending"
+	if rank_number > 0:
+		rank_text = _ordinal_number(rank_number) + " of " + str(max(1, leaderboard.size())) + " houses"
+	var recent_text: String = "No prestige gains recorded yet."
+	var recent: Array = prestige.get("recent_history", []) as Array
+	if not recent.is_empty() and recent[0] is Dictionary:
+		var last_record: Dictionary = recent[0] as Dictionary
+		var amount: float = float(last_record.get("amount", 0.0))
+		recent_text = "Recent: " + ("+" if amount >= 0.0 else "") + _format_religion_amount(amount) + " — " + String(last_record.get("detail", "Prestige changed"))
+
+	var panel: PanelContainer = PanelContainer.new()
+	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.035, 0.050, 0.047, 0.96), Color(0.76, 0.63, 0.32, 0.72), 10))
+	notification_list.add_child(panel)
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	panel.add_child(margin)
+
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 3)
+	margin.add_child(stack)
+
+	var title: Label = Label.new()
+	title.text = "Prestige Standing"
+	title.add_theme_font_size_override("font_size", 18)
+	title.add_theme_color_override("font_color", Color(0.95, 0.88, 0.62, 1.0))
+	stack.add_child(title)
+
+	var value_label: Label = Label.new()
+	value_label.text = _format_religion_amount(player_value) + " Prestige  •  " + rank_text
+	value_label.add_theme_font_size_override("font_size", 16)
+	value_label.add_theme_color_override("font_color", Color(0.90, 0.88, 0.78, 1.0))
+	value_label.clip_text = true
+	stack.add_child(value_label)
+
+	var note: Label = Label.new()
+	note.text = recent_text
+	note.add_theme_font_size_override("font_size", 13)
+	note.add_theme_color_override("font_color", Color(0.72, 0.78, 0.72, 1.0))
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	stack.add_child(note)
+
+	panel.tooltip_text = "Prestige is the main score of the game. It is never spent."
+
+func _add_prestige_estate_score_card() -> void:
+	# Compact score summary used by Estate Overview and Palace reports.
+	# Prestige is still not a persistent corner panel outside Palace.
+	var state: Node = _state()
+	if state == null or not state.has_method("get_prestige_summary"):
+		_add_notification("Prestige: backend score data is not connected yet.")
+		return
+	var prestige: Dictionary = state.call("get_prestige_summary") as Dictionary
+	var player_value: float = float(prestige.get("player_prestige", 0.0))
+	var player_rank: Dictionary = prestige.get("player_rank", {}) as Dictionary
+	var rank_number: int = int(player_rank.get("rank", 0))
+	var leaderboard: Array = prestige.get("leaderboard", []) as Array
+	var rank_text: String = "Rank pending"
+	if rank_number > 0:
+		rank_text = _ordinal_number(rank_number) + " of " + str(leaderboard.size()) + " houses"
+	_add_notification("Prestige — Main Score: " + _format_religion_amount(player_value) + ". Standing: " + rank_text + ". Prestige is never spent.")
+	var parts: Array[String] = []
+	for row_variant: Variant in leaderboard:
+		if not (row_variant is Dictionary):
+			continue
+		var row: Dictionary = row_variant as Dictionary
+		var label: String = str(int(row.get("rank", 0))) + ". " + String(row.get("name", "House")) + " " + _format_religion_amount(float(row.get("prestige", 0.0)))
+		if bool(row.get("is_player", false)):
+			label += " (you)"
+		parts.append(label)
+	_add_notification("Prestige leaderboard: " + "; ".join(parts) + ".")
+	var recent: Array = prestige.get("recent_history", []) as Array
+	if recent.is_empty():
+		_add_notification("Prestige history: no gains or losses recorded yet. Court-need donations currently add Prestige by donated amount × base value.")
+	else:
+		var recent_parts: Array[String] = []
+		var count: int = 0
+		for item_variant: Variant in recent:
+			if count >= 3:
+				break
+			if not (item_variant is Dictionary):
+				continue
+			var item: Dictionary = item_variant as Dictionary
+			var amount: float = float(item.get("amount", 0.0))
+			recent_parts.append(("+" if amount >= 0.0 else "") + _format_religion_amount(amount) + " " + String(item.get("detail", "Prestige changed")))
+			count += 1
+		_add_notification("Recent prestige: " + "; ".join(recent_parts) + ".")
 
 func _add_palace_estate_probe_card() -> void:
 	var state: Node = _state()
@@ -6325,10 +6924,28 @@ func _add_palace_estate_probe_card() -> void:
 		title = "Palace — Dedication: None"
 	_add_notification(title + ". Palace Level " + str(palace_level) + ". Built structures: " + str(structure_count) + ".")
 	_add_notification("Palace route: " + route_name + ". " + power_summary)
-	_add_notification("Palace status: " + authority_status + " Dedication and structure construction are handled on Palace → Divine Seat; maintenance and staff clarity are active, while ruler demands show a display-only readiness prototype.")
+	_add_notification("Palace status: " + authority_status + " Dedication and structure construction are handled on Palace → Divine Seat; maintenance and staff clarity are active, while court needs now accept donations for prestige.")
 	_add_notification("Flower War authority check: " + gate_status)
 
+func _estate_report_definitions() -> Array[Dictionary]:
+	var output: Array[Dictionary] = []
+	output.append({"id": "palace_status", "title": "Palace Status", "subtitle": _estate_report_subtitle("palace_status")})
+	var base_reports: Array = super._estate_report_definitions()
+	for report_variant: Variant in base_reports:
+		if report_variant is Dictionary:
+			output.append(report_variant as Dictionary)
+	return output
+
+func _estate_report_subtitle(report_id: String) -> String:
+	match report_id:
+		"palace_status":
+			return _palace_estate_report_subtitle()
+	return super._estate_report_subtitle(report_id)
+
 func _estate_report_title(report_id: String) -> String:
+	match report_id:
+		"palace_status":
+			return "Palace Status"
 	if report_id.begins_with("calendar|"):
 		var data: Dictionary = _calendar_report_data_from_id(report_id)
 		if String(data.get("period", "veintena")) == "nemontemi":
@@ -6338,9 +6955,117 @@ func _estate_report_title(report_id: String) -> String:
 	return super._estate_report_title(report_id)
 
 func _build_estate_report_detail_text(report_id: String) -> String:
+	match report_id:
+		"palace_status":
+			return _build_palace_estate_report_detail_text()
 	if report_id.begins_with("calendar|"):
 		return _build_calendar_report_detail_text(report_id)
 	return super._build_estate_report_detail_text(report_id)
+
+func _prestige_estate_report_subtitle() -> String:
+	var state: Node = _state()
+	if state == null or not state.has_method("get_prestige_summary"):
+		return "Prestige data not connected"
+	var prestige: Dictionary = state.call("get_prestige_summary") as Dictionary
+	var player_value: float = float(prestige.get("player_prestige", 0.0))
+	var player_rank: Dictionary = prestige.get("player_rank", {}) as Dictionary
+	var rank_number: int = int(player_rank.get("rank", 0))
+	var leaderboard: Array = prestige.get("leaderboard", []) as Array
+	if rank_number > 0:
+		return _format_religion_amount(player_value) + " Prestige; " + _ordinal_number(rank_number) + " of " + str(leaderboard.size())
+	return _format_religion_amount(player_value) + " Prestige; rank pending"
+
+func _palace_estate_report_subtitle() -> String:
+	var state: Node = _state()
+	if state == null or not state.has_method("get_palace_summary"):
+		return "Palace data not connected"
+	var summary: Dictionary = state.call("get_palace_summary") as Dictionary
+	var dedication_name: String = String(summary.get("dedicated_god_name", "None"))
+	var palace_level: int = int(summary.get("palace_level", 1))
+	var active_count: int = int(summary.get("active_structure_count", 0))
+	var built_count: int = int(summary.get("built_structure_count", 0))
+	return "Dedication: " + dedication_name + "; L" + str(palace_level) + "; active " + str(active_count) + " / built " + str(built_count)
+
+func _build_prestige_estate_report_detail_text() -> String:
+	var state: Node = _state()
+	if state == null or not state.has_method("get_prestige_summary"):
+		return "[b]Prestige Standing[/b]\nPrestige data is not connected yet."
+	var prestige: Dictionary = state.call("get_prestige_summary") as Dictionary
+	var player_value: float = float(prestige.get("player_prestige", 0.0))
+	var player_rank: Dictionary = prestige.get("player_rank", {}) as Dictionary
+	var rank_number: int = int(player_rank.get("rank", 0))
+	var leaderboard: Array = prestige.get("leaderboard", []) as Array
+	var text: String = "[b]Prestige Standing[/b]\n"
+	text += "Prestige is the main score. It is never spent.\n\n"
+	text += "• Player Prestige: " + _format_religion_amount(player_value) + "\n"
+	if rank_number > 0:
+		text += "• Current standing: " + _ordinal_number(rank_number) + " of " + str(leaderboard.size()) + " houses\n"
+	else:
+		text += "• Current standing: rank pending\n"
+	text += "\n[b]Leaderboard[/b]\n"
+	if leaderboard.is_empty():
+		text += "• No leaderboard data connected yet.\n"
+	else:
+		for row_variant: Variant in leaderboard:
+			if not (row_variant is Dictionary):
+				continue
+			var row: Dictionary = row_variant as Dictionary
+			var line: String = "• " + str(int(row.get("rank", 0))) + ". " + String(row.get("name", "House")) + " — " + _format_religion_amount(float(row.get("prestige", 0.0)))
+			if bool(row.get("is_player", false)):
+				line += " (you)"
+			if String(row.get("source", "")) == "placeholder":
+				line += " [placeholder]"
+			text += line + "\n"
+	var recent: Array = prestige.get("recent_history", []) as Array
+	text += "\n[b]Recent Prestige[/b]\n"
+	if recent.is_empty():
+		text += "• No prestige gains or losses recorded yet. Court-need donations currently add Prestige by donated amount × base value.\n"
+	else:
+		var count: int = 0
+		for item_variant: Variant in recent:
+			if count >= 5:
+				break
+			if not (item_variant is Dictionary):
+				continue
+			var item: Dictionary = item_variant as Dictionary
+			var amount: float = float(item.get("amount", 0.0))
+			text += "• " + ("+" if amount >= 0.0 else "") + _format_religion_amount(amount) + " — " + String(item.get("detail", "Prestige changed")) + "\n"
+			count += 1
+	return text.strip_edges()
+
+func _build_palace_estate_report_detail_text() -> String:
+	var state: Node = _state()
+	if state == null or not state.has_method("get_palace_summary"):
+		return "[b]Palace Status[/b]\nPalace data is not connected yet."
+	var summary: Dictionary = state.call("get_palace_summary") as Dictionary
+	var dedicated: bool = bool(summary.get("dedicated", false))
+	var dedication_name: String = String(summary.get("dedicated_god_name", "None"))
+	var route_name: String = String(summary.get("route_name", "No dedication"))
+	var power_summary: String = String(summary.get("power_summary", "No palace route has been chosen."))
+	var palace_level: int = int(summary.get("palace_level", 1))
+	var built_count: int = int(summary.get("built_structure_count", 0))
+	var active_count: int = int(summary.get("active_structure_count", 0))
+	var inactive_count: int = int(summary.get("inactive_structure_count", 0))
+	var authority_status: String = String(summary.get("authority_status", "No active palace authority mechanics are implemented yet."))
+	var gate_status: String = String(summary.get("flower_war_gate_status", "Flower War palace gate not checked."))
+	var text: String = "[b]Palace Status[/b]\n"
+	if dedicated:
+		text += "• Dedication: " + dedication_name + "\n"
+	else:
+		text += "• Dedication: None\n"
+	text += "• Palace Level: " + str(palace_level) + "\n"
+	text += "• Route: " + route_name + "\n"
+	text += "• Built structures: " + str(built_count) + "\n"
+	text += "• Active structures: " + str(active_count) + "\n"
+	text += "• Inactive structures: " + str(inactive_count) + "\n\n"
+	text += "[b]Route Power[/b]\n"
+	text += "• " + power_summary + "\n\n"
+	text += "[b]Authority Status[/b]\n"
+	text += "• " + authority_status + "\n\n"
+	text += "[b]Flower War Authority[/b]\n"
+	text += "• " + gate_status + "\n\n"
+	text += "Use Palace → Divine Seat for dedication and palace structures, Palace → Authority for route effects, and Palace → Ruler Demands for court needs."
+	return text.strip_edges()
 
 func _calendar_report_data_from_id(report_id: String) -> Dictionary:
 	var parts: PackedStringArray = report_id.split("|")
