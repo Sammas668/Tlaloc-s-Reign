@@ -888,6 +888,7 @@ func _setup_palace_navigation_probe() -> void:
 	profile["body"] = "The Palace is the estate's political and divine centre. The Divine Seat is a ceremonial dedication hall: choose one route, then view that god's palace structure construction data."
 	profile["focuses"] = [
 		{"id": "overview", "label": "Overview"},
+		{"id": "prestige", "label": "Prestige"},
 		{"id": "divine_seat", "label": "Divine Seat"},
 		{"id": "authority", "label": "Authority"},
 		{"id": "ruler_demands", "label": "Court Needs"}
@@ -1166,6 +1167,8 @@ func _report_title_for_current_focus(profile: Dictionary) -> String:
 		match _current_focus_id():
 			"overview":
 				return "Palace Overview"
+			"prestige":
+				return "Prestige"
 			"divine_seat":
 				return "Divine Seat"
 			"authority":
@@ -1205,6 +1208,8 @@ func _show_palace_content() -> void:
 		return
 	dynamic_view_host.visible = true
 	match _current_focus_id():
+		"prestige":
+			_build_palace_prestige_main_view()
 		"divine_seat":
 			_build_palace_divine_seat_main_view()
 		"authority":
@@ -1817,6 +1822,264 @@ func _add_palace_authority_locked_section(parent: VBoxContainer, rows: Array, co
 		stack.add_child(_palace_wrapped_label(line, 14, Color(0.72, 0.78, 0.70, 1.0)))
 		stack.add_child(_palace_wrapped_label("Status: " + String(row.get("build_status", "Locked.")), 13, Color(0.62, 0.68, 0.62, 1.0)))
 
+
+func _build_palace_prestige_main_view() -> void:
+	var state: Node = _state()
+	var prestige: Dictionary = {}
+	if state != null and state.has_method("get_prestige_summary"):
+		prestige = state.call("get_prestige_summary") as Dictionary
+
+	var outer: PanelContainer = PanelContainer.new()
+	outer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	outer.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	outer.add_theme_stylebox_override("panel", _make_panel_style(Color(0.026, 0.024, 0.019, 0.94), Color(0.76, 0.60, 0.34, 0.68), 18))
+	dynamic_view_host.add_child(outer)
+
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 22)
+	margin.add_theme_constant_override("margin_top", 18)
+	margin.add_theme_constant_override("margin_right", 22)
+	margin.add_theme_constant_override("margin_bottom", 18)
+	outer.add_child(margin)
+
+	var root: VBoxContainer = VBoxContainer.new()
+	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_theme_constant_override("separation", 12)
+	margin.add_child(root)
+
+	var title: Label = _palace_label("PALACE PRESTIGE", 33, Color(1.0, 0.86, 0.50, 1.0))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	root.add_child(title)
+	root.add_child(_palace_wrapped_label("Prestige is the house's public standing and main score. It is earned from visible actions such as court-need donations, Flower Wars, ritual sacrifice and savvy market trade. It is never spent.", 17, Color(0.83, 0.86, 0.78, 1.0)))
+
+	if prestige.is_empty():
+		root.add_child(_palace_wrapped_label("Prestige backend score data is not connected yet.", 18, Color(1.0, 0.72, 0.45, 1.0)))
+		return
+
+	var player_value: float = float(prestige.get("player_prestige", 0.0))
+	var leaderboard: Array = prestige.get("leaderboard", []) as Array
+	var player_rank: Dictionary = prestige.get("player_rank", {}) as Dictionary
+	var rank_number: int = int(player_rank.get("rank", 0))
+	var rank_text: String = "Rank pending"
+	if rank_number > 0:
+		rank_text = _ordinal_number(rank_number) + " of " + str(max(1, leaderboard.size())) + " houses"
+	var recent: Array = prestige.get("recent_history", []) as Array
+	var all_history: Array = prestige.get("prestige_history", []) as Array
+	var source_rows: Array[Dictionary] = _prestige_source_rows(all_history)
+	var latest_text: String = "No recent prestige gains recorded."
+	if not recent.is_empty() and recent[0] is Dictionary:
+		var latest: Dictionary = recent[0] as Dictionary
+		latest_text = _prestige_signed_amount(float(latest.get("amount", 0.0))) + " — " + String(latest.get("detail", "Prestige changed"))
+	var leader_text: String = "No leaderboard data"
+	if not leaderboard.is_empty() and leaderboard[0] is Dictionary:
+		var leader: Dictionary = leaderboard[0] as Dictionary
+		leader_text = String(leader.get("name", "House")) + " " + _format_religion_amount(float(leader.get("prestige", 0.0)))
+
+	var status_row: HBoxContainer = HBoxContainer.new()
+	status_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	status_row.add_theme_constant_override("separation", 10)
+	root.add_child(status_row)
+	_add_palace_summary_card(status_row, "Total", _format_religion_amount(player_value), "Current Player House Prestige.", Color(0.96, 0.80, 0.52, 1.0))
+	_add_palace_summary_card(status_row, "Standing", rank_text, "Prestige is compared against rival houses.", Color(0.72, 0.92, 0.70, 1.0))
+	_add_palace_summary_card(status_row, "Leader", leader_text, "Rival values are prototype comparison data until full rival turns are connected.", Color(0.90, 0.72, 0.44, 1.0))
+	_add_palace_summary_card(status_row, "Latest", latest_text, "Most recent recorded Prestige change.", Color(0.68, 0.86, 0.94, 1.0))
+
+	var scroll: ScrollContainer = ScrollContainer.new()
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	root.add_child(scroll)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stack.add_theme_constant_override("separation", 12)
+	scroll.add_child(stack)
+
+	stack.add_child(_palace_label("Prestige Source Breakdown", 23, Color(1.0, 0.84, 0.54, 1.0)))
+	stack.add_child(_palace_wrapped_label("This shows where the score has actually come from so gains are not hidden in the background.", 14, Color(0.76, 0.80, 0.70, 1.0)))
+	if source_rows.is_empty():
+		stack.add_child(_palace_wrapped_label("No source history yet. Make a qualifying market trade, donate to a court need, win a Flower War or complete a prestige-granting ritual to create the first entry.", 15, Color(0.74, 0.78, 0.70, 1.0)))
+	else:
+		for row: Dictionary in source_rows:
+			_add_palace_prestige_source_row_card(stack, row)
+
+	stack.add_child(_palace_label("Recent Prestige Ledger", 23, Color(1.0, 0.84, 0.54, 1.0)))
+	if recent.is_empty():
+		stack.add_child(_palace_wrapped_label("No recent prestige entries recorded yet.", 15, Color(0.74, 0.78, 0.70, 1.0)))
+	else:
+		var recent_count: int = 0
+		for item_variant: Variant in recent:
+			if recent_count >= 12:
+				break
+			if item_variant is Dictionary:
+				_add_palace_prestige_history_row_card(stack, item_variant as Dictionary)
+				recent_count += 1
+
+	stack.add_child(_palace_label("House Standing", 23, Color(1.0, 0.84, 0.54, 1.0)))
+	if leaderboard.is_empty():
+		stack.add_child(_palace_wrapped_label("No leaderboard data is available.", 15, Color(0.74, 0.78, 0.70, 1.0)))
+	else:
+		for row_variant: Variant in leaderboard:
+			if row_variant is Dictionary:
+				_add_palace_prestige_leaderboard_row_card(stack, row_variant as Dictionary)
+
+	var note_panel: PanelContainer = PanelContainer.new()
+	note_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	note_panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.020, 0.023, 0.020, 0.84), Color(0.45, 0.48, 0.38, 0.55), 10))
+	stack.add_child(note_panel)
+	var note_margin: MarginContainer = MarginContainer.new()
+	note_margin.add_theme_constant_override("margin_left", 12)
+	note_margin.add_theme_constant_override("margin_top", 9)
+	note_margin.add_theme_constant_override("margin_right", 12)
+	note_margin.add_theme_constant_override("margin_bottom", 9)
+	note_panel.add_child(note_margin)
+	note_margin.add_child(_palace_wrapped_label(String(prestige.get("mechanics_note", "Prestige is the main score. It is earned, lost, displayed and compared against rivals. It is never spent.")), 15, Color(0.74, 0.78, 0.70, 1.0)))
+
+func _prestige_source_rows(history: Array) -> Array[Dictionary]:
+	var totals: Dictionary = {}
+	for item_variant: Variant in history:
+		if not (item_variant is Dictionary):
+			continue
+		var item: Dictionary = item_variant as Dictionary
+		var source_id: String = String(item.get("source_id", "unknown"))
+		var amount: float = float(item.get("amount", 0.0))
+		if not totals.has(source_id):
+			totals[source_id] = {"source_id": source_id, "amount": 0.0, "count": 0, "latest_detail": "", "latest_veintena": 0}
+		var row: Dictionary = totals[source_id] as Dictionary
+		row["amount"] = float(row.get("amount", 0.0)) + amount
+		row["count"] = int(row.get("count", 0)) + 1
+		row["latest_detail"] = String(item.get("detail", row.get("latest_detail", "Prestige changed")))
+		row["latest_veintena"] = int(item.get("veintena", row.get("latest_veintena", 0)))
+		totals[source_id] = row
+	var rows: Array[Dictionary] = []
+	for key_variant: Variant in totals.keys():
+		var row_value: Dictionary = totals[key_variant] as Dictionary
+		rows.append(row_value.duplicate(true))
+	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		var a_amount: float = absf(float(a.get("amount", 0.0)))
+		var b_amount: float = absf(float(b.get("amount", 0.0)))
+		if is_equal_approx(a_amount, b_amount):
+			return _prestige_source_display_name(String(a.get("source_id", ""))) < _prestige_source_display_name(String(b.get("source_id", "")))
+		return a_amount > b_amount
+	)
+	return rows
+
+func _add_palace_prestige_source_row_card(parent: VBoxContainer, row: Dictionary) -> void:
+	var source_id: String = String(row.get("source_id", "unknown"))
+	var colour: Color = _prestige_source_colour(source_id)
+	var card: PanelContainer = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_stylebox_override("panel", _make_panel_style(Color(0.022, 0.024, 0.020, 0.90), colour.darkened(0.08), 10))
+	parent.add_child(card)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 12)
+	margin.add_theme_constant_override("margin_top", 8)
+	margin.add_theme_constant_override("margin_right", 12)
+	margin.add_theme_constant_override("margin_bottom", 8)
+	card.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 4)
+	margin.add_child(stack)
+	var top: HBoxContainer = HBoxContainer.new()
+	top.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_theme_constant_override("separation", 8)
+	stack.add_child(top)
+	var title: Label = _palace_label(_prestige_source_display_name(source_id), 19, colour.lightened(0.22))
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	top.add_child(title)
+	var value: Label = _palace_label(_prestige_signed_amount(float(row.get("amount", 0.0))) + " Prestige", 18, colour.lightened(0.18))
+	value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	value.custom_minimum_size = Vector2(160, 0)
+	top.add_child(value)
+	stack.add_child(_palace_wrapped_label(str(int(row.get("count", 0))) + " recorded entr" + ("y" if int(row.get("count", 0)) == 1 else "ies") + ". Latest: " + String(row.get("latest_detail", "Prestige changed")), 14, Color(0.80, 0.84, 0.76, 1.0)))
+
+func _add_palace_prestige_history_row_card(parent: VBoxContainer, record: Dictionary) -> void:
+	var source_id: String = String(record.get("source_id", "unknown"))
+	var colour: Color = _prestige_source_colour(source_id)
+	var amount: float = float(record.get("amount", 0.0))
+	var card: PanelContainer = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_stylebox_override("panel", _make_panel_style(Color(0.018, 0.020, 0.018, 0.86), colour.darkened(0.14), 8))
+	parent.add_child(card)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 7)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 7)
+	card.add_child(margin)
+	var stack: VBoxContainer = VBoxContainer.new()
+	stack.add_theme_constant_override("separation", 3)
+	margin.add_child(stack)
+	stack.add_child(_palace_wrapped_label(_prestige_record_time_text(record) + " • " + _prestige_source_display_name(source_id) + " • " + _prestige_signed_amount(amount) + " Prestige", 15, colour.lightened(0.22)))
+	stack.add_child(_palace_wrapped_label(String(record.get("detail", "Prestige changed")), 13, Color(0.76, 0.80, 0.72, 1.0)))
+
+func _add_palace_prestige_leaderboard_row_card(parent: VBoxContainer, row: Dictionary) -> void:
+	var is_player: bool = bool(row.get("is_player", false))
+	var border: Color = Color(0.76, 0.63, 0.32, 0.78) if is_player else Color(0.42, 0.46, 0.38, 0.58)
+	var card: PanelContainer = PanelContainer.new()
+	card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	card.add_theme_stylebox_override("panel", _make_panel_style(Color(0.020, 0.023, 0.020, 0.86), border, 8))
+	parent.add_child(card)
+	var margin: MarginContainer = MarginContainer.new()
+	margin.add_theme_constant_override("margin_left", 10)
+	margin.add_theme_constant_override("margin_top", 7)
+	margin.add_theme_constant_override("margin_right", 10)
+	margin.add_theme_constant_override("margin_bottom", 7)
+	card.add_child(margin)
+	var line: HBoxContainer = HBoxContainer.new()
+	line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	line.add_theme_constant_override("separation", 8)
+	margin.add_child(line)
+	var name_label: Label = _palace_label(str(int(row.get("rank", 0))) + ". " + String(row.get("name", "House")) + (" (you)" if is_player else ""), 16, Color(0.95, 0.88, 0.62, 1.0) if is_player else Color(0.78, 0.82, 0.74, 1.0))
+	name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	line.add_child(name_label)
+	var value_label: Label = _palace_label(_format_religion_amount(float(row.get("prestige", 0.0))) + " Prestige", 16, Color(0.95, 0.88, 0.62, 1.0) if is_player else Color(0.78, 0.82, 0.74, 1.0))
+	value_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	value_label.custom_minimum_size = Vector2(150, 0)
+	line.add_child(value_label)
+
+func _prestige_source_display_name(source_id: String) -> String:
+	match source_id:
+		"economic_savvy_trade":
+			return "Savvy Trade"
+		"court_need_donation":
+			return "Court Need Donations"
+		"flower_war_attack":
+			return "Flower War Musters"
+		"flower_war_defence":
+			return "Flower War Defence"
+		"religion_sacrifice":
+			return "Ritual Sacrifice"
+		"shrine_level":
+			return "Shrine Recognition"
+		"palace_recognition":
+			return "Palace Recognition"
+	return source_id.replace("_", " ").capitalize()
+
+func _prestige_source_colour(source_id: String) -> Color:
+	match source_id:
+		"economic_savvy_trade":
+			return Color(0.50, 0.82, 0.74, 0.90)
+		"court_need_donation":
+			return Color(0.96, 0.78, 0.42, 0.90)
+		"flower_war_attack", "flower_war_defence":
+			return Color(0.90, 0.42, 0.30, 0.90)
+		"religion_sacrifice":
+			return Color(0.70, 0.55, 0.92, 0.90)
+		"shrine_level":
+			return Color(0.42, 0.70, 0.96, 0.90)
+		"palace_recognition":
+			return Color(0.95, 0.86, 0.54, 0.90)
+	return Color(0.70, 0.74, 0.68, 0.85)
+
+func _prestige_signed_amount(amount: float) -> String:
+	return ("+" if amount >= 0.0 else "") + _format_religion_amount(amount)
+
+func _prestige_record_time_text(record: Dictionary) -> String:
+	var veintena: int = int(record.get("veintena", 0))
+	if veintena > 0:
+		return "Veintena " + str(veintena)
+	return "Current turn"
+
 func _build_palace_overview_main_view() -> void:
 	var summary: Dictionary = _palace_probe_summary()
 	var god_id: String = String(summary.get("dedicated_god", ""))
@@ -1875,7 +2138,7 @@ func _build_palace_overview_main_view() -> void:
 	note_margin.add_theme_constant_override("margin_right", 12)
 	note_margin.add_theme_constant_override("margin_bottom", 9)
 	note_panel.add_child(note_margin)
-	note_margin.add_child(_palace_wrapped_label("Palace structures consume maintenance and reserve existing active staff when the Veintena resolves. The Authority tab reads active structures; Huitzilopochtli gates attacking Flower Wars, Tlaloc shows natural foresight, Tezcatlipoca shows scarcity pressure, and Quetzalcoatl shows legitimacy hooks. Court needs can now be delivered, but prestige is generated by donation value.", 15, Color(0.74, 0.78, 0.70, 1.0)))
+	note_margin.add_child(_palace_wrapped_label("Palace structures consume maintenance and reserve existing active staff when the Veintena resolves. The Prestige tab now explains score, source history and rival standing. The Authority tab reads active structures; Huitzilopochtli gates attacking Flower Wars, Tlaloc shows natural foresight, Tezcatlipoca shows scarcity pressure, and Quetzalcoatl shows legitimacy hooks. Court needs can now be delivered, but prestige is generated by donation value.", 15, Color(0.74, 0.78, 0.70, 1.0)))
 
 func _add_palace_summary_card(parent: HBoxContainer, heading: String, value: String, detail: String, colour: Color) -> void:
 	var card: PanelContainer = PanelContainer.new()
@@ -2460,6 +2723,8 @@ func _palace_wrapped_label(text: String, font_size: int, colour: Color) -> RichT
 func _build_palace_navigation_probe_reports() -> void:
 	var focus_id: String = _current_focus_id()
 	match focus_id:
+		"prestige":
+			_build_palace_prestige_probe_reports()
 		"divine_seat":
 			_build_palace_divine_seat_probe_reports()
 		"authority":
@@ -2478,7 +2743,30 @@ func _build_palace_overview_probe_reports() -> void:
 	_add_notification("Structures: " + str(int(summary.get("built_structure_count", 0))) + " built; " + str(int(summary.get("active_structure_count", 0))) + " active; " + str(int(summary.get("inactive_structure_count", 0))) + " inactive.")
 	var staff_summary: Dictionary = summary.get("staff_summary", {}) as Dictionary
 	_add_notification(String(staff_summary.get("headline", "No palace staff required yet.")))
-	_add_notification("Palace upkeep and staff now resolve on Veintena advance. Huitzilopochtli dedication now gates attacking Flower Wars; other authority effects and court needs now show a display-only readiness prototype.")
+	_add_notification("Palace upkeep and staff now resolve on Veintena advance. The Palace → Prestige tab now explains score sources and recent gains. Huitzilopochtli dedication gates attacking Flower Wars; other authority effects and court needs now show a display-only readiness prototype.")
+
+func _build_palace_prestige_probe_reports() -> void:
+	_add_prestige_estate_score_card()
+	var state: Node = _state()
+	if state == null or not state.has_method("get_prestige_summary"):
+		_add_notification("Prestige: backend score data is not connected yet.")
+		return
+	var prestige: Dictionary = state.call("get_prestige_summary") as Dictionary
+	var history: Array = prestige.get("prestige_history", []) as Array
+	var source_rows: Array[Dictionary] = _prestige_source_rows(history)
+	_add_notification("Palace → Prestige: explains why the main score changed, with recent entries and source totals.")
+	if source_rows.is_empty():
+		_add_notification("Prestige source breakdown: no recorded gains or losses yet.")
+	else:
+		var parts: Array[String] = []
+		var count: int = 0
+		for row: Dictionary in source_rows:
+			if count >= 4:
+				break
+			parts.append(_prestige_source_display_name(String(row.get("source_id", "unknown"))) + " " + _prestige_signed_amount(float(row.get("amount", 0.0))))
+			count += 1
+		_add_notification("Prestige source totals: " + "; ".join(parts) + ".")
+	_add_notification("Market trades remain previewed in the Market basket, but the full Prestige history now lives here in the Palace tab.")
 
 func _build_palace_divine_seat_probe_reports() -> void:
 	var summary: Dictionary = _palace_probe_summary()
