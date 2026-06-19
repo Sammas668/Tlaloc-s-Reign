@@ -2,10 +2,16 @@
 # Godot 4.x
 # Project path: res://Scripts/ui/screens/TradeBasketView.gd
 #
+# v0.43.3 MarketTradeSystem UI handoff.
+#
 # Barter-only trade basket. There is no stored Wealth, coin or market credit.
 # Negative slider values sell estate free stock into the market.
 # Positive slider values buy market stock into the estate.
-# Balance buttons can set a row to the amount needed to balance the rest of the basket.
+#
+# This view now asks TRGameState / MarketTradeSystem for trade pricing,
+# validation and application rules instead of owning those rules itself.
+# The local pricing helpers remain only as fallback compatibility.
+
 extends PanelContainer
 
 signal trade_changed()
@@ -30,6 +36,7 @@ var clear_button: Button = null
 var list_root: VBoxContainer = null
 var error_label: Label = null
 
+
 func _ready() -> void:
 	_add_styles()
 	if state == null:
@@ -38,17 +45,20 @@ func _ready() -> void:
 	_refresh_rows()
 	_refresh_summary()
 
+
 func setup(new_state: Node) -> void:
 	state = new_state
 	if is_node_ready():
 		_refresh_rows()
 		_refresh_summary()
 
+
 func _find_state() -> Node:
 	var autoload_state: Node = get_node_or_null("/root/TRGameState")
 	if autoload_state != null:
 		return autoload_state
 	return get_node_or_null("/root/GameState")
+
 
 func _build_ui() -> void:
 	for child: Node in get_children():
@@ -111,7 +121,7 @@ func _build_ui() -> void:
 	button_row.add_child(error_label)
 
 	var helper: Label = Label.new()
-	helper.text = "Drag left to sell estate free stock. Drag right to buy market stock. Prices use projected market value and marginal barter pricing: each unit bought raises the next unit price, and each unit sold lowers the next unit value. Use a row's Balance button to set that good to the amount needed to balance the rest of the basket."
+	helper.text = "Drag left to sell estate free stock. Drag right to buy market stock. Prices use MarketTradeSystem marginal barter pricing. Use a row's Balance button to set that good to the amount needed to balance the rest of the basket."
 	helper.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	helper.add_theme_font_size_override("font_size", 19)
 	helper.add_theme_color_override("font_color", COLOR_MUTED)
@@ -126,6 +136,7 @@ func _build_ui() -> void:
 	list_root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	list_root.add_theme_constant_override("separation", 8)
 	scroll.add_child(list_root)
+
 
 func _refresh_rows() -> void:
 	if list_root == null:
@@ -148,6 +159,7 @@ func _refresh_rows() -> void:
 	for resource_id: String in ids:
 		_add_trade_row(resource_id)
 
+
 func _resource_ids_in_order() -> Array[String]:
 	var ids: Array[String] = []
 	for key_variant: Variant in store_good_by_id.keys():
@@ -158,12 +170,14 @@ func _resource_ids_in_order() -> Array[String]:
 			ids.append(id)
 	return ids
 
+
 func _add_empty_row(text: String) -> void:
 	var label: Label = Label.new()
 	label.text = text
 	label.add_theme_font_size_override("font_size", 22)
 	label.add_theme_color_override("font_color", COLOR_TEXT)
 	list_root.add_child(label)
+
 
 func _add_trade_row(resource_id: String) -> void:
 	var store_good: Dictionary = store_good_by_id.get(resource_id, {}) as Dictionary
@@ -173,7 +187,7 @@ func _add_trade_row(resource_id: String) -> void:
 	var estate_stored: float = maxf(0.0, float(store_good.get("stored", 0.0)))
 	var estate_reserved: float = maxf(0.0, float(store_good.get("reserved", 0.0)))
 	var market_stock: float = maxf(0.0, float(market_good.get("market_stock", 0.0)))
-	var unit_value: float = maxf(0.0, float(market_good.get("current_value", market_good.get("projected_value", market_good.get("base_value", 1.0)))))
+	var unit_value: float = _current_unit_value_for(resource_id)
 	var market_state: String = String(market_good.get("label", "Unknown"))
 
 	var sell_cap: int = int(floor(estate_free))
@@ -248,8 +262,6 @@ func _add_trade_row(resource_id: String) -> void:
 	slider.step = 1.0
 	slider.value = existing_value
 	slider.editable = sell_cap > 0 or buy_cap > 0
-	# Do not let mouse-wheel scrolling over the trade list change barter amounts.
-	# The wheel should scroll the list; bars should only change when dragged or balanced.
 	slider.scrollable = false
 	slider.tick_count = 3
 	slider.ticks_on_borders = true
@@ -289,6 +301,7 @@ func _add_trade_row(resource_id: String) -> void:
 	}
 	_update_row_labels(resource_id)
 
+
 func _on_slider_changed(resource_id: String, value: float) -> void:
 	if absf(value) <= 0.001:
 		trade_plan.erase(resource_id)
@@ -298,6 +311,7 @@ func _on_slider_changed(resource_id: String, value: float) -> void:
 	_refresh_summary()
 	emit_signal("trade_changed")
 
+
 func _on_balance_pressed(resource_id: String) -> void:
 	if not row_info_by_id.has(resource_id):
 		return
@@ -306,9 +320,6 @@ func _on_balance_pressed(resource_id: String) -> void:
 	if slider == null:
 		return
 
-	# Balance against the rest of the basket, ignoring this row's current value.
-	# If the rest of the basket is surplus, this row should buy enough goods to spend it.
-	# If the rest of the basket is deficit, this row should sell enough goods to cover it.
 	var totals: Dictionary = _basket_totals_excluding(resource_id)
 	var sold_without: float = float(totals.get("sold_value", 0.0))
 	var bought_without: float = float(totals.get("bought_value", 0.0))
@@ -334,7 +345,6 @@ func _on_balance_pressed(resource_id: String) -> void:
 	else:
 		trade_plan[resource_id] = new_amount
 
-	# Clamp again against the live slider limits and push the UI to the selected amount.
 	new_amount = clampf(new_amount, float(slider.min_value), float(slider.max_value))
 	if not is_equal_approx(slider.value, new_amount):
 		slider.value = new_amount
@@ -343,9 +353,11 @@ func _on_balance_pressed(resource_id: String) -> void:
 		_refresh_summary()
 		emit_signal("trade_changed")
 
+
 func _set_error_text(text: String) -> void:
 	if error_label:
 		error_label.text = text
+
 
 func _update_row_labels(resource_id: String) -> void:
 	if not row_info_by_id.has(resource_id):
@@ -388,10 +400,11 @@ func _update_row_labels(resource_id: String) -> void:
 		value_text += " | " + market_state
 		meta_label.text = value_text
 
+
 func _refresh_summary() -> void:
-	var totals: Dictionary = _basket_totals()
-	var sold_value: float = float(totals.get("sold_value", 0.0))
-	var bought_value: float = float(totals.get("bought_value", 0.0))
+	var preview: Dictionary = _trade_preview_for_plan(trade_plan)
+	var sold_value: float = float(preview.get("sold_value", 0.0))
+	var bought_value: float = float(preview.get("bought_value", 0.0))
 	var balance: float = sold_value - bought_value
 	var line_colour: String = "#8FE6D1"
 	if balance < -0.001:
@@ -421,24 +434,60 @@ func _refresh_summary() -> void:
 		elif error_label.text.begins_with("Trade asks for"):
 			error_label.text = ""
 
+
+func _trade_preview_for_plan(plan: Dictionary) -> Dictionary:
+	if state != null and state.has_method("get_market_trade_preview"):
+		var preview_variant: Variant = state.call("get_market_trade_preview", plan)
+		if preview_variant is Dictionary:
+			return preview_variant as Dictionary
+	var totals: Dictionary = _local_basket_totals_for_plan(plan, "")
+	totals["valid"] = false
+	totals["reason"] = "MarketTradeSystem API is not connected."
+	return totals
+
+
 func _basket_totals() -> Dictionary:
 	return _basket_totals_excluding("")
 
+
 func _basket_totals_excluding(excluded_resource_id: String) -> Dictionary:
+	if excluded_resource_id == "":
+		var preview: Dictionary = _trade_preview_for_plan(trade_plan)
+		return {
+			"sold_value": float(preview.get("sold_value", 0.0)),
+			"bought_value": float(preview.get("bought_value", 0.0)),
+			"balance": float(preview.get("balance", float(preview.get("sold_value", 0.0)) - float(preview.get("bought_value", 0.0))))
+		}
+	var reduced_plan: Dictionary = {}
+	for key_variant: Variant in trade_plan.keys():
+		var resource_id: String = String(key_variant)
+		if resource_id == excluded_resource_id:
+			continue
+		reduced_plan[resource_id] = trade_plan[key_variant]
+	var reduced_preview: Dictionary = _trade_preview_for_plan(reduced_plan)
+	return {
+		"sold_value": float(reduced_preview.get("sold_value", 0.0)),
+		"bought_value": float(reduced_preview.get("bought_value", 0.0)),
+		"balance": float(reduced_preview.get("balance", float(reduced_preview.get("sold_value", 0.0)) - float(reduced_preview.get("bought_value", 0.0))))
+	}
+
+
+func _local_basket_totals_for_plan(plan: Dictionary, excluded_resource_id: String) -> Dictionary:
 	var sold_value: float = 0.0
 	var bought_value: float = 0.0
-	for key_variant: Variant in trade_plan.keys():
+	for key_variant: Variant in plan.keys():
 		var resource_id: String = String(key_variant)
 		if excluded_resource_id != "" and resource_id == excluded_resource_id:
 			continue
-		var amount: float = float(trade_plan[key_variant])
+		var amount: float = float(plan[key_variant])
 		var pricing: Dictionary = _trade_pricing(resource_id, amount)
 		var value: float = float(pricing.get("total_value", 0.0))
 		if amount < -0.001:
 			sold_value += value
 		elif amount > 0.001:
 			bought_value += value
-	return {"sold_value": sold_value, "bought_value": bought_value}
+	return {"sold_value": sold_value, "bought_value": bought_value, "balance": sold_value - bought_value}
+
 
 func _largest_buy_amount_within_value(resource_id: String, target_value: float, max_amount: int) -> int:
 	var best_amount: int = 0
@@ -450,12 +499,14 @@ func _largest_buy_amount_within_value(resource_id: String, target_value: float, 
 			break
 	return best_amount
 
+
 func _smallest_sell_amount_covering_value(resource_id: String, target_value: float, max_amount: int) -> int:
 	for amount: int in range(1, max_amount + 1):
 		var value: float = float(_trade_pricing(resource_id, -float(amount)).get("total_value", 0.0))
 		if value >= target_value - 0.001:
 			return amount
 	return 0
+
 
 func _on_clear_pressed() -> void:
 	trade_plan.clear()
@@ -469,6 +520,7 @@ func _on_clear_pressed() -> void:
 	_refresh_summary()
 	emit_signal("trade_changed")
 
+
 func _on_accept_pressed() -> void:
 	var validation: Dictionary = _validate_against_current_state()
 	if not bool(validation.get("valid", false)):
@@ -477,17 +529,34 @@ func _on_accept_pressed() -> void:
 		_refresh_rows()
 		_refresh_summary()
 		return
-	_apply_trade(validation)
+
+	var result: Dictionary = _apply_trade(validation)
+	if not bool(result.get("valid", result.get("applied", true))):
+		if error_label:
+			error_label.text = String(result.get("reason", "Trade could not be accepted."))
+		_refresh_rows()
+		_refresh_summary()
+		return
+
 	trade_plan.clear()
 	_refresh_rows()
 	_refresh_summary()
 	emit_signal("trade_accepted")
+
 
 func _validate_against_current_state() -> Dictionary:
 	if state == null:
 		return {"valid": false, "reason": "Trade data is not connected."}
 	market_good_by_id = _market_goods_by_id()
 	store_good_by_id = _store_goods_by_id()
+	if state.has_method("validate_market_trade_plan"):
+		var validation_variant: Variant = state.call("validate_market_trade_plan", trade_plan)
+		if validation_variant is Dictionary:
+			return validation_variant as Dictionary
+	return _validate_against_current_state_fallback()
+
+
+func _validate_against_current_state_fallback() -> Dictionary:
 	var sold_value: float = 0.0
 	var bought_value: float = 0.0
 	var clean_plan: Dictionary = {}
@@ -534,9 +603,19 @@ func _validate_against_current_state() -> Dictionary:
 		"bought_parts": bought_parts
 	}
 
-func _apply_trade(validation: Dictionary) -> void:
+
+func _apply_trade(validation: Dictionary) -> Dictionary:
 	if state == null:
-		return
+		return {"valid": false, "reason": "Trade data is not connected."}
+	if state.has_method("apply_market_trade_plan"):
+		var result_variant: Variant = state.call("apply_market_trade_plan", validation.get("plan", trade_plan))
+		if result_variant is Dictionary:
+			return result_variant as Dictionary
+	_apply_trade_fallback(validation)
+	return {"valid": true, "applied": true}
+
+
+func _apply_trade_fallback(validation: Dictionary) -> void:
 	var plan: Dictionary = validation.get("plan", {}) as Dictionary
 	var estate_variant: Variant = state.get("estate_stockpiles")
 	var market_variant: Variant = state.get("market_stockpiles")
@@ -570,9 +649,9 @@ func _apply_trade(validation: Dictionary) -> void:
 		var report: Array = report_variant as Array
 		report.append(report_line)
 		state.set("last_report", report)
-
 	if state.has_signal("state_changed"):
 		state.emit_signal("state_changed")
+
 
 func _market_goods_by_id() -> Dictionary:
 	var output: Dictionary = {}
@@ -580,9 +659,11 @@ func _market_goods_by_id() -> Dictionary:
 		return output
 	var goods: Array = state.call("get_market_goods") as Array
 	for good_variant: Variant in goods:
-		var good: Dictionary = good_variant as Dictionary
-		output[String(good.get("id", ""))] = good
+		if good_variant is Dictionary:
+			var good: Dictionary = good_variant as Dictionary
+			output[String(good.get("id", ""))] = good
 	return output
+
 
 func _store_goods_by_id() -> Dictionary:
 	var output: Dictionary = {}
@@ -590,9 +671,11 @@ func _store_goods_by_id() -> Dictionary:
 		return output
 	var goods: Array = state.call("get_storehouse_goods") as Array
 	for good_variant: Variant in goods:
-		var good: Dictionary = good_variant as Dictionary
-		output[String(good.get("id", ""))] = good
+		if good_variant is Dictionary:
+			var good: Dictionary = good_variant as Dictionary
+			output[String(good.get("id", ""))] = good
 	return output
+
 
 func _good_name(resource_id: String, store_good: Dictionary, market_good: Dictionary) -> String:
 	var name: String = String(store_good.get("name", ""))
@@ -605,15 +688,25 @@ func _good_name(resource_id: String, store_good: Dictionary, market_good: Dictio
 		return String(state.call("get_resource_name", resource_id))
 	return resource_id.replace("_", " ").capitalize()
 
+
 func _unit_value_for(resource_id: String) -> float:
 	return _current_unit_value_for(resource_id)
 
+
 func _current_unit_value_for(resource_id: String) -> float:
-	var market_good: Dictionary = market_good_by_id.get(resource_id, {}) as Dictionary
-	var pricing_stock: float = _market_stock_for_pricing(market_good)
-	return _trade_price_for_stock(resource_id, pricing_stock)
+	var pricing: Dictionary = _trade_pricing(resource_id, 0.0)
+	return float(pricing.get("first_unit_value", 0.0))
+
 
 func _trade_pricing(resource_id: String, amount: float) -> Dictionary:
+	if state != null and state.has_method("get_market_trade_pricing"):
+		var pricing_variant: Variant = state.call("get_market_trade_pricing", resource_id, amount)
+		if pricing_variant is Dictionary:
+			return pricing_variant as Dictionary
+	return _trade_pricing_fallback(resource_id, amount)
+
+
+func _trade_pricing_fallback(resource_id: String, amount: float) -> Dictionary:
 	var market_good: Dictionary = market_good_by_id.get(resource_id, {}) as Dictionary
 	var start_stock: float = _market_stock_for_pricing(market_good)
 	var actual_market_stock: float = maxf(0.0, float(market_good.get("market_stock", start_stock)))
@@ -661,11 +754,10 @@ func _trade_pricing(resource_id: String, amount: float) -> Dictionary:
 		"final_stock": working_stock
 	}
 
+
 func _market_stock_for_pricing(market_good: Dictionary) -> float:
-	# The Market rows price goods from projected post-village stock when available.
-	# Using the same value here keeps the Trade Basket aligned with the visible
-	# projected market price, while the final accepted trade still moves the actual stockpile.
 	return maxf(0.0, float(market_good.get("projected_market_stock", market_good.get("market_stock", 0.0))))
+
 
 func _trade_price_for_stock(resource_id: String, stock_value: float) -> float:
 	var market_good: Dictionary = market_good_by_id.get(resource_id, {}) as Dictionary
@@ -676,11 +768,13 @@ func _trade_price_for_stock(resource_id: String, stock_value: float) -> float:
 	var coverage: float = maxf(0.0, stock_value) / demand_value
 	return base_value * _local_scarcity_multiplier(coverage, demand_value)
 
+
 func _market_demand_for_pricing(market_good: Dictionary) -> float:
 	var demand_value: float = maxf(0.0, float(market_good.get("village_total_demand", 0.0)))
 	if demand_value <= 0.001:
 		demand_value = maxf(0.0, float(market_good.get("demand", 0.0)))
 	return demand_value
+
 
 func _local_scarcity_multiplier(coverage: float, demand: float) -> float:
 	if demand <= 0.001:
@@ -688,6 +782,7 @@ func _local_scarcity_multiplier(coverage: float, demand: float) -> float:
 	if coverage <= 0.001:
 		return 3.0
 	return clampf(3.0 / coverage, 0.50, 3.0)
+
 
 func _state_colour(state_label: String) -> Color:
 	match state_label:
@@ -704,6 +799,7 @@ func _state_colour(state_label: String) -> Color:
 		_:
 			return COLOR_MUTED
 
+
 func _make_panel_style(bg: Color, border: Color, radius: int) -> StyleBoxFlat:
 	var style: StyleBoxFlat = StyleBoxFlat.new()
 	style.bg_color = bg
@@ -713,13 +809,16 @@ func _make_panel_style(bg: Color, border: Color, radius: int) -> StyleBoxFlat:
 	style.set_content_margin_all(8)
 	return style
 
+
 func _add_styles() -> void:
 	add_theme_stylebox_override("panel", _make_panel_style(Color(0.0, 0.0, 0.0, 0.58), COLOR_TEAL, 12))
+
 
 func _fmt(value: float) -> String:
 	if is_equal_approx(value, roundf(value)):
 		return str(int(roundf(value)))
 	return "%.2f" % value
+
 
 func _signed_fmt(value: float) -> String:
 	if value > 0.001:

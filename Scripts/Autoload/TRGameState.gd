@@ -16,6 +16,16 @@ const BUILDING_DATA_PATH: String = "res://Data/Prototype0/buildings.json"
 const START_STATE_PATH: String = "res://Data/Prototype0/start_state.json"
 const MARKET_ECONOMY_DATA_PATH: String = "res://Data/Prototype0/market_economy.json"
 const PRESTIGE_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/PrestigeSystem.gd")
+const MARKET_TRADE_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/MarketTradeSystem.gd")
+const POPULATION_UPKEEP_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/PopulationUpkeepSystem.gd")
+const HOUSING_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/HousingSystem.gd")
+const PRODUCTION_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/ProductionSystem.gd")
+const TURN_RESOLUTION_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/TurnResolutionSystem.gd")
+const PALACE_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/PalaceSystem.gd")
+const RELIGION_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/ReligionSystem.gd")
+const WARBAND_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/WarbandSystem.gd")
+const FLOWER_WAR_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/FlowerWarSystem.gd")
+const RIVAL_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/RivalSystem.gd")
 
 
 const GOD_TLALOC: String = "tlaloc"
@@ -57,6 +67,16 @@ var last_palace_maintenance_report: Array[String] = []
 # regardless of dedication because the player is responding to an attack.
 var flower_war_palace_gate_enabled: bool = true
 var _prestige_system_instance: PrestigeSystem = null
+var _market_trade_system_instance: MarketTradeSystem = null
+var _population_upkeep_system_instance: PopulationUpkeepSystem = null
+var _housing_system_instance: HousingSystem = null
+var _production_system_instance: ProductionSystem = null
+var _turn_resolution_system_instance: TurnResolutionSystem = null
+var _palace_system_instance: PalaceSystem = null
+var _religion_system_instance: ReligionSystem = null
+var _warband_system_instance: WarbandSystem = null
+var _flower_war_system_instance: FlowerWarSystem = null
+var _rival_system_instance: RivalSystem = null
 
 var population_upkeep_rates: Dictionary = {
 	"macehualtin": {"maize": 1.0, "cotton": 0.05, "cloth": 0.2, "tools": 0.1},
@@ -73,6 +93,56 @@ func _get_prestige_system() -> PrestigeSystem:
 	if _prestige_system_instance == null:
 		_prestige_system_instance = PRESTIGE_SYSTEM_SCRIPT.new() as PrestigeSystem
 	return _prestige_system_instance
+
+func _get_market_trade_system() -> MarketTradeSystem:
+	if _market_trade_system_instance == null:
+		_market_trade_system_instance = MARKET_TRADE_SYSTEM_SCRIPT.new() as MarketTradeSystem
+	return _market_trade_system_instance
+
+func _get_population_upkeep_system() -> PopulationUpkeepSystem:
+	if _population_upkeep_system_instance == null:
+		_population_upkeep_system_instance = POPULATION_UPKEEP_SYSTEM_SCRIPT.new() as PopulationUpkeepSystem
+	return _population_upkeep_system_instance
+
+func _get_housing_system() -> HousingSystem:
+	if _housing_system_instance == null:
+		_housing_system_instance = HOUSING_SYSTEM_SCRIPT.new() as HousingSystem
+	return _housing_system_instance
+
+func _get_production_system() -> ProductionSystem:
+	if _production_system_instance == null:
+		_production_system_instance = PRODUCTION_SYSTEM_SCRIPT.new() as ProductionSystem
+	return _production_system_instance
+
+func _get_turn_resolution_system() -> TurnResolutionSystem:
+	if _turn_resolution_system_instance == null:
+		_turn_resolution_system_instance = TURN_RESOLUTION_SYSTEM_SCRIPT.new() as TurnResolutionSystem
+	return _turn_resolution_system_instance
+
+func _get_palace_system() -> PalaceSystem:
+	if _palace_system_instance == null:
+		_palace_system_instance = PALACE_SYSTEM_SCRIPT.new() as PalaceSystem
+	return _palace_system_instance
+
+func _get_religion_system() -> ReligionSystem:
+	if _religion_system_instance == null:
+		_religion_system_instance = RELIGION_SYSTEM_SCRIPT.new() as ReligionSystem
+	return _religion_system_instance
+
+func _get_warband_system() -> WarbandSystem:
+	if _warband_system_instance == null:
+		_warband_system_instance = WARBAND_SYSTEM_SCRIPT.new() as WarbandSystem
+	return _warband_system_instance
+
+func _get_flower_war_system() -> FlowerWarSystem:
+	if _flower_war_system_instance == null:
+		_flower_war_system_instance = FLOWER_WAR_SYSTEM_SCRIPT.new() as FlowerWarSystem
+	return _flower_war_system_instance
+
+func _get_rival_system() -> RivalSystem:
+	if _rival_system_instance == null:
+		_rival_system_instance = RIVAL_SYSTEM_SCRIPT.new() as RivalSystem
+	return _rival_system_instance
 
 func _ready() -> void:
 	if not initialized:
@@ -271,6 +341,30 @@ func get_market_goods() -> Array[Dictionary]:
 		output.append(item.duplicate(true))
 	return output
 
+func get_market_trade_preview(trade_plan: Dictionary) -> Dictionary:
+	# v0.43.2 public API. UI can use this to preview barter values without
+	# owning market pricing rules. Existing TradeBasketView still works while
+	# the UI migration is staged.
+	return _get_market_trade_system().get_trade_preview(self, trade_plan)
+
+func validate_market_trade_plan(trade_plan: Dictionary) -> Dictionary:
+	return _get_market_trade_system().validate_trade_plan(self, trade_plan)
+
+func apply_market_trade_plan(trade_plan: Dictionary) -> Dictionary:
+	return _get_market_trade_system().apply_trade_plan(self, trade_plan)
+
+func get_market_trade_prestige_lines(trade_plan: Dictionary) -> Array[Dictionary]:
+	var preview: Dictionary = get_market_trade_preview(trade_plan)
+	var lines: Array[Dictionary] = []
+	for line_variant: Variant in (preview.get("trade_lines", []) as Array):
+		if line_variant is Dictionary:
+			lines.append((line_variant as Dictionary).duplicate(true))
+	return lines
+
+func get_market_trade_pricing(resource_id: String, amount: float) -> Dictionary:
+	var market_goods: Dictionary = _get_market_trade_system().market_goods_by_id(self)
+	return _get_market_trade_system().trade_pricing(market_goods, resource_id, amount)
+
 func estimate_market_resolution() -> Dictionary:
 	var base_goods: Array[Dictionary] = _base_market_goods()
 	var resolved_goods: Array[Dictionary] = _apply_market_economy_to_goods(base_goods)
@@ -376,411 +470,77 @@ func get_buildings_for_screen(screen_id: String, focus_id: String = "overview") 
 
 
 func get_housing_summary() -> Dictionary:
-	var tiers: Array[Dictionary] = []
-	var total_population: int = 0
-	var total_active_population: int = 0
-	var total_inactive_population: int = 0
-	var total_capacity: int = 0
-	var total_active_capacity: int = 0
-	var total_over: int = 0
-	var total_free: int = 0
-	var built_capacity_by_group: Dictionary = housing_capacity_by_group({}, false)
-	var active_capacity_by_group: Dictionary = housing_capacity_by_group({}, true)
-	var maintenance: Dictionary = estimate_housing_maintenance()
-	for category_id: String in _housing_category_order():
-		var tier: Dictionary = _housing_category_summary(category_id, built_capacity_by_group, active_capacity_by_group)
-		tiers.append(tier)
-		total_population += int(tier.get("population", 0))
-		total_active_population += int(tier.get("active_population", 0))
-		total_inactive_population += int(tier.get("inactive_population", 0))
-		total_capacity += int(tier.get("capacity", 0))
-		total_active_capacity += int(tier.get("active_capacity", 0))
-		total_over += int(tier.get("over_capacity", 0))
-		total_free += int(tier.get("free_capacity", 0))
-	return {
-		"tiers": tiers,
-		"capacity_by_group": active_capacity_by_group,
-		"built_capacity_by_group": built_capacity_by_group,
-		"maintenance": maintenance,
-		"total_population": total_population,
-		"total_active_population": total_active_population,
-		"total_inactive_population": total_inactive_population,
-		"total_capacity": total_capacity,
-		"total_active_capacity": total_active_capacity,
-		"total_over_capacity": total_over,
-		"total_free_capacity": total_free,
-		"status_text": _housing_status_text(total_active_population, total_active_capacity)
-	}
+	return _get_housing_system().get_housing_summary(self)
 
 func get_housing_rows(focus_id: String = "overview") -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	var built_capacity_by_group: Dictionary = housing_capacity_by_group({}, false)
-	var active_capacity_by_group: Dictionary = housing_capacity_by_group({}, true)
-	if focus_id == "" or focus_id == "overview":
-		for category_id: String in _housing_category_order():
-			var tier: Dictionary = _housing_category_summary(category_id, built_capacity_by_group, active_capacity_by_group)
-			tier["is_summary"] = true
-			output.append(tier)
-		return output
-	if focus_id == "mothball":
-		return get_housing_mothball_rows()
-
-	for building_id: String in building_order:
-		if not buildings.has(building_id):
-			continue
-		var definition: Dictionary = buildings[building_id] as Dictionary
-		if String(definition.get("screen", "")) != "housing":
-			continue
-		if String(definition.get("category", "")) != focus_id:
-			continue
-		output.append(_housing_building_view_data(building_id))
-	return output
+	return _get_housing_system().get_housing_rows(self, focus_id)
 
 func housing_capacity_by_group(overrides: Dictionary = {}, active_only: bool = true) -> Dictionary:
-	_ensure_active_housing_counts()
-	var result: Dictionary = {}
-	for group_variant: Variant in base_housing_capacity.keys():
-		var group_id: String = String(group_variant)
-		result[group_id] = int(base_housing_capacity[group_id])
-	for group_variant: Variant in population.keys():
-		var group_id: String = String(group_variant)
-		if not result.has(group_id):
-			result[group_id] = 0
-	for building_id: String in building_order:
-		if not _is_housing_building_id(building_id):
-			continue
-		var built_count: int = int(estate_buildings.get(building_id, 0))
-		var count: int = built_count
-		if active_only:
-			count = int(active_housing_counts.get(building_id, built_count))
-		if overrides.has(building_id):
-			count = int(overrides[building_id])
-		count = clampi(count, 0, built_count)
-		if count <= 0:
-			continue
-		var definition: Dictionary = buildings[building_id] as Dictionary
-		var capacity: Dictionary = definition.get("housing_capacity", {}) as Dictionary
-		for group_variant: Variant in capacity.keys():
-			var group_id: String = String(group_variant)
-			result[group_id] = int(result.get(group_id, 0)) + int(capacity[group_variant]) * count
-	return result
+	return _get_housing_system().housing_capacity_by_group(self, overrides, active_only)
 
 func active_population_by_group() -> Dictionary:
-	var result: Dictionary = {}
-	var active_capacity: Dictionary = housing_capacity_by_group({}, true)
-	for group_variant: Variant in population.keys():
-		var group_id: String = String(group_variant)
-		var total: int = int(population.get(group_id, 0))
-		var active_cap: int = int(active_capacity.get(group_id, total))
-		result[group_id] = mini(total, max(0, active_cap))
-	return result
+	return _get_housing_system().active_population_by_group(self)
 
 func inactive_population_by_group() -> Dictionary:
-	var result: Dictionary = {}
-	var active: Dictionary = active_population_by_group()
-	for group_variant: Variant in population.keys():
-		var group_id: String = String(group_variant)
-		result[group_id] = max(0, int(population.get(group_id, 0)) - int(active.get(group_id, 0)))
-	return result
+	return _get_housing_system().inactive_population_by_group(self)
 
 func _active_population_for_group(group_id: String) -> int:
-	return int(active_population_by_group().get(group_id, 0))
+	return _get_housing_system().active_population_for_group(self, group_id)
 
 func estimate_housing_maintenance() -> Dictionary:
-	# Mothballing does not avoid building maintenance. Maintenance is paid for all
-	# built housing, active or inactive.
-	var result: Dictionary = {}
-	for building_id: String in building_order:
-		if not _is_housing_building_id(building_id):
-			continue
-		var count: int = int(estate_buildings.get(building_id, 0))
-		if count <= 0:
-			continue
-		var definition: Dictionary = buildings[building_id] as Dictionary
-		var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
-		for resource_variant: Variant in maintenance.keys():
-			var resource_id: String = String(resource_variant)
-			result[resource_id] = float(result.get(resource_id, 0.0)) + float(maintenance[resource_variant]) * float(count)
-	return result
+	return _get_housing_system().estimate_housing_maintenance(self)
 
 func _housing_building_view_data(building_id: String) -> Dictionary:
-	_ensure_active_housing_counts()
-	var definition: Dictionary = buildings[building_id] as Dictionary
-	var count: int = int(estate_buildings.get(building_id, 0))
-	var active_count: int = int(active_housing_counts.get(building_id, count))
-	var mothballed_count: int = max(0, count - active_count)
-	var capacity: Dictionary = definition.get("housing_capacity", {}) as Dictionary
-	var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
-	var category_id: String = String(definition.get("category", ""))
-	var category_summary: Dictionary = _housing_category_summary(category_id, housing_capacity_by_group({}, false), housing_capacity_by_group({}, true))
-	return {
-		"id": building_id,
-		"name": String(definition.get("name", building_id.capitalize())),
-		"screen": "housing",
-		"category": category_id,
-		"tier": String(definition.get("tier", "")),
-		"description": String(definition.get("description", "")),
-		"count": count,
-		"active_count": active_count,
-		"mothballed_count": mothballed_count,
-		"operating": active_count,
-		"blocked": mothballed_count,
-		"build_cost": definition.get("build_cost", {}) as Dictionary,
-		"housing_capacity": capacity,
-		"housing_maintenance": maintenance,
-		"inputs": maintenance,
-		"outputs": capacity,
-		"capacity_total": _multiply_dictionary(capacity, count),
-		"active_capacity_total": _multiply_dictionary(capacity, active_count),
-		"maintenance_total": _multiply_dictionary(maintenance, count),
-		"capacity_after_build": _multiply_dictionary(capacity, count + 1),
-		"maintenance_after_build": _multiply_dictionary(maintenance, count + 1),
-		"capacity_after_destroy": _multiply_dictionary(capacity, max(0, count - 1)),
-		"maintenance_after_destroy": _multiply_dictionary(maintenance, max(0, count - 1)),
-		"category_summary": category_summary,
-		"efficiency_text": _housing_efficiency_text(capacity, maintenance),
-		"can_build": can_build(building_id),
-		"build_status": build_status_text(building_id),
-		"can_destroy": can_destroy(building_id),
-		"destroy_status": destroy_status_text(building_id),
-		"status_text": _housing_building_status_text(building_id)
-	}
+	return _get_housing_system().housing_building_view_data(self, building_id)
 
 func _housing_category_summary(category_id: String, built_capacity_by_group: Dictionary, active_capacity_by_group: Dictionary) -> Dictionary:
-	var group_ids: Array[String] = _housing_group_ids_for_category(category_id)
-	var population_total: int = 0
-	var active_population_total: int = 0
-	var inactive_population_total: int = 0
-	var built_capacity_total: int = 0
-	var active_capacity_total: int = 0
-	var member_rows: Array[Dictionary] = []
-	for group_id: String in group_ids:
-		var pop_count: int = int(population.get(group_id, 0))
-		var active_pop: int = _active_population_for_group(group_id)
-		var inactive_pop: int = max(0, pop_count - active_pop)
-		var built_capacity_count: int = int(built_capacity_by_group.get(group_id, 0))
-		var active_capacity_count: int = int(active_capacity_by_group.get(group_id, 0))
-		population_total += pop_count
-		active_population_total += active_pop
-		inactive_population_total += inactive_pop
-		built_capacity_total += built_capacity_count
-		active_capacity_total += active_capacity_count
-		member_rows.append({
-			"id": group_id,
-			"name": _labour_group_name(group_id),
-			"population": pop_count,
-			"active_population": active_pop,
-			"inactive_population": inactive_pop,
-			"capacity": built_capacity_count,
-			"active_capacity": active_capacity_count,
-			"free_capacity": max(0, active_capacity_count - active_pop),
-			"over_capacity": max(0, active_pop - active_capacity_count),
-			"status": _housing_status_text(active_pop, active_capacity_count)
-		})
-	var building_options: Array[Dictionary] = []
-	for building_id: String in building_order:
-		if not _is_housing_building_id(building_id):
-			continue
-		var definition: Dictionary = buildings[building_id] as Dictionary
-		if String(definition.get("category", "")) != category_id:
-			continue
-		building_options.append({
-			"id": building_id,
-			"name": String(definition.get("name", building_id.capitalize())),
-			"tier": String(definition.get("tier", "")),
-			"count": int(estate_buildings.get(building_id, 0)),
-			"active_count": int(active_housing_counts.get(building_id, int(estate_buildings.get(building_id, 0)))),
-			"build_cost": definition.get("build_cost", {}) as Dictionary,
-			"housing_capacity": definition.get("housing_capacity", {}) as Dictionary,
-			"housing_maintenance": definition.get("housing_maintenance", {}) as Dictionary,
-			"efficiency_text": _housing_efficiency_text(definition.get("housing_capacity", {}) as Dictionary, definition.get("housing_maintenance", {}) as Dictionary)
-		})
-	return {
-		"id": category_id,
-		"name": _housing_category_name(category_id),
-		"population": population_total,
-		"active_population": active_population_total,
-		"inactive_population": inactive_population_total,
-		"capacity": built_capacity_total,
-		"active_capacity": active_capacity_total,
-		"free_capacity": max(0, active_capacity_total - active_population_total),
-		"over_capacity": max(0, active_population_total - active_capacity_total),
-		"status": _housing_status_text(active_population_total, active_capacity_total),
-		"members": member_rows,
-		"building_options": building_options,
-		"maintenance": _housing_maintenance_for_category(category_id)
-	}
+	return _get_housing_system().housing_category_summary(self, category_id, built_capacity_by_group, active_capacity_by_group)
 
 func _housing_category_order() -> Array[String]:
-	return ["field_labour", "artisans", "tlacotin", "warriors", "priests", "nobles", "captives"]
+	return _get_housing_system().housing_category_order()
 
 func _housing_category_name(category_id: String) -> String:
-	match category_id:
-		"field_labour":
-			return "Field Labour"
-		"artisans":
-			return "Artisans"
-		"tlacotin":
-			return "Tlacotin"
-		"warriors":
-			return "Warriors"
-		"priests":
-			return "Priests"
-		"nobles":
-			return "Nobles"
-		"captives":
-			return "Captives"
-	return category_id.capitalize()
+	return _get_housing_system().housing_category_name(category_id)
 
 func _housing_group_ids_for_category(category_id: String) -> Array[String]:
-	match category_id:
-		"field_labour":
-			return ["macehualtin"]
-		"artisans":
-			return ["tolteca"]
-		"tlacotin":
-			return ["tlacotin"]
-		"warriors":
-			return ["yaotequihuaqueh"]
-		"priests":
-			return ["tlamacazqueh"]
-		"nobles":
-			return ["pipiltin"]
-		"captives":
-			return ["malli"]
-	return []
+	return _get_housing_system().housing_group_ids_for_category(category_id)
 
 func _housing_maintenance_for_category(category_id: String) -> Dictionary:
-	var result: Dictionary = {}
-	for building_id: String in building_order:
-		if not _is_housing_building_id(building_id):
-			continue
-		var definition: Dictionary = buildings[building_id] as Dictionary
-		if String(definition.get("category", "")) != category_id:
-			continue
-		var count: int = int(estate_buildings.get(building_id, 0))
-		if count <= 0:
-			continue
-		var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
-		for resource_variant: Variant in maintenance.keys():
-			var resource_id: String = String(resource_variant)
-			result[resource_id] = float(result.get(resource_id, 0.0)) + float(maintenance[resource_variant]) * float(count)
-	return result
+	return _get_housing_system().housing_maintenance_for_category(self, category_id)
 
 func _housing_status_text(population_count: int, capacity_count: int) -> String:
-	if capacity_count <= 0:
-		if population_count <= 0:
-			return "No population"
-		return "No active capacity"
-	if population_count > capacity_count:
-		return "Inactive overflow"
-	if population_count == capacity_count:
-		return "Full"
-	var use_ratio: float = float(population_count) / float(capacity_count)
-	if use_ratio >= 0.9:
-		return "Strained"
-	if use_ratio >= 0.7:
-		return "Tight"
-	return "Comfortable"
+	return _get_housing_system().housing_status_text(population_count, capacity_count)
 
 func _housing_building_status_text(building_id: String) -> String:
-	if not buildings.has(building_id):
-		return "Unknown building."
-	var definition: Dictionary = buildings[building_id] as Dictionary
-	var count: int = int(estate_buildings.get(building_id, 0))
-	var active_count: int = int(active_housing_counts.get(building_id, count))
-	var capacity: Dictionary = definition.get("housing_capacity", {}) as Dictionary
-	var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
-	var text: String = "Built " + str(count) + "; active " + str(active_count) + "; mothballed " + str(max(0, count - active_count)) + ". Adds " + _dictionary_to_named_string(capacity, "capacity") + " each."
-	if not maintenance.is_empty():
-		text += " Building upkeep each: " + _dictionary_to_named_string(maintenance, "") + "."
-	return text
+	return _get_housing_system().housing_building_status_text(self, building_id)
 
 func _housing_efficiency_text(capacity: Dictionary, maintenance: Dictionary) -> String:
-	if maintenance.is_empty():
-		return "No building upkeep"
-	return "Larger housing tiers have lower upkeep per capacity."
+	return _get_housing_system().housing_efficiency_text(capacity, maintenance)
 
 func _would_destroy_overcrowd(building_id: String) -> Dictionary:
-	# Destroying removes the building entirely. It is blocked if that would make
-	# currently active people inactive. Mothballing is the safe way to deactivate.
-	var result: Dictionary = {"blocked": false, "lines": []}
-	if not _is_housing_building_id(building_id):
-		return result
-	var current_count: int = int(estate_buildings.get(building_id, 0))
-	if current_count <= 0:
-		return result
-	var active_count: int = int(active_housing_counts.get(building_id, current_count))
-	var active_after: int = mini(active_count, max(0, current_count - 1))
-	var overrides: Dictionary = {building_id: active_after}
-	var after_capacity: Dictionary = housing_capacity_by_group(overrides, true)
-	var lines: Array[String] = []
-	for group_variant: Variant in population.keys():
-		var group_id: String = String(group_variant)
-		var active_pop: int = _active_population_for_group(group_id)
-		var capacity_count: int = int(after_capacity.get(group_id, 0))
-		if active_pop > capacity_count:
-			lines.append(_labour_group_name(group_id) + " by " + str(active_pop - capacity_count))
-	if not lines.is_empty():
-		result["blocked"] = true
-		result["lines"] = lines
-	return result
+	return _get_housing_system().would_destroy_overcrowd(self, building_id)
 
 func _is_housing_building_id(building_id: String) -> bool:
-	if not buildings.has(building_id):
-		return false
-	var definition: Dictionary = buildings[building_id] as Dictionary
-	return String(definition.get("screen", "")) == "housing" and (definition.has("housing_capacity") or definition.has("housing_maintenance"))
+	return _get_housing_system().is_housing_building_id(self, building_id)
 
 func _ensure_base_housing_capacity() -> void:
-	for group_variant: Variant in population.keys():
-		var group_id: String = String(group_variant)
-		if not base_housing_capacity.has(group_id):
-			# Missing base capacity should not silently house the population.
-			# Starting housing now comes from start_state estate_buildings +
-			# active_housing_counts, so future/new groups default to 0 unless
-			# the start data explicitly grants inherited base capacity.
-			base_housing_capacity[group_id] = 0
+	_get_housing_system().ensure_base_housing_capacity(self)
 
 func _ensure_active_housing_counts() -> void:
-	for building_id: String in building_order:
-		if not _is_housing_building_id(building_id):
-			if active_housing_counts.has(building_id):
-				active_housing_counts.erase(building_id)
-			continue
-		var built_count: int = int(estate_buildings.get(building_id, 0))
-		if built_count <= 0:
-			active_housing_counts[building_id] = 0
-			continue
-		if not active_housing_counts.has(building_id):
-			active_housing_counts[building_id] = built_count
-		else:
-			active_housing_counts[building_id] = clampi(int(active_housing_counts[building_id]), 0, built_count)
+	_get_housing_system().ensure_active_housing_counts(self)
 
 func set_active_housing_count(building_id: String, active_count: int) -> bool:
-	if not _is_housing_building_id(building_id):
-		return false
-	_ensure_active_housing_counts()
-	var built_count: int = int(estate_buildings.get(building_id, 0))
-	active_housing_counts[building_id] = clampi(active_count, 0, built_count)
-	_ensure_labour_assignments()
-	emit_signal("state_changed")
-	return true
+	var result: bool = _get_housing_system().set_active_housing_count(self, building_id, active_count)
+	if result:
+		_ensure_labour_assignments()
+		emit_signal("state_changed")
+	return result
 
 func get_housing_mothball_rows() -> Array[Dictionary]:
-	_ensure_active_housing_counts()
-	var rows: Array[Dictionary] = []
-	for building_id: String in building_order:
-		if not _is_housing_building_id(building_id):
-			continue
-		var count: int = int(estate_buildings.get(building_id, 0))
-		if count <= 0:
-			continue
-		rows.append(_housing_building_view_data(building_id))
-	return rows
+	return _get_housing_system().get_housing_mothball_rows(self)
 
 func get_housing_mothball_data() -> Dictionary:
-	return {"summary": get_housing_summary(), "rows": get_housing_mothball_rows()}
+	return _get_housing_system().get_housing_mothball_data(self)
 
 func get_productive_labour_rows() -> Array[Dictionary]:
 	_ensure_labour_assignments()
@@ -1385,38 +1145,10 @@ func destroy_building(building_id: String) -> bool:
 	return true
 
 func advance_veintena() -> void:
-	if not initialized:
-		new_game()
-	last_report.clear()
-	last_report.append("Veintena " + str(current_veintena) + " resolves.")
-	var previous_demand_index: int = _current_palace_ruler_demand_index()
-	var previous_demand_title: String = String(_current_palace_ruler_demand_set().get("title", "Court Need"))
-	var previous_demand_completion: Dictionary = get_palace_ruler_demand_completion_summary()
-	_pay_population_upkeep()
-	_pay_housing_maintenance()
-	_pay_palace_maintenance()
-	_operate_buildings()
-	_recover_injured_warriors()
-	current_veintena += 1
-	if current_veintena > 18:
-		current_veintena = 1
-		last_report.append("Nemontemi reckoning placeholder: the next Ritual Year begins.")
-	_report_palace_ruler_demand_cycle_transition(previous_demand_index, previous_demand_title, previous_demand_completion)
-	last_report.append("Now entering Veintena " + str(current_veintena) + ".")
-	emit_signal("turn_advanced", last_report)
-	emit_signal("state_changed")
+	_get_turn_resolution_system().advance_veintena(self)
 
 func estimate_population_upkeep() -> Dictionary:
-	var result: Dictionary = {}
-	for group_variant: Variant in population.keys():
-		var group_id: String = String(group_variant)
-		var count: int = _active_population_for_group(group_id)
-		var rates: Dictionary = population_upkeep_rates.get(group_id, {}) as Dictionary
-		for resource_variant: Variant in rates.keys():
-			var resource_id: String = String(resource_variant)
-			var amount: float = float(rates[resource_id]) * float(count) / 5.0
-			result[resource_id] = float(result.get(resource_id, 0.0)) + amount
-	return result
+	return _get_population_upkeep_system().calculate_population_upkeep(active_population_by_group(), population_upkeep_rates)
 
 func estimate_building_inputs() -> Dictionary:
 	# Single source of truth for Storehouse / Production / Labour previews.
@@ -1435,128 +1167,9 @@ func estimate_building_outputs() -> Dictionary:
 	return (resolution.get("outputs", {}) as Dictionary).duplicate(true)
 
 func estimate_production_resolution() -> Dictionary:
-	# Authoritative production preview. This mirrors Advance Veintena order:
-	# 1. copy current stockpiles
-	# 2. pay population upkeep and housing building upkeep from the copied stockpile
-	# 3. process staffed production buildings in building_order
-	# 4. consume inputs from the copied stockpile
-	# 5. add outputs to the copied stockpile
-	# 6. record exactly what would operate, block, or sit unstaffed
-	_ensure_labour_assignments()
-	var temp_stockpile: Dictionary = _copy_stockpile_dictionary(estate_stockpiles)
-	var upkeep_needed: Dictionary = estimate_population_upkeep()
-	var maintenance_needed: Dictionary = estimate_housing_maintenance()
-	var upkeep_paid: Dictionary = {}
-	var upkeep_shortfalls: Dictionary = {}
-	var maintenance_paid: Dictionary = {}
-	var maintenance_shortfalls: Dictionary = {}
-
-	for resource_variant: Variant in upkeep_needed.keys():
-		var resource_id: String = String(resource_variant)
-		var needed: float = float(upkeep_needed[resource_variant])
-		var available: float = float(temp_stockpile.get(resource_id, 0.0))
-		var paid: float = minf(available, needed)
-		temp_stockpile[resource_id] = available - paid
-		upkeep_paid[resource_id] = paid
-		if paid < needed:
-			upkeep_shortfalls[resource_id] = needed - paid
-
-	for resource_variant: Variant in maintenance_needed.keys():
-		var resource_id: String = String(resource_variant)
-		var needed: float = float(maintenance_needed[resource_variant])
-		var available: float = float(temp_stockpile.get(resource_id, 0.0))
-		var paid: float = minf(available, needed)
-		temp_stockpile[resource_id] = available - paid
-		maintenance_paid[resource_id] = paid
-		if paid < needed:
-			maintenance_shortfalls[resource_id] = needed - paid
-
-	var total_inputs: Dictionary = {}
-	var total_outputs: Dictionary = {}
-	var building_statuses: Dictionary = {}
-	var report_lines: Array[String] = []
-
-	for building_id: String in building_order:
-		if not buildings.has(building_id):
-			continue
-		var definition: Dictionary = buildings[building_id] as Dictionary
-		var count: int = int(estate_buildings.get(building_id, 0))
-		if count <= 0:
-			building_statuses[building_id] = {
-				"operating": 0,
-				"blocked": 0,
-				"staffed_count": 0,
-				"unstaffed": 0,
-				"input_blocked": 0,
-				"status_text": "Not built.",
-				"input_shortages": []
-			}
-			continue
-
-		var staffed_count: int = count
-		if _is_productive_building_id(building_id):
-			staffed_count = _staffed_count_for_building(building_id)
-		staffed_count = clampi(staffed_count, 0, count)
-
-		var operated: int = 0
-		var input_blocked: int = 0
-		var input_shortages: Array[String] = []
-
-		for index: int in range(staffed_count):
-			var reason: String = _can_operate_instance_with_stockpile(definition, temp_stockpile)
-			if reason == "":
-				var inputs: Dictionary = definition.get("inputs", {}) as Dictionary
-				var outputs: Dictionary = definition.get("outputs", {}) as Dictionary
-				_consume_inputs_from_stockpile(inputs, temp_stockpile)
-				_add_outputs_to_stockpile(outputs, temp_stockpile)
-				_add_dictionary_amounts(total_inputs, inputs)
-				_add_dictionary_amounts(total_outputs, outputs)
-				operated += 1
-			else:
-				input_blocked += 1
-				if not input_shortages.has(reason):
-					input_shortages.append(reason)
-
-		var unstaffed: int = max(0, count - staffed_count)
-		var blocked: int = input_blocked + unstaffed
-		var status_text: String = "Staffed " + str(staffed_count) + " / " + str(count) + "; operating " + str(operated) + " / " + str(staffed_count) + " staffed"
-		if unstaffed > 0:
-			status_text += "; unstaffed " + str(unstaffed)
-		if input_blocked > 0:
-			status_text += "; input blocked " + str(input_blocked)
-		if not input_shortages.is_empty():
-			status_text += "; " + "; ".join(input_shortages)
-
-		building_statuses[building_id] = {
-			"operating": operated,
-			"blocked": blocked,
-			"staffed_count": staffed_count,
-			"unstaffed": unstaffed,
-			"input_blocked": input_blocked,
-			"status_text": status_text,
-			"input_shortages": input_shortages.duplicate()
-		}
-
-		if operated > 0:
-			report_lines.append(String(definition.get("name", building_id)) + " would operate x" + str(operated) + ".")
-		if input_blocked > 0:
-			report_lines.append(String(definition.get("name", building_id)) + " would be input-blocked x" + str(input_blocked) + ".")
-		if _is_productive_building_id(building_id) and unstaffed > 0:
-			report_lines.append(String(definition.get("name", building_id)) + " would be unstaffed x" + str(unstaffed) + ".")
-
-	return {
-		"inputs": total_inputs,
-		"outputs": total_outputs,
-		"building_statuses": building_statuses,
-		"stockpile_after_upkeep_and_production": temp_stockpile,
-		"upkeep_needed": upkeep_needed,
-		"upkeep_paid": upkeep_paid,
-		"upkeep_shortfalls": upkeep_shortfalls,
-		"housing_maintenance_needed": maintenance_needed,
-		"housing_maintenance_paid": maintenance_paid,
-		"housing_maintenance_shortfalls": maintenance_shortfalls,
-		"reports": report_lines
-	}
+	# Authoritative production preview. Rule logic now lives in ProductionSystem;
+	# TRGameState remains the live-state owner and public API for the UI.
+	return _get_production_system().estimate_production_resolution(self)
 
 func _copy_stockpile_dictionary(source: Dictionary) -> Dictionary:
 	var output: Dictionary = {}
@@ -1565,89 +1178,46 @@ func _copy_stockpile_dictionary(source: Dictionary) -> Dictionary:
 		output[key] = float(source[key_variant])
 	return output
 
-func _can_operate_instance_with_stockpile(definition: Dictionary, temp_stockpile: Dictionary) -> String:
-	var inputs: Dictionary = definition.get("inputs", {}) as Dictionary
-	for resource_variant: Variant in inputs.keys():
-		var resource_id: String = String(resource_variant)
-		var needed: float = float(inputs[resource_variant])
-		if float(temp_stockpile.get(resource_id, 0.0)) < needed:
-			return "not enough " + get_resource_name(resource_id) + " input"
-	return ""
-
-func _consume_inputs_from_stockpile(inputs: Dictionary, temp_stockpile: Dictionary) -> void:
-	for resource_variant: Variant in inputs.keys():
-		var resource_id: String = String(resource_variant)
-		temp_stockpile[resource_id] = float(temp_stockpile.get(resource_id, 0.0)) - float(inputs[resource_variant])
-
-func _add_outputs_to_stockpile(outputs: Dictionary, temp_stockpile: Dictionary) -> void:
-	for resource_variant: Variant in outputs.keys():
-		var resource_id: String = String(resource_variant)
-		temp_stockpile[resource_id] = float(temp_stockpile.get(resource_id, 0.0)) + float(outputs[resource_variant])
-
 func _add_dictionary_amounts(target: Dictionary, amounts: Dictionary) -> void:
 	for resource_variant: Variant in amounts.keys():
 		var resource_id: String = String(resource_variant)
 		target[resource_id] = float(target.get(resource_id, 0.0)) + float(amounts[resource_variant])
 
 func _pay_population_upkeep() -> void:
-	var upkeep: Dictionary = estimate_population_upkeep()
-	for resource_variant: Variant in upkeep.keys():
-		var resource_id: String = String(resource_variant)
-		var needed: float = float(upkeep[resource_id])
-		var available: float = _stock(resource_id)
-		var paid: float = minf(available, needed)
-		_add_stock(resource_id, -paid)
-		if paid >= needed:
+	var resolution: Dictionary = _get_population_upkeep_system().resolve_population_upkeep(estate_stockpiles, active_population_by_group(), population_upkeep_rates)
+	var payments: Array = resolution.get("payments", []) as Array
+	for payment_variant: Variant in payments:
+		if not (payment_variant is Dictionary):
+			continue
+		var payment: Dictionary = payment_variant as Dictionary
+		var resource_id: String = String(payment.get("resource_id", ""))
+		var needed: float = float(payment.get("needed", 0.0))
+		var paid: float = float(payment.get("paid", 0.0))
+		var shortfall: float = float(payment.get("shortfall", 0.0))
+		if shortfall <= 0.001:
 			last_report.append("Paid population upkeep: " + _format_amount(needed) + " " + get_resource_name(resource_id) + ".")
 		else:
 			last_report.append("Shortage: paid only " + _format_amount(paid) + " / " + _format_amount(needed) + " " + get_resource_name(resource_id) + " for population upkeep.")
 
 func _pay_housing_maintenance() -> void:
-	var maintenance: Dictionary = estimate_housing_maintenance()
-	for resource_variant: Variant in maintenance.keys():
-		var resource_id: String = String(resource_variant)
-		var needed: float = float(maintenance[resource_id])
-		var available: float = _stock(resource_id)
-		var paid: float = minf(available, needed)
-		_add_stock(resource_id, -paid)
-		if paid >= needed:
+	var payments: Array = _get_housing_system().pay_housing_maintenance(self)
+	for payment_variant: Variant in payments:
+		if not (payment_variant is Dictionary):
+			continue
+		var payment: Dictionary = payment_variant as Dictionary
+		var resource_id: String = String(payment.get("resource_id", ""))
+		var needed: float = float(payment.get("needed", 0.0))
+		var paid: float = float(payment.get("paid", 0.0))
+		var shortfall: float = float(payment.get("shortfall", 0.0))
+		if shortfall <= 0.001:
 			last_report.append("Paid housing building upkeep: " + _format_amount(needed) + " " + get_resource_name(resource_id) + ".")
 		else:
 			last_report.append("Housing building upkeep shortage: paid only " + _format_amount(paid) + " / " + _format_amount(needed) + " " + get_resource_name(resource_id) + ".")
 
 func _operate_buildings() -> void:
-	_ensure_labour_assignments()
-	for building_id: String in building_order:
-		var count: int = int(estate_buildings.get(building_id, 0))
-		if count <= 0:
-			continue
-		var definition: Dictionary = buildings[building_id] as Dictionary
-		var target_count: int = count
-		if _is_productive_building_id(building_id):
-			target_count = _staffed_count_for_building(building_id)
-		var operated: int = 0
-		var blocked: int = 0
-		for index: int in range(target_count):
-			var reason: String = _can_operate_instance(definition)
-			if reason == "":
-				_consume_inputs(definition.get("inputs", {}) as Dictionary)
-				_add_outputs(definition.get("outputs", {}) as Dictionary)
-				operated += 1
-			else:
-				blocked += 1
-				last_report.append(String(definition.get("name", building_id)) + " blocked: " + reason)
-		if operated > 0:
-			last_report.append(String(definition.get("name", building_id)) + " operated x" + str(operated) + ".")
-		if _is_productive_building_id(building_id) and target_count < count:
-			last_report.append(String(definition.get("name", building_id)) + " unstaffed x" + str(count - target_count) + ".")
-
-func _can_operate_instance(definition: Dictionary) -> String:
-	var inputs: Dictionary = definition.get("inputs", {}) as Dictionary
-	for resource_variant: Variant in inputs.keys():
-		var resource_id: String = String(resource_variant)
-		if _stock(resource_id) < float(inputs[resource_id]):
-			return "not enough " + get_resource_name(resource_id) + " input"
-	return ""
+	var reports: Array = _get_production_system().operate_buildings(self)
+	for report_variant: Variant in reports:
+		last_report.append(String(report_variant))
 
 func _reserve_staff(staff: Dictionary, available_staff: Dictionary) -> void:
 	# Legacy helper retained for older patches. Production staffing is now handled
@@ -2222,14 +1792,7 @@ func _market_trend(coverage: float, demand_value: float) -> String:
 	return "Critical"
 
 func _rival_market_note(resource_id: String) -> String:
-	match resource_id:
-		"weapons", "obsidian":
-			return "War Rival pressure: weapons, obsidian and martial goods."
-		"tools", "cloth":
-			return "Cunning Rival pressure: practical bottlenecks and market leverage."
-		"cacao", "fine_textiles":
-			return "Diplomatic Rival pressure: palace-facing status goods."
-	return "Rival behaviour can alter this market once procurement is connected."
+	return _get_rival_system().market_note_for_resource(resource_id)
 
 
 func _apply_market_economy_to_goods(goods: Array[Dictionary]) -> Array[Dictionary]:
@@ -2485,130 +2048,43 @@ func _warband_combat_stats_from_warband(warband: Dictionary) -> Dictionary:
 
 
 func get_player_palace_dedicated_god() -> String:
-	return player_palace_dedicated_god
+	return _get_palace_system().get_player_palace_dedicated_god(self)
 
 func set_player_palace_dedicated_god(god_id: String) -> Dictionary:
-	var cleaned: String = god_id.strip_edges().to_lower()
-	if cleaned == "":
-		player_palace_dedicated_god = ""
-		if is_flower_war_palace_gate_enabled():
-			last_report.append("Palace dedication cleared. Flower Wars are locked until the palace is dedicated to Huitzilopochtli.")
-		else:
-			last_report.append("Palace dedication cleared. Flower Wars remain open because the palace gate is not active yet.")
-		emit_signal("state_changed")
-		return {"ok": true, "reason": "Palace dedication cleared."}
-	if not PALACE_GOD_IDS.has(cleaned):
-		return {"ok": false, "reason": "Unknown palace god: " + god_id + "."}
-	player_palace_dedicated_god = cleaned
-	last_report.append("Palace dedicated to " + _god_display_name(cleaned) + ".")
-	emit_signal("state_changed")
-	return {"ok": true, "reason": "Palace dedicated to " + _god_display_name(cleaned) + "."}
+	return _get_palace_system().set_player_palace_dedicated_god(self, god_id)
 
 func has_war_god_palace() -> bool:
-	# This reports the actual palace dedication state only. It does not bypass the
-	# rule when the temporary gate is disabled. Use flower_war_palace_gate_passed()
-	# for launch permission.
-	return player_palace_dedicated_god == GOD_HUITZILOPOCHTLI
+	return _get_palace_system().has_war_god_palace(self)
 
 func is_flower_war_palace_gate_enabled() -> bool:
-	return flower_war_palace_gate_enabled
+	return _get_palace_system().is_flower_war_palace_gate_enabled(self)
 
 func set_flower_war_palace_gate_enabled(enabled: bool) -> Dictionary:
-	flower_war_palace_gate_enabled = enabled
-	if enabled:
-		last_report.append("Flower War palace gate enabled. Flower Wars now require a Huitzilopochtli-dedicated palace.")
-	else:
-		last_report.append("Flower War palace gate disabled. Flower Wars are open until the Palace system is implemented.")
-	emit_signal("state_changed")
-	return {"ok": true, "enabled": enabled}
+	return _get_palace_system().set_flower_war_palace_gate_enabled(self, enabled)
 
 func flower_war_palace_gate_passed() -> bool:
-	# v0.27 reconnects the canonical palace gate. Attacking Flower Wars require
-	# the Palace to be dedicated to Huitzilopochtli. Defensive Flower Wars use their
-	# own resolver and do not call this gate.
-	if not is_flower_war_palace_gate_enabled():
-		return true
-	return has_war_god_palace()
+	return _get_palace_system().flower_war_palace_gate_passed(self)
 
 func flower_war_palace_gate_status_text() -> String:
-	if not is_flower_war_palace_gate_enabled():
-		return "Palace gate inactive: attacking Flower Wars are open for testing."
-	if has_war_god_palace():
-		return "Huitzilopochtli Palace authority active: attacking Flower Wars are authorised."
-	if player_palace_dedicated_god == "":
-		return "Attacking Flower Wars locked: dedicate the Palace to Huitzilopochtli to authorise the war route. Defensive Flower Wars can still occur."
-	return "Attacking Flower Wars locked: current palace dedication is " + _god_display_name(player_palace_dedicated_god) + "; Huitzilopochtli is required. Defensive Flower Wars can still occur."
+	return _get_palace_system().flower_war_palace_gate_status_text(self)
 
 func _god_display_name(god_id: String) -> String:
-	match god_id:
-		"tlaloc":
-			return "Tlaloc"
-		"huitzilopochtli":
-			return "Huitzilopochtli"
-		"tezcatlipoca":
-			return "Tezcatlipoca"
-		"quetzalcoatl":
-			return "Quetzalcoatl"
-	return god_id.capitalize()
-
-
-# -----------------------------------------------------------------------------
-# Palace backend probe v0.20.1
-# -----------------------------------------------------------------------------
-# Read-only palace planning data. This deliberately does not add Palace UI,
-# dedication buttons, structure construction, court-need mechanics, or Flower War
-# gate changes. Palace structures can now be built and can become active/inactive
-# based on upkeep and existing staff availability.
+	return _get_palace_system().god_display_name(god_id)
 
 func get_palace_dedicated_god() -> String:
-	return get_player_palace_dedicated_god()
+	return _get_palace_system().get_palace_dedicated_god(self)
 
 func get_palace_route_name(god_id: String) -> String:
-	match god_id:
-		"tlaloc":
-			return "Natural Calendar Foresight"
-		"huitzilopochtli":
-			return "Flower Wars Authority"
-		"tezcatlipoca":
-			return "Scarcity and Intrigue"
-		"quetzalcoatl":
-			return "Legitimacy and Recognition"
-	return "No Palace Route"
+	return _get_palace_system().get_palace_route_name(god_id)
 
 func get_palace_route_power_summary(god_id: String) -> String:
-	match god_id:
-		"tlaloc":
-			return "Deep calendar and natural-event foresight: higher palace levels will reveal droughts, floods, harvest pressure and other natural events earlier and in more detail."
-		"huitzilopochtli":
-			return "Flower Wars authority: dedicating the Palace to Huitzilopochtli formally authorises attacking Flower Wars and the war route."
-		"tezcatlipoca":
-			return "Scarcity, intrigue and market pressure: future structures will support rival pressure, disruption, manipulation, sabotage hooks and market leverage."
-		"quetzalcoatl":
-			return "Legitimacy, recognition and palace trust: future structures will strengthen ruler-facing credibility, order, tribute reliability and prestige-style authority."
-	return "No palace dedication has been chosen. Dedication will define the house's palace route."
-
+	return _get_palace_system().get_palace_route_power_summary(god_id)
 
 func can_dedicate_palace_to_god(god_id: String) -> Dictionary:
-	var cleaned: String = god_id.strip_edges().to_lower()
-	if cleaned == "":
-		return {"ok": false, "reason": "Choose a palace god."}
-	if not PALACE_GOD_IDS.has(cleaned):
-		return {"ok": false, "reason": "Unknown palace god: " + god_id + "."}
-	if get_palace_dedicated_god() != "":
-		return {"ok": false, "reason": "The palace is already dedicated to " + _god_display_name(get_palace_dedicated_god()) + ". Prototype 0 dedication is permanent."}
-	return {"ok": true, "reason": "Ready to dedicate the palace to " + _god_display_name(cleaned) + "."}
+	return _get_palace_system().can_dedicate_palace_to_god(self, god_id)
 
 func dedicate_palace_to_god(god_id: String) -> Dictionary:
-	var status: Dictionary = can_dedicate_palace_to_god(god_id)
-	if not bool(status.get("ok", false)):
-		last_report.append("Palace dedication failed: " + String(status.get("reason", "")))
-		emit_signal("state_changed")
-		return status
-	var cleaned: String = god_id.strip_edges().to_lower()
-	player_palace_dedicated_god = cleaned
-	last_report.append("Palace dedicated to " + _god_display_name(cleaned) + ". The Divine Seat now displays the " + get_palace_route_name(cleaned) + " structure node data.")
-	emit_signal("state_changed")
-	return {"ok": true, "reason": "Palace dedicated to " + _god_display_name(cleaned) + ".", "god_id": cleaned}
+	return _get_palace_system().dedicate_palace_to_god(self, god_id)
 
 func get_palace_structure_tree_shell(god_id: String = "") -> Dictionary:
 	var route_id: String = god_id.strip_edges().to_lower()
@@ -2757,584 +2233,94 @@ func _palace_structure_tree_tiers(god_id: String) -> Array[Dictionary]:
 
 
 func get_built_palace_structure_ids() -> Array[String]:
-	var output: Array[String] = []
-	for key_variant: Variant in palace_built_structures.keys():
-		var structure_id: String = String(key_variant)
-		if bool(palace_built_structures.get(structure_id, false)):
-			output.append(structure_id)
-	output.sort()
-	return output
+	return _get_palace_system().get_built_palace_structure_ids(self)
 
 func _is_palace_structure_built(structure_id: String) -> bool:
-	return bool(palace_built_structures.get(structure_id, false))
+	return _get_palace_system().is_palace_structure_built(self, structure_id)
 
 func _apply_palace_structure_statuses(tiers: Array[Dictionary], route_id: String) -> void:
-	var operation_preview: Dictionary = get_palace_structure_operation_preview()
-	var operation_statuses: Dictionary = operation_preview.get("statuses", {}) as Dictionary
-	for tier_index: int in range(tiers.size()):
-		var tier: Dictionary = tiers[tier_index]
-		var structures: Array = tier.get("structures", []) as Array
-		for structure_index: int in range(structures.size()):
-			if not (structures[structure_index] is Dictionary):
-				continue
-			var structure: Dictionary = structures[structure_index] as Dictionary
-			var structure_id: String = String(structure.get("id", ""))
-			var built: bool = _is_palace_structure_built(structure_id)
-			var build_status: Dictionary = can_build_palace_structure(structure_id)
-			structure["built"] = built
-			structure["can_build"] = bool(build_status.get("ok", false))
-			structure["build_status"] = String(build_status.get("reason", ""))
-			if built:
-				var op_status: Dictionary = operation_statuses.get(structure_id, {}) as Dictionary
-				var active: bool = bool(op_status.get("active", false))
-				structure["active"] = active
-				structure["inactive_reason"] = String(op_status.get("inactive_reason", "Operation status not calculated."))
-				structure["maintenance_paid_preview"] = op_status.get("maintenance_paid", {}) as Dictionary
-				structure["staff_assigned_preview"] = op_status.get("staff_assigned", {}) as Dictionary
-				if active:
-					structure["status"] = "Active"
-				else:
-					structure["status"] = "Built, inactive"
-			elif bool(build_status.get("ok", false)):
-				structure["active"] = false
-				structure["inactive_reason"] = "Not built."
-				structure["status"] = "Ready to build"
-			else:
-				structure["active"] = false
-				structure["inactive_reason"] = "Not built."
-				structure["status"] = "Locked"
-			structures[structure_index] = structure
-		tier["structures"] = structures
-		tiers[tier_index] = tier
+	_get_palace_system().apply_palace_structure_statuses(self, tiers, route_id)
 
 func _palace_structure_by_id(structure_id: String, route_id: String = "") -> Dictionary:
-	var search_routes: Array[String] = []
-	if route_id.strip_edges() != "":
-		search_routes.append(route_id.strip_edges().to_lower())
-	else:
-		var dedicated: String = get_palace_dedicated_god()
-		if dedicated != "":
-			search_routes.append(dedicated)
-		else:
-			for palace_god_id: String in PALACE_GOD_IDS:
-				search_routes.append(palace_god_id)
-	for god_id: String in search_routes:
-		var tiers: Array[Dictionary] = _palace_structure_tree_tiers(god_id)
-		for tier: Dictionary in tiers:
-			var structures: Array = tier.get("structures", []) as Array
-			for structure_variant: Variant in structures:
-				if not (structure_variant is Dictionary):
-					continue
-				var structure: Dictionary = structure_variant as Dictionary
-				if String(structure.get("id", "")) == structure_id:
-					return structure.duplicate(true)
-	return {}
+	return _get_palace_system().palace_structure_by_id(self, structure_id, route_id)
 
 func _palace_structure_id_by_name(god_id: String, structure_name: String) -> String:
-	var needle: String = structure_name.strip_edges().to_lower()
-	if needle == "":
-		return ""
-	var tiers: Array[Dictionary] = _palace_structure_tree_tiers(god_id)
-	for tier: Dictionary in tiers:
-		var structures: Array = tier.get("structures", []) as Array
-		for structure_variant: Variant in structures:
-			if not (structure_variant is Dictionary):
-				continue
-			var structure: Dictionary = structure_variant as Dictionary
-			if String(structure.get("name", "")).strip_edges().to_lower() == needle:
-				return String(structure.get("id", ""))
-	return ""
+	return _get_palace_system().palace_structure_id_by_name(self, god_id, structure_name)
 
 func _palace_any_built_in_tier(god_id: String, tier_number: int) -> bool:
-	var tiers: Array[Dictionary] = _palace_structure_tree_tiers(god_id)
-	for tier: Dictionary in tiers:
-		if int(tier.get("tier", 0)) != tier_number:
-			continue
-		var structures: Array = tier.get("structures", []) as Array
-		for structure_variant: Variant in structures:
-			if not (structure_variant is Dictionary):
-				continue
-			var structure: Dictionary = structure_variant as Dictionary
-			if _is_palace_structure_built(String(structure.get("id", ""))):
-				return true
-	return false
+	return _get_palace_system().palace_any_built_in_tier(self, god_id, tier_number)
 
 func _palace_prerequisite_check(god_id: String, prerequisite_text: String) -> Dictionary:
-	var text: String = prerequisite_text.strip_edges()
-	if text == "":
-		return {"ok": true, "reason": "No prerequisite."}
-	if text.begins_with("One Level 1"):
-		if _palace_any_built_in_tier(god_id, 1):
-			return {"ok": true, "reason": text + " met."}
-		return {"ok": false, "reason": "Requires any Level 1 " + _god_display_name(god_id) + " palace structure."}
-	if text.find(" or ") >= 0:
-		var options: PackedStringArray = text.split(" or ")
-		for option: String in options:
-			var option_id: String = _palace_structure_id_by_name(god_id, option)
-			if option_id != "" and _is_palace_structure_built(option_id):
-				return {"ok": true, "reason": text + " met."}
-		return {"ok": false, "reason": "Requires one of: " + text + "."}
-	var required_id: String = _palace_structure_id_by_name(god_id, text)
-	if required_id == "":
-		return {"ok": false, "reason": "Unknown prerequisite: " + text + "."}
-	if _is_palace_structure_built(required_id):
-		return {"ok": true, "reason": text + " met."}
-	return {"ok": false, "reason": "Requires " + text + "."}
+	return _get_palace_system().palace_prerequisite_check(self, god_id, prerequisite_text)
 
 func _palace_prerequisites_met(structure: Dictionary) -> Dictionary:
-	var god_id: String = String(structure.get("god_id", get_palace_dedicated_god()))
-	var prerequisites: Array = structure.get("prerequisites", []) as Array
-	var blocked: Array[String] = []
-	for prereq_variant: Variant in prerequisites:
-		var check: Dictionary = _palace_prerequisite_check(god_id, String(prereq_variant))
-		if not bool(check.get("ok", false)):
-			blocked.append(String(check.get("reason", "Prerequisite not met.")))
-	if blocked.is_empty():
-		return {"ok": true, "reason": "Prerequisites met."}
-	return {"ok": false, "reason": " ".join(blocked)}
+	return _get_palace_system().palace_prerequisites_met(self, structure)
 
 func _can_pay_palace_build_cost(cost: Dictionary) -> Dictionary:
-	for resource_variant: Variant in cost.keys():
-		var resource_id: String = String(resource_variant)
-		var needed: float = float(cost[resource_variant])
-		var free_value: float = free_stock_after_reserves(resource_id)
-		if free_value + 0.001 < needed:
-			return {"ok": false, "reason": "Need " + _format_amount(needed - free_value) + " more free " + get_resource_name(resource_id) + " after reserves."}
-	return {"ok": true, "reason": "Build cost available."}
+	return _get_palace_system().can_pay_palace_build_cost(self, cost)
 
 func can_build_palace_structure(structure_id: String) -> Dictionary:
-	var dedicated_god: String = get_palace_dedicated_god()
-	if dedicated_god == "":
-		return {"ok": false, "reason": "Dedicate the palace before building palace structures."}
-	var structure: Dictionary = _palace_structure_by_id(structure_id, dedicated_god)
-	if structure.is_empty():
-		return {"ok": false, "reason": "Unknown palace structure for the chosen route."}
-	if _is_palace_structure_built(structure_id):
-		return {"ok": false, "reason": "Already built."}
-	var prereq_status: Dictionary = _palace_prerequisites_met(structure)
-	if not bool(prereq_status.get("ok", false)):
-		return {"ok": false, "reason": String(prereq_status.get("reason", "Prerequisites not met."))}
-	var cost_status: Dictionary = _can_pay_palace_build_cost(structure.get("build_cost", {}) as Dictionary)
-	if not bool(cost_status.get("ok", false)):
-		return cost_status
-	return {"ok": true, "reason": "Ready to build " + String(structure.get("name", "palace structure")) + "."}
+	return _get_palace_system().can_build_palace_structure(self, structure_id)
 
 func build_palace_structure(structure_id: String) -> Dictionary:
-	var status: Dictionary = can_build_palace_structure(structure_id)
-	if not bool(status.get("ok", false)):
-		last_report.append("Palace structure not built: " + String(status.get("reason", "Blocked.")))
-		emit_signal("state_changed")
-		return status
-	var structure: Dictionary = _palace_structure_by_id(structure_id, get_palace_dedicated_god())
-	var cost: Dictionary = structure.get("build_cost", {}) as Dictionary
-	for resource_variant: Variant in cost.keys():
-		var resource_id: String = String(resource_variant)
-		_add_stock(resource_id, -float(cost[resource_variant]))
-	palace_built_structures[structure_id] = true
-	palace_structure_runtime_statuses.clear()
-	last_report.append("Built palace structure: " + String(structure.get("name", structure_id)) + ". It must now be maintained and staffed each Veintena to remain active.")
-	emit_signal("state_changed")
-	return {"ok": true, "reason": "Built " + String(structure.get("name", structure_id)) + ".", "structure_id": structure_id}
-
+	return _get_palace_system().build_palace_structure(self, structure_id)
 
 func _palace_built_structure_ids_in_tree_order(god_id: String) -> Array[String]:
-	var output: Array[String] = []
-	if god_id == "":
-		return output
-	var tiers: Array[Dictionary] = _palace_structure_tree_tiers(god_id)
-	for tier: Dictionary in tiers:
-		var structures: Array = tier.get("structures", []) as Array
-		for structure_variant: Variant in structures:
-			if not (structure_variant is Dictionary):
-				continue
-			var structure: Dictionary = structure_variant as Dictionary
-			var structure_id: String = String(structure.get("id", ""))
-			if structure_id != "" and _is_palace_structure_built(structure_id):
-				output.append(structure_id)
-	return output
+	return _get_palace_system().palace_built_structure_ids_in_tree_order(self, god_id)
 
 func _palace_staff_group_order() -> Array[String]:
-	# Palace staffing uses existing population groups. This is display/support data only;
-	# it does not create new population types or a separate palace workforce.
-	return ["pipiltin", "tlamacazqueh", "tolteca", "tlacotin", "macehualtin", "yaotequihuaqueh", "malli"]
+	return _get_palace_system().palace_staff_group_order()
 
 func get_palace_staff_capacity() -> Dictionary:
-	var result: Dictionary = {}
-	for group_id: String in _palace_staff_group_order():
-		result[group_id] = _active_population_for_group(group_id)
-	return result
+	return _get_palace_system().get_palace_staff_capacity(self)
 
 func get_palace_staff_summary() -> Dictionary:
-	var capacity: Dictionary = get_palace_staff_capacity()
-	var required: Dictionary = get_palace_required_staff()
-	var operation: Dictionary = get_palace_structure_operation_preview()
-	var used: Dictionary = operation.get("staff_used", {}) as Dictionary
-	var shortfalls: Dictionary = operation.get("staff_shortfalls", {}) as Dictionary
-	var rows: Array[Dictionary] = []
-	var group_ids: Array[String] = _palace_staff_group_order()
-	for key_variant: Variant in required.keys():
-		var key_id: String = String(key_variant)
-		if not group_ids.has(key_id):
-			group_ids.append(key_id)
-	for key_variant: Variant in used.keys():
-		var key_id: String = String(key_variant)
-		if not group_ids.has(key_id):
-			group_ids.append(key_id)
-	for key_variant: Variant in shortfalls.keys():
-		var key_id: String = String(key_variant)
-		if not group_ids.has(key_id):
-			group_ids.append(key_id)
-	var total_required: int = 0
-	var total_used: int = 0
-	var total_shortfall: int = 0
-	for group_id: String in group_ids:
-		var available_count: int = int(capacity.get(group_id, 0))
-		var required_count: int = int(required.get(group_id, 0))
-		var used_count: int = int(used.get(group_id, 0))
-		var shortfall_count: int = int(shortfalls.get(group_id, 0))
-		if available_count <= 0 and required_count <= 0 and used_count <= 0 and shortfall_count <= 0:
-			continue
-		total_required += required_count
-		total_used += used_count
-		total_shortfall += shortfall_count
-		var status: String = "Idle"
-		if required_count <= 0:
-			status = "Not required"
-		elif shortfall_count > 0:
-			status = "Shortfall"
-		elif used_count >= required_count:
-			status = "Covered"
-		elif used_count > 0:
-			status = "Partly assigned"
-		else:
-			status = "Available"
-		rows.append({
-			"id": group_id,
-			"name": _labour_group_name(group_id),
-			"available": available_count,
-			"required_by_built_structures": required_count,
-			"assigned_to_active_structures": used_count,
-			"remaining_after_active_structures": max(0, available_count - used_count),
-			"shortfall": shortfall_count,
-			"status": status
-		})
-	var headline: String = "No palace staff required yet."
-	if total_required > 0:
-		headline = "Palace staff: " + str(total_used) + " assigned to active structures / " + str(total_required) + " required by built structures."
-		if total_shortfall > 0:
-			headline += " Shortfall: " + str(total_shortfall) + "."
-	return {
-		"rows": rows,
-		"capacity": capacity,
-		"required": required,
-		"used": used,
-		"shortfalls": shortfalls,
-		"total_required": total_required,
-		"total_used": total_used,
-		"total_shortfall": total_shortfall,
-		"headline": headline,
-		"note": "Palace structures use existing active population groups such as Pipiltin nobles, Tlamacazqueh priests, Tolteca specialists and labour groups where specified."
-	}
+	return _get_palace_system().get_palace_staff_summary(self)
 
 func get_palace_structure_operation_preview() -> Dictionary:
-	return _resolve_palace_structure_operation(false)
+	return _get_palace_system().get_palace_structure_operation_preview(self)
 
 func get_palace_structure_runtime_statuses() -> Dictionary:
-	if palace_structure_runtime_statuses.is_empty():
-		return (get_palace_structure_operation_preview().get("statuses", {}) as Dictionary).duplicate(true)
-	return palace_structure_runtime_statuses.duplicate(true)
+	return _get_palace_system().get_palace_structure_runtime_statuses(self)
 
 func get_active_palace_structure_ids() -> Array[String]:
-	var output: Array[String] = []
-	var statuses: Dictionary = get_palace_structure_runtime_statuses()
-	for key_variant: Variant in statuses.keys():
-		var structure_id: String = String(key_variant)
-		var status: Dictionary = statuses[structure_id] as Dictionary
-		if bool(status.get("active", false)):
-			output.append(structure_id)
-	output.sort()
-	return output
+	return _get_palace_system().get_active_palace_structure_ids(self)
 
 func get_inactive_palace_structure_ids() -> Array[String]:
-	var output: Array[String] = []
-	var statuses: Dictionary = get_palace_structure_runtime_statuses()
-	for key_variant: Variant in statuses.keys():
-		var structure_id: String = String(key_variant)
-		var status: Dictionary = statuses[structure_id] as Dictionary
-		if bool(status.get("built", false)) and not bool(status.get("active", false)):
-			output.append(structure_id)
-	output.sort()
-	return output
+	return _get_palace_system().get_inactive_palace_structure_ids(self)
 
 func _resolve_palace_structure_operation(pay_costs: bool) -> Dictionary:
-	var dedicated_god: String = get_palace_dedicated_god()
-	var result: Dictionary = {
-		"dedicated_god": dedicated_god,
-		"statuses": {},
-		"active_structure_ids": [],
-		"inactive_structure_ids": [],
-		"maintenance_needed": {},
-		"maintenance_paid": {},
-		"maintenance_shortfalls": {},
-		"staff_capacity": get_palace_staff_capacity(),
-		"staff_used": {},
-		"staff_shortfalls": {},
-		"reports": []
-	}
-	if dedicated_god == "":
-		return result
-	var temp_stockpile: Dictionary = _copy_stockpile_dictionary(estate_stockpiles)
-	var available_staff: Dictionary = get_palace_staff_capacity()
-	var structure_ids: Array[String] = _palace_built_structure_ids_in_tree_order(dedicated_god)
-	for structure_id: String in structure_ids:
-		var structure: Dictionary = _palace_structure_by_id(structure_id, dedicated_god)
-		if structure.is_empty():
-			continue
-		var maintenance: Dictionary = structure.get("maintenance_cost", {}) as Dictionary
-		var staff: Dictionary = structure.get("staff_requirement", {}) as Dictionary
-		_add_dictionary_amounts(result["maintenance_needed"] as Dictionary, maintenance)
-		var missing_parts: Array[String] = []
-		for resource_variant: Variant in maintenance.keys():
-			var resource_id: String = String(resource_variant)
-			var needed: float = float(maintenance[resource_variant])
-			var available: float = float(temp_stockpile.get(resource_id, 0.0))
-			if available + 0.001 < needed:
-				var shortfall: float = needed - available
-				(result["maintenance_shortfalls"] as Dictionary)[resource_id] = float((result["maintenance_shortfalls"] as Dictionary).get(resource_id, 0.0)) + shortfall
-				missing_parts.append(_format_amount(shortfall) + " " + get_resource_name(resource_id))
-		for staff_variant: Variant in staff.keys():
-			var staff_id: String = String(staff_variant)
-			var needed_staff: int = int(staff[staff_variant])
-			var available_staff_count: int = int(available_staff.get(staff_id, 0))
-			if available_staff_count < needed_staff:
-				var staff_shortfall: int = needed_staff - available_staff_count
-				(result["staff_shortfalls"] as Dictionary)[staff_id] = int((result["staff_shortfalls"] as Dictionary).get(staff_id, 0)) + staff_shortfall
-				missing_parts.append(_labour_group_name(staff_id) + " " + str(staff_shortfall))
-		var structure_status: Dictionary = {
-			"id": structure_id,
-			"name": String(structure.get("name", structure_id)),
-			"built": true,
-			"active": false,
-			"inactive_reason": "",
-			"maintenance_paid": {},
-			"staff_assigned": {}
-		}
-		if missing_parts.is_empty():
-			structure_status["active"] = true
-			structure_status["inactive_reason"] = "Active."
-			for resource_variant: Variant in maintenance.keys():
-				var resource_id: String = String(resource_variant)
-				var amount: float = float(maintenance[resource_variant])
-				temp_stockpile[resource_id] = float(temp_stockpile.get(resource_id, 0.0)) - amount
-				(structure_status["maintenance_paid"] as Dictionary)[resource_id] = amount
-				(result["maintenance_paid"] as Dictionary)[resource_id] = float((result["maintenance_paid"] as Dictionary).get(resource_id, 0.0)) + amount
-			for staff_variant: Variant in staff.keys():
-				var staff_id: String = String(staff_variant)
-				var amount: int = int(staff[staff_variant])
-				available_staff[staff_id] = int(available_staff.get(staff_id, 0)) - amount
-				(structure_status["staff_assigned"] as Dictionary)[staff_id] = amount
-				(result["staff_used"] as Dictionary)[staff_id] = int((result["staff_used"] as Dictionary).get(staff_id, 0)) + amount
-			(result["active_structure_ids"] as Array).append(structure_id)
-			(result["reports"] as Array).append("Palace structure active: " + String(structure.get("name", structure_id)) + ".")
-		else:
-			structure_status["inactive_reason"] = "Missing: " + ", ".join(missing_parts) + "."
-			(result["inactive_structure_ids"] as Array).append(structure_id)
-			(result["reports"] as Array).append("Palace structure inactive: " + String(structure.get("name", structure_id)) + " — " + String(structure_status["inactive_reason"]))
-		(result["statuses"] as Dictionary)[structure_id] = structure_status
-	if pay_costs:
-		for resource_variant: Variant in (result["maintenance_paid"] as Dictionary).keys():
-			var resource_id: String = String(resource_variant)
-			_add_stock(resource_id, -float((result["maintenance_paid"] as Dictionary)[resource_variant]))
-	return result
+	return _get_palace_system().resolve_palace_structure_operation(self, pay_costs)
 
 func _pay_palace_maintenance() -> void:
-	last_palace_maintenance_report.clear()
-	if get_palace_dedicated_god() == "" or get_built_palace_structure_ids().is_empty():
-		palace_structure_runtime_statuses.clear()
-		return
-	var resolution: Dictionary = _resolve_palace_structure_operation(true)
-	palace_structure_runtime_statuses = (resolution.get("statuses", {}) as Dictionary).duplicate(true)
-	var reports: Array = resolution.get("reports", []) as Array
-	if reports.is_empty():
-		return
-	last_report.append("Palace maintenance resolves.")
-	for report_variant: Variant in reports:
-		var line: String = String(report_variant)
-		last_palace_maintenance_report.append(line)
-		last_report.append(line)
+	_get_palace_system().pay_palace_maintenance(self)
 
 func get_palace_total_maintenance() -> Dictionary:
-	var result: Dictionary = {}
-	var dedicated_god: String = get_palace_dedicated_god()
-	if dedicated_god == "":
-		return result
-	for structure_id: String in get_built_palace_structure_ids():
-		var structure: Dictionary = _palace_structure_by_id(structure_id, dedicated_god)
-		if structure.is_empty():
-			continue
-		var maintenance: Dictionary = structure.get("maintenance_cost", {}) as Dictionary
-		for resource_variant: Variant in maintenance.keys():
-			var resource_id: String = String(resource_variant)
-			result[resource_id] = float(result.get(resource_id, 0.0)) + float(maintenance[resource_variant])
-	return result
+	return _get_palace_system().get_palace_total_maintenance(self)
 
 func get_palace_required_staff() -> Dictionary:
-	var result: Dictionary = {}
-	var dedicated_god: String = get_palace_dedicated_god()
-	if dedicated_god == "":
-		return result
-	for structure_id: String in get_built_palace_structure_ids():
-		var structure: Dictionary = _palace_structure_by_id(structure_id, dedicated_god)
-		if structure.is_empty():
-			continue
-		var staff: Dictionary = structure.get("staff_requirement", {}) as Dictionary
-		for staff_variant: Variant in staff.keys():
-			var staff_id: String = String(staff_variant)
-			result[staff_id] = int(result.get(staff_id, 0)) + int(staff[staff_variant])
-	return result
+	return _get_palace_system().get_palace_required_staff(self)
 
 func get_palace_level() -> int:
-	var dedicated_god: String = get_palace_dedicated_god()
-	if dedicated_god == "":
-		return 1
-	var highest: int = 1
-	for structure_id: String in get_built_palace_structure_ids():
-		var structure: Dictionary = _palace_structure_by_id(structure_id, dedicated_god)
-		if structure.is_empty():
-			continue
-		highest = maxi(highest, int(structure.get("tier", 1)))
-	return highest
+	return _get_palace_system().get_palace_level(self)
 
 func get_palace_dedication_routes() -> Array[Dictionary]:
-	var rows: Array[Dictionary] = []
-	var current_god: String = get_palace_dedicated_god()
-	for god_id: String in PALACE_GOD_IDS:
-		rows.append({
-			"id": god_id,
-			"god_id": god_id,
-			"god_name": _god_display_name(god_id),
-			"route_name": get_palace_route_name(god_id),
-			"power_summary": get_palace_route_power_summary(god_id),
-			"is_chosen": god_id == current_god,
-			"is_available_for_future_dedication": current_god == "",
-			"can_dedicate": bool(can_dedicate_palace_to_god(god_id).get("ok", false)),
-			"dedication_status": String(can_dedicate_palace_to_god(god_id).get("reason", "")),
-			"prototype_status": "Dedication UI active. Palace structures can be built and must be maintained/staffed to stay active. Huitzilopochtli authorises attacking Flower Wars; Tlaloc, Tezcatlipoca and Quetzalcoatl authority panels are information-only prototypes."
-		})
-	return rows
-
+	return _get_palace_system().get_palace_dedication_routes(self)
 
 func _palace_authority_route_headline(god_id: String, active_count: int) -> String:
-	if god_id == "":
-		return "No Palace Authority"
-	if active_count <= 0:
-		return _god_display_name(god_id) + " authority is dormant"
-	match god_id:
-		"tlaloc":
-			return "Tlaloc Authority — Natural Calendar Foresight"
-		"huitzilopochtli":
-			return "Huitzilopochtli Authority — Flower Wars"
-		"tezcatlipoca":
-			return "Tezcatlipoca Authority — Scarcity and Intrigue"
-		"quetzalcoatl":
-			return "Quetzalcoatl Authority — Legitimacy and Recognition"
-	return "Palace Authority"
+	return _get_palace_system().palace_authority_route_headline(god_id, active_count)
 
 func _palace_authority_route_body(god_id: String, active_count: int) -> String:
-	if god_id == "":
-		return "Dedicate the palace on the Divine Seat tab to unlock a route-specific authority screen."
-	if active_count <= 0:
-		return "Build, maintain and staff palace structures before this route can express authority."
-	match god_id:
-		"tlaloc":
-			return "Active Tlaloc structures now reveal a controlled natural-calendar forecast prototype: rain, drought, flood, crop and field pressures appear earlier and in more detail as the palace grows."
-		"huitzilopochtli":
-			return "Huitzilopochtli dedication authorises attacking Flower Wars. Active Huitzilopochtli structures support future war-route authority and escalation."
-		"tezcatlipoca":
-			return "Active Tezcatlipoca structures reveal an information-only scarcity mirror: market pressure, shortage leverage and rival vulnerability hooks. Sabotage and manipulation actions are not implemented yet."
-		"quetzalcoatl":
-			return "Active Quetzalcoatl structures reveal an information-only legitimacy court: ruler-facing credibility, tribute reliability, palace trust and recognition-route hooks. Court need donations create prestige by base value; broader recognition systems are not implemented yet."
-	return "Active palace structures are ready, but their route authority has not been defined."
+	return _get_palace_system().palace_authority_route_body(god_id, active_count)
 
 func _palace_authority_structure_row(structure_id: String, status: Dictionary, god_id: String) -> Dictionary:
-	var structure: Dictionary = _palace_structure_by_id(structure_id, god_id)
-	if structure.is_empty():
-		return {}
-	return {
-		"id": structure_id,
-		"name": String(structure.get("name", structure_id)),
-		"tier": int(structure.get("tier", 1)),
-		"effect_summary": String(structure.get("effect_summary", structure.get("summary", "Future palace authority hook."))),
-		"active": bool(status.get("active", false)),
-		"inactive_reason": String(status.get("inactive_reason", "")),
-		"maintenance_paid": (status.get("maintenance_paid", {}) as Dictionary).duplicate(true),
-		"staff_assigned": (status.get("staff_assigned", {}) as Dictionary).duplicate(true)
-	}
+	return _get_palace_system().palace_authority_structure_row(self, structure_id, status, god_id)
 
 func _palace_next_locked_authority_rows(god_id: String, limit: int = 4) -> Array[Dictionary]:
-	var rows: Array[Dictionary] = []
-	if god_id == "":
-		return rows
-	var tiers: Array[Dictionary] = _palace_structure_tree_tiers(god_id)
-	for tier: Dictionary in tiers:
-		var structures: Array = tier.get("structures", []) as Array
-		for structure_variant: Variant in structures:
-			if not (structure_variant is Dictionary):
-				continue
-			var structure: Dictionary = structure_variant as Dictionary
-			var structure_id: String = String(structure.get("id", ""))
-			if structure_id == "" or _is_palace_structure_built(structure_id):
-				continue
-			var build_status: Dictionary = can_build_palace_structure(structure_id)
-			rows.append({
-				"id": structure_id,
-				"name": String(structure.get("name", structure_id)),
-				"tier": int(structure.get("tier", 1)),
-				"effect_summary": String(structure.get("effect_summary", structure.get("summary", "Future palace authority hook."))),
-				"can_build": bool(build_status.get("ok", false)),
-				"build_status": String(build_status.get("reason", ""))
-			})
-			if rows.size() >= limit:
-				return rows
-	return rows
+	return _get_palace_system().palace_next_locked_authority_rows(self, god_id, limit)
 
 func get_palace_authority_summary() -> Dictionary:
-	var god_id: String = get_palace_dedicated_god()
-	var statuses: Dictionary = get_palace_structure_runtime_statuses()
-	var active_rows: Array[Dictionary] = []
-	var inactive_rows: Array[Dictionary] = []
-	var highest_active_tier: int = 0
-	if god_id != "":
-		var ordered_built: Array[String] = _palace_built_structure_ids_in_tree_order(god_id)
-		for structure_id: String in ordered_built:
-			var status: Dictionary = statuses.get(structure_id, {}) as Dictionary
-			var row: Dictionary = _palace_authority_structure_row(structure_id, status, god_id)
-			if row.is_empty():
-				continue
-			if bool(row.get("active", false)):
-				highest_active_tier = maxi(highest_active_tier, int(row.get("tier", 1)))
-				active_rows.append(row)
-			else:
-				inactive_rows.append(row)
-	var headline: String = _palace_authority_route_headline(god_id, active_rows.size())
-	var body: String = _palace_authority_route_body(god_id, active_rows.size())
-	return {
-		"dedicated": god_id != "",
-		"god_id": god_id,
-		"god_name": _god_display_name(god_id) if god_id != "" else "None",
-		"route_name": get_palace_route_name(god_id),
-		"headline": headline,
-		"body": body,
-		"active_structure_count": active_rows.size(),
-		"inactive_structure_count": inactive_rows.size(),
-		"highest_active_tier": highest_active_tier,
-		"active_structures": active_rows,
-		"inactive_structures": inactive_rows,
-		"next_locked_structures": _palace_next_locked_authority_rows(god_id, 4),
-		"mechanics_note": "This tab now reads active palace structures. It does not yet apply route authority effects to gameplay.",
-		"flower_war_gate_status": flower_war_palace_gate_status_text(),
-		"ruler_demand_status": "Court needs are connected as donation opportunities; donations create prestige by base value."
-	}
+	return _get_palace_system().get_palace_authority_summary(self)
 
 func _tlaloc_controlled_natural_pressure_events() -> Array[Dictionary]:
 	# v0.28 uses a deterministic test calendar instead of a random natural-event
@@ -3651,36 +2637,7 @@ func _tezcatlipoca_market_pressure_row(good: Dictionary, detail_tier: int) -> Di
 	}
 
 func _tezcatlipoca_rival_pressure_hooks(detail_tier: int) -> Array[Dictionary]:
-	var rows: Array[Dictionary] = []
-	if detail_tier <= 0:
-		return rows
-	var raw_hooks: Array[Dictionary] = [
-		{"id": "war_rival_martial_goods", "rival": "War Rival", "domain": "Obsidian, weapons, captives", "summary": "The War Rival is vulnerable to equipment bottlenecks and captive pressure.", "future_hook": "Future hook: expose or exploit martial-goods shortages before a Flower War."},
-		{"id": "cunning_rival_practical_bottlenecks", "rival": "Cunning Rival", "domain": "Tools, cloth, wood", "summary": "The Cunning Rival depends on practical bottlenecks and flexible building goods.", "future_hook": "Future hook: counter-pressure, misinformation or market leverage against practical goods."},
-		{"id": "diplomatic_rival_status_goods", "rival": "Diplomatic Rival", "domain": "Cacao, fine textiles, tribute goods", "summary": "The Diplomatic Rival is exposed through status goods and ruler-facing obligations.", "future_hook": "Future hook: palace embarrassment, tribute pressure or credibility disruption."}
-	]
-	var max_rows: int = 1
-	if detail_tier >= 2:
-		max_rows = 2
-	if detail_tier >= 3:
-		max_rows = 3
-	for index: int in range(mini(max_rows, raw_hooks.size())):
-		var hook: Dictionary = raw_hooks[index]
-		var row: Dictionary = {
-			"id": String(hook.get("id", "hook")),
-			"rival": String(hook.get("rival", "Rival")),
-			"domain": "Hidden",
-			"summary": "The mirror suggests a rival pressure point, but the details are not yet clear.",
-			"future_hook": "Build higher active Tezcatlipoca structures to reveal future manipulation hooks.",
-			"detail_tier": detail_tier
-		}
-		if detail_tier >= 2:
-			row["domain"] = String(hook.get("domain", "Pressure goods"))
-			row["summary"] = String(hook.get("summary", row["summary"]))
-		if detail_tier >= 3:
-			row["future_hook"] = String(hook.get("future_hook", row["future_hook"]))
-		rows.append(row)
-	return rows
+	return _get_rival_system().tezcatlipoca_rival_pressure_hooks(detail_tier)
 
 func get_tezcatlipoca_pressure_overview() -> Dictionary:
 	var dedicated: bool = get_palace_dedicated_god() == GOD_TEZCATLIPOCA
@@ -3874,114 +2831,28 @@ func get_quetzalcoatl_legitimacy_overview() -> Dictionary:
 # base value of the donated good. Prestige is a score, never a currency.
 
 func _palace_ruler_demand_sets() -> Array[Dictionary]:
-	return [
-		{
-			"id": "food_and_court_cloth",
-			"title": "Food and Court Cloth Need",
-			"veintena_band": "Early cycle",
-			"flavour": "The court is visibly short of basic food, cloth and elite hospitality goods. Donating these goods raises the house's public standing.",
-			"demands": [
-				{"slot": "raw", "slot_name": "Raw / food need", "resource_id": "maize", "amount": 25.0, "note": "Basic food support and public reliability."},
-				{"slot": "processed", "slot_name": "Processed need", "resource_id": "cloth", "amount": 6.0, "note": "Visible household order and practical tribute preparation."},
-				{"slot": "luxury_special", "slot_name": "Luxury / special need", "resource_id": "cacao", "amount": 3.0, "note": "Elite court hospitality and status display."}
-			]
-		},
-		{
-			"id": "construction_and_ritual_readiness",
-			"title": "Construction and Ritual Need",
-			"veintena_band": "Middle cycle",
-			"flavour": "The court values houses that can support construction, ritual display and practical administration at the same time.",
-			"demands": [
-				{"slot": "raw", "slot_name": "Raw need", "resource_id": "wood", "amount": 20.0, "note": "Construction capacity and estate readiness."},
-				{"slot": "processed", "slot_name": "Processed need", "resource_id": "tools", "amount": 4.0, "note": "Administrative and construction competence."},
-				{"slot": "luxury_special", "slot_name": "Luxury / special need", "resource_id": "ritual_goods", "amount": 2.0, "note": "Ritual credibility and visible obligation."}
-			]
-		},
-		{
-			"id": "war_and_luxury_pressure",
-			"title": "War and Luxury Need",
-			"veintena_band": "Late cycle",
-			"flavour": "The court is attentive to martial usefulness, textile strength and high-status presentation.",
-			"demands": [
-				{"slot": "raw", "slot_name": "Raw need", "resource_id": "cotton", "amount": 18.0, "note": "Textile base and household production capacity."},
-				{"slot": "processed", "slot_name": "Processed need", "resource_id": "weapons", "amount": 2.0, "note": "War-route visibility and martial usefulness."},
-				{"slot": "luxury_special", "slot_name": "Luxury / special need", "resource_id": "fine_textiles", "amount": 1.0, "note": "High-status palace presentation."}
-			]
-		}
-	]
+	return _get_palace_system().palace_ruler_demand_sets()
 
 func _current_palace_ruler_demand_index() -> int:
-	# Three controlled court-need sets rotate through the ritual year. This is a
-	# prototype display cycle, not a random political system.
-	var index: int = int(floor(float(current_veintena - 1) / 6.0))
-	return clampi(index, 0, _palace_ruler_demand_sets().size() - 1)
+	return _get_palace_system().current_palace_ruler_demand_index(self)
 
 func _palace_ruler_demand_cycle_window(index: int) -> Dictionary:
-	var demand_sets: Array[Dictionary] = _palace_ruler_demand_sets()
-	var safe_index: int = clampi(index, 0, maxi(0, demand_sets.size() - 1))
-	var start_veintena: int = safe_index * 6 + 1
-	var end_veintena: int = mini(start_veintena + 5, 18)
-	return {
-		"start_veintena": start_veintena,
-		"end_veintena": end_veintena,
-		"label": "Veintenas " + str(start_veintena) + "–" + str(end_veintena)
-	}
+	return _get_palace_system().palace_ruler_demand_cycle_window(index)
 
 func _palace_ruler_demand_deadline_summary(index: int = -1) -> Dictionary:
-	var selected_index: int = _current_palace_ruler_demand_index() if index < 0 else index
-	var window: Dictionary = _palace_ruler_demand_cycle_window(selected_index)
-	var start_veintena: int = int(window.get("start_veintena", 1))
-	var end_veintena: int = int(window.get("end_veintena", 6))
-	var remaining: int = maxi(0, end_veintena - current_veintena + 1)
-	var urgency: String = "Time remains"
-	if current_veintena < start_veintena:
-		remaining = end_veintena - start_veintena + 1
-		urgency = "Future cycle"
-	elif remaining <= 1:
-		urgency = "Final Veintena"
-	elif remaining <= 2:
-		urgency = "Deadline close"
-	var suffix: String = "s" if remaining != 1 else ""
-	var headline: String = String(window.get("label", "Court need cycle")) + "; " + str(remaining) + " Veintena" + suffix + " including the current turn."
-	return {
-		"cycle_index": selected_index,
-		"start_veintena": start_veintena,
-		"end_veintena": end_veintena,
-		"veintenas_remaining": remaining,
-		"urgency": urgency,
-		"headline": headline
-	}
+	return _get_palace_system().palace_ruler_demand_deadline_summary(self, index)
 
 func _report_palace_ruler_demand_cycle_transition(previous_index: int, previous_title: String, previous_completion: Dictionary) -> void:
-	var new_index: int = _current_palace_ruler_demand_index()
-	if new_index == previous_index:
-		return
-	last_report.append("Court need cycle closed: " + previous_title + ". Donated value: +" + _format_amount(float(previous_completion.get("total_prestige", 0.0))) + " Prestige across " + str(int(previous_completion.get("donation_count", 0))) + " donations.")
-	var new_cycle: Dictionary = _current_palace_ruler_demand_set()
-	if not new_cycle.is_empty():
-		var deadline: Dictionary = _palace_ruler_demand_deadline_summary(new_index)
-		last_report.append("New court need cycle opened: " + String(new_cycle.get("title", "Court Need")) + ". " + String(deadline.get("headline", "")))
+	_get_palace_system().report_palace_ruler_demand_cycle_transition(self, previous_index, previous_title, previous_completion)
 
 func _current_palace_ruler_demand_set() -> Dictionary:
-	var demand_sets: Array[Dictionary] = _palace_ruler_demand_sets()
-	if demand_sets.is_empty():
-		return {}
-	var selected_index: int = _current_palace_ruler_demand_index()
-	return demand_sets[selected_index] if selected_index >= 0 and selected_index < demand_sets.size() else {}
+	return _get_palace_system().current_palace_ruler_demand_set(self)
 
 func _palace_ruler_demand_cycle_id() -> String:
-	var selected: Dictionary = _current_palace_ruler_demand_set()
-	return String(selected.get("id", "no_court_need_cycle"))
+	return _get_palace_system().palace_ruler_demand_cycle_id(self)
 
 func _palace_ruler_demand_raw_row_by_slot(slot_id: String) -> Dictionary:
-	var selected: Dictionary = _current_palace_ruler_demand_set()
-	var rows: Array = selected.get("demands", []) as Array
-	for row_variant: Variant in rows:
-		if row_variant is Dictionary:
-			var row: Dictionary = row_variant as Dictionary
-			if String(row.get("slot", "")) == slot_id:
-				return row
-	return {}
+	return _get_palace_system().palace_ruler_demand_raw_row_by_slot(self, slot_id)
 
 func _resource_base_value(resource_id: String) -> float:
 	return _get_prestige_system().resource_base_value(self, resource_id)
@@ -4051,24 +2922,26 @@ func get_prestige_history() -> Array[Dictionary]:
 		output.append(item.duplicate(true))
 	return output
 
+func get_rival_house_definitions() -> Array[Dictionary]:
+	return _get_rival_system().get_rival_house_definitions()
+
+func get_rival_pressure_hooks(detail_tier: int = 3) -> Array[Dictionary]:
+	return _get_rival_system().tezcatlipoca_rival_pressure_hooks(detail_tier)
+
+func get_rival_market_note(resource_id: String) -> String:
+	return _get_rival_system().market_note_for_resource(resource_id)
+
 func _default_rival_prestige_values() -> Dictionary:
-	return _get_prestige_system().default_rival_prestige_values()
+	return _get_rival_system().default_rival_prestige_values()
 
 func _prestige_house_name(house_id: String) -> String:
 	return _get_prestige_system().prestige_house_name(house_id)
 
 func get_rival_prestige() -> Dictionary:
-	if rival_prestige.is_empty():
-		rival_prestige = _default_rival_prestige_values()
-	return rival_prestige.duplicate(true)
+	return _get_rival_system().get_rival_prestige(self)
 
 func set_rival_prestige(house_id: String, value: float) -> Dictionary:
-	# Debug/prototype helper for later rival tests. It does not spend or transfer Prestige.
-	if rival_prestige.is_empty():
-		rival_prestige = _default_rival_prestige_values()
-	rival_prestige[house_id] = value
-	emit_signal("state_changed")
-	return {"ok": true, "house_id": house_id, "prestige": value}
+	return _get_rival_system().set_rival_prestige(self, house_id, value)
 
 func get_prestige_leaderboard() -> Array[Dictionary]:
 	return _get_prestige_system().get_prestige_leaderboard(self)
@@ -4080,429 +2953,73 @@ func get_prestige_summary() -> Dictionary:
 	return _get_prestige_system().get_prestige_summary(self)
 
 func _sacrifice_prestige_option_definitions() -> Array[Dictionary]:
-	# Prototype values follow the agreed hierarchy: Captive > Priest > Slave/Tlacotin.
-	# Sacrifice Prestige is public religious fame. It is score only and is never spent.
-	return [
-		{
-			"id": "captive",
-			"name": "Captive",
-			"source_type": "resource",
-			"resource_id": "captives",
-			"population_group": "",
-			"prestige_each": 8.0,
-			"favour_each": 8.0,
-			"description": "Highest-prestige sacrifice. Captives are the central ritual prize of Flower Wars."
-		},
-		{
-			"id": "priest",
-			"name": "Priest",
-			"source_type": "population",
-			"resource_id": "",
-			"population_group": "tlamacazqueh",
-			"prestige_each": 4.0,
-			"favour_each": 4.0,
-			"description": "Moderate-prestige sacrifice. This is costly because it removes a trained priest from the estate."
-		},
-		{
-			"id": "tlacotin",
-			"name": "Tlacotin Labourer",
-			"source_type": "population",
-			"resource_id": "",
-			"population_group": "tlacotin",
-			"prestige_each": 1.0,
-			"favour_each": 1.0,
-			"description": "Small-prestige sacrifice. This uses bonded labour and should remain much less prestigious than captive sacrifice."
-		}
-	]
+	return _get_religion_system().sacrifice_prestige_option_definitions()
 
 func get_sacrifice_prestige_options() -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	for option: Dictionary in _sacrifice_prestige_option_definitions():
-		var source_type: String = String(option.get("source_type", ""))
-		var available: int = 0
-		if source_type == "resource":
-			available = int(floor(_stock(String(option.get("resource_id", "")))))
-		elif source_type == "population":
-			available = _active_population_for_group(String(option.get("population_group", "")))
-		var row: Dictionary = option.duplicate(true)
-		row["available"] = available
-		row["can_sacrifice_one"] = available >= 1
-		row["prestige_preview_one"] = float(row.get("prestige_each", 0.0))
-		row["favour_preview_one"] = float(row.get("favour_each", row.get("prestige_each", 0.0)))
-		output.append(row)
-	return output
+	return _get_religion_system().get_sacrifice_prestige_options(self)
 
 func _sacrifice_prestige_option_by_id(sacrifice_id: String) -> Dictionary:
-	for option: Dictionary in _sacrifice_prestige_option_definitions():
-		if String(option.get("id", "")) == sacrifice_id:
-			return option.duplicate(true)
-	return {}
+	return _get_religion_system().sacrifice_prestige_option_by_id(sacrifice_id)
 
 func can_sacrifice_for_prestige(sacrifice_id: String, amount: int = 1) -> Dictionary:
-	var option: Dictionary = _sacrifice_prestige_option_by_id(sacrifice_id)
-	if option.is_empty():
-		return {"ok": false, "reason": "Unknown sacrifice type."}
-	var count: int = max(0, amount)
-	if count <= 0:
-		return {"ok": false, "reason": "Choose at least 1 sacrifice."}
-	var source_type: String = String(option.get("source_type", ""))
-	var available: int = 0
-	if source_type == "resource":
-		available = int(floor(_stock(String(option.get("resource_id", "")))))
-	elif source_type == "population":
-		available = _active_population_for_group(String(option.get("population_group", "")))
-	else:
-		return {"ok": false, "reason": "Sacrifice source is not configured."}
-	if available < count:
-		return {"ok": false, "reason": "Only " + str(available) + " available."}
-	return {"ok": true, "reason": "Ready.", "available": available}
+	return _get_religion_system().can_sacrifice_for_prestige(self, sacrifice_id, amount)
 
 func sacrifice_for_prestige(sacrifice_id: String, amount: int = 1, god_id: String = "") -> Dictionary:
-	var status: Dictionary = can_sacrifice_for_prestige(sacrifice_id, amount)
-	if not bool(status.get("ok", false)):
-		return status
-	var option: Dictionary = _sacrifice_prestige_option_by_id(sacrifice_id)
-	var count: int = max(1, amount)
-	var source_type: String = String(option.get("source_type", ""))
-	if source_type == "resource":
-		_add_stock(String(option.get("resource_id", "")), -float(count))
-	elif source_type == "population":
-		var group_id: String = String(option.get("population_group", ""))
-		population[group_id] = max(0, int(population.get(group_id, 0)) - count)
-		_ensure_active_housing_counts()
-		_ensure_labour_assignments()
-	var prestige_gain: float = snappedf(float(count) * float(option.get("prestige_each", 0.0)), 0.01)
-	var favour_gain: float = snappedf(float(count) * float(option.get("favour_each", option.get("prestige_each", 0.0))), 0.01)
-	var god_text: String = ""
-	if god_id != "":
-		god_text = " to " + get_palace_route_name(god_id)
-	var detail: String = "Sacrificed " + str(count) + " " + String(option.get("name", "sacrifice")) + god_text + "."
-	var record: Dictionary = {
-		"source_id": "religion_sacrifice",
-		"sacrifice_id": sacrifice_id,
-		"name": String(option.get("name", "Sacrifice")),
-		"amount": count,
-		"god_id": god_id,
-		"prestige_each": float(option.get("prestige_each", 0.0)),
-		"favour_each": float(option.get("favour_each", option.get("prestige_each", 0.0))),
-		"prestige_gain": prestige_gain,
-		"favour_gain": favour_gain,
-		"veintena": current_veintena,
-		"detail": detail
-	}
-	add_player_prestige(prestige_gain, "religion_sacrifice", detail, record)
-	sacrifice_prestige_records.append(record.duplicate(true))
-	last_report.append(detail + " Prestige +" + _format_amount(prestige_gain) + "; favour +" + _format_amount(favour_gain) + ".")
-	emit_signal("state_changed")
-	return {"ok": true, "reason": "Sacrifice recorded.", "record": record, "prestige_gain": prestige_gain, "favour_gain": favour_gain, "message": detail + " Prestige +" + _format_amount(prestige_gain) + "; favour +" + _format_amount(favour_gain) + "."}
+	return _get_religion_system().sacrifice_for_prestige(self, sacrifice_id, amount, god_id)
 
 func get_sacrifice_prestige_records() -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	for record: Dictionary in sacrifice_prestige_records:
-		output.append(record.duplicate(true))
-	return output
+	return _get_religion_system().get_sacrifice_prestige_records(self)
 
 func _palace_donation_records_for_cycle(cycle_id: String = "") -> Array[Dictionary]:
-	var target_cycle: String = _palace_ruler_demand_cycle_id() if cycle_id == "" else cycle_id
-	var output: Array[Dictionary] = []
-	for record: Dictionary in palace_ruler_demand_donations:
-		if String(record.get("cycle_id", "")) == target_cycle:
-			output.append(record.duplicate(true))
-	return output
+	return _get_palace_system().palace_donation_records_for_cycle(self, cycle_id)
 
 func _palace_donation_records_for_cycle_slot(cycle_id: String, slot_id: String) -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	for record: Dictionary in _palace_donation_records_for_cycle(cycle_id):
-		if String(record.get("slot", "")) == slot_id:
-			output.append(record.duplicate(true))
-	return output
+	return _get_palace_system().palace_donation_records_for_cycle_slot(self, cycle_id, slot_id)
 
 func _palace_donation_total_for_cycle(cycle_id: String = "") -> Dictionary:
-	var records: Array[Dictionary] = _palace_donation_records_for_cycle(cycle_id)
-	var total_amount: float = 0.0
-	var total_prestige: float = 0.0
-	var by_resource: Dictionary = {}
-	var by_slot: Dictionary = {}
-	for record: Dictionary in records:
-		var amount: float = float(record.get("amount", 0.0))
-		var prestige_gain: float = float(record.get("prestige_gain", 0.0))
-		var resource_id: String = String(record.get("resource_id", ""))
-		var slot_id: String = String(record.get("slot", ""))
-		total_amount += amount
-		total_prestige += prestige_gain
-		by_resource[resource_id] = float(by_resource.get(resource_id, 0.0)) + amount
-		by_slot[slot_id] = float(by_slot.get(slot_id, 0.0)) + amount
-	return {
-		"donation_count": records.size(),
-		"total_amount": total_amount,
-		"total_prestige": total_prestige,
-		"by_resource": by_resource,
-		"by_slot": by_slot,
-		"records": records
-	}
+	return _get_palace_system().palace_donation_total_for_cycle(self, cycle_id)
 
 func _palace_donation_total_for_slot(cycle_id: String, slot_id: String) -> Dictionary:
-	var records: Array[Dictionary] = _palace_donation_records_for_cycle_slot(cycle_id, slot_id)
-	var total_amount: float = 0.0
-	var total_prestige: float = 0.0
-	for record: Dictionary in records:
-		total_amount += float(record.get("amount", 0.0))
-		total_prestige += float(record.get("prestige_gain", 0.0))
-	return {"donation_count": records.size(), "amount": total_amount, "prestige": total_prestige, "records": records}
+	return _get_palace_system().palace_donation_total_for_slot(self, cycle_id, slot_id)
 
 func can_donate_palace_need(slot_id: String, amount: float) -> Dictionary:
-	var raw_row: Dictionary = _palace_ruler_demand_raw_row_by_slot(slot_id)
-	if raw_row.is_empty():
-		return {"ok": false, "reason": "Unknown court-need slot: " + slot_id + "."}
-	var resource_id: String = String(raw_row.get("resource_id", ""))
-	if resource_id == "":
-		return {"ok": false, "reason": "Court need row is missing a valid resource."}
-	if amount <= 0.001:
-		return {"ok": false, "reason": "Choose a positive donation amount."}
-	var free_value: float = free_stock_after_reserves(resource_id)
-	if free_value + 0.001 < amount:
-		return {"ok": false, "reason": "Need " + _format_amount(amount - free_value) + " more free " + get_resource_name(resource_id) + " after reserves."}
-	var base_value: float = _resource_base_value(resource_id)
-	return {"ok": true, "reason": "Ready to donate " + _format_amount(amount) + " " + get_resource_name(resource_id) + " for +" + _format_amount(amount * base_value) + " Prestige.", "prestige_gain": amount * base_value}
+	return _get_palace_system().can_donate_palace_need(self, slot_id, amount)
 
 func donate_palace_need(slot_id: String, amount: float) -> Dictionary:
-	var status: Dictionary = can_donate_palace_need(slot_id, amount)
-	if not bool(status.get("ok", false)):
-		last_report.append("Court need donation failed: " + String(status.get("reason", "Unknown reason.")))
-		emit_signal("state_changed")
-		return status
-	var raw_row: Dictionary = _palace_ruler_demand_raw_row_by_slot(slot_id)
-	var resource_id: String = String(raw_row.get("resource_id", ""))
-	var base_value: float = _resource_base_value(resource_id)
-	var prestige_gain: float = amount * base_value
-	var free_before: float = free_stock_after_reserves(resource_id)
-	var stored_before: float = _stock(resource_id)
-	_add_stock(resource_id, -amount)
-	var record: Dictionary = {
-		"slot": slot_id,
-		"slot_name": String(raw_row.get("slot_name", "Court need")),
-		"cycle_id": _palace_ruler_demand_cycle_id(),
-		"resource_id": resource_id,
-		"resource_name": get_resource_name(resource_id),
-		"amount": amount,
-		"base_value": base_value,
-		"prestige_gain": prestige_gain,
-		"donated_veintena": current_veintena,
-		"free_before_donation": free_before,
-		"stored_before_donation": stored_before
-	}
-	palace_ruler_demand_donations.append(record)
-	add_player_prestige(prestige_gain, "court_need_donation", "Donated " + _format_amount(amount) + " " + get_resource_name(resource_id) + " to a court need.", record)
-	last_report.append("Donated " + _format_amount(amount) + " " + get_resource_name(resource_id) + " to the current court need. Prestige +" + _format_amount(prestige_gain) + ".")
-	emit_signal("state_changed")
-	return {"ok": true, "reason": "Donated.", "record": record, "prestige_gain": prestige_gain}
+	return _get_palace_system().donate_palace_need(self, slot_id, amount)
 
-# Compatibility wrappers retained so older UI/debug calls fail safely or donate the
-# visible need marker amount. New UI should use can_donate_palace_need/donate_palace_need.
 func is_palace_ruler_demand_delivered(slot_id: String) -> bool:
-	return float(_palace_donation_total_for_slot(_palace_ruler_demand_cycle_id(), slot_id).get("amount", 0.0)) > 0.001
+	return _get_palace_system().is_palace_ruler_demand_delivered(self, slot_id)
 
 func can_deliver_palace_ruler_demand(slot_id: String) -> Dictionary:
-	var raw_row: Dictionary = _palace_ruler_demand_raw_row_by_slot(slot_id)
-	if raw_row.is_empty():
-		return {"ok": false, "reason": "Unknown court-need slot: " + slot_id + "."}
-	return can_donate_palace_need(slot_id, float(raw_row.get("amount", 0.0)))
+	return _get_palace_system().can_deliver_palace_ruler_demand(self, slot_id)
 
 func deliver_palace_ruler_demand(slot_id: String) -> Dictionary:
-	var raw_row: Dictionary = _palace_ruler_demand_raw_row_by_slot(slot_id)
-	if raw_row.is_empty():
-		return {"ok": false, "reason": "Unknown court-need slot: " + slot_id + "."}
-	return donate_palace_need(slot_id, float(raw_row.get("amount", 0.0)))
+	return _get_palace_system().deliver_palace_ruler_demand(self, slot_id)
 
 func get_palace_ruler_demand_delivery_records() -> Array[Dictionary]:
-	return _palace_donation_records_for_cycle()
+	return _get_palace_system().get_palace_ruler_demand_delivery_records(self)
 
 func _palace_ruler_demand_archive_row(raw_row: Dictionary, cycle_id: String) -> Dictionary:
-	var slot_id: String = String(raw_row.get("slot", ""))
-	var donation: Dictionary = _palace_donation_total_for_slot(cycle_id, slot_id)
-	var donated_amount: float = float(donation.get("amount", 0.0))
-	return {
-		"slot": slot_id,
-		"slot_name": String(raw_row.get("slot_name", "Court need")),
-		"resource_id": String(raw_row.get("resource_id", "")),
-		"resource_name": get_resource_name(String(raw_row.get("resource_id", ""))),
-		"needed_marker": float(raw_row.get("amount", 0.0)),
-		"donated": donated_amount > 0.001,
-		"donated_amount": donated_amount,
-		"donated_prestige": float(donation.get("prestige", 0.0)),
-		"donation_count": int(donation.get("donation_count", 0)),
-		"status": "Donated" if donated_amount > 0.001 else "No donation"
-	}
+	return _get_palace_system().palace_ruler_demand_archive_row(self, raw_row, cycle_id)
 
 func _palace_ruler_demand_records_for_cycle(cycle_id: String) -> Array[Dictionary]:
-	return _palace_donation_records_for_cycle(cycle_id)
+	return _get_palace_system().palace_ruler_demand_records_for_cycle(self, cycle_id)
 
 func get_palace_ruler_demand_cycle_archive() -> Array[Dictionary]:
-	var archive: Array[Dictionary] = []
-	var demand_sets: Array[Dictionary] = _palace_ruler_demand_sets()
-	var current_cycle_id: String = _palace_ruler_demand_cycle_id()
-	for index: int in range(demand_sets.size()):
-		var cycle: Dictionary = demand_sets[index] as Dictionary
-		var cycle_id: String = String(cycle.get("id", ""))
-		var window: Dictionary = _palace_ruler_demand_cycle_window(index)
-		var rows: Array[Dictionary] = []
-		for row_variant: Variant in (cycle.get("demands", []) as Array):
-			if row_variant is Dictionary:
-				rows.append(_palace_ruler_demand_archive_row(row_variant as Dictionary, cycle_id))
-		var donation_summary: Dictionary = _palace_need_donation_summary_for_cycle(cycle_id, rows)
-		archive.append({
-			"cycle_id": cycle_id,
-			"title": String(cycle.get("title", "Court Need Cycle")),
-			"veintena_band": String(cycle.get("veintena_band", "Prototype cycle")),
-			"cycle_window": String(window.get("label", "Court need cycle")),
-			"start_veintena": int(window.get("start_veintena", 1)),
-			"end_veintena": int(window.get("end_veintena", 6)),
-			"flavour": String(cycle.get("flavour", "")),
-			"is_current": cycle_id == current_cycle_id,
-			"rows": rows,
-			"records": _palace_ruler_demand_records_for_cycle(cycle_id),
-			"donation_count": int(donation_summary.get("donation_count", 0)),
-			"donated_prestige": float(donation_summary.get("total_prestige", 0.0)),
-			"donated_slots": int(donation_summary.get("donated_slots", 0)),
-			"total_slots": int(donation_summary.get("total_slots", rows.size()))
-		})
-	return archive
+	return _get_palace_system().get_palace_ruler_demand_cycle_archive(self)
 
 func _palace_need_donation_summary_for_cycle(cycle_id: String, rows: Array[Dictionary] = []) -> Dictionary:
-	var total: Dictionary = _palace_donation_total_for_cycle(cycle_id)
-	var donated_slots: int = 0
-	var total_slots: int = rows.size()
-	for row: Dictionary in rows:
-		if bool(row.get("donated", false)):
-			donated_slots += 1
-	return {
-		"label": "Prestige +" + _format_amount(float(total.get("total_prestige", 0.0))),
-		"detail": str(int(total.get("donation_count", 0))) + " donations made across " + str(donated_slots) + " / " + str(total_slots) + " visible court needs.",
-		"donation_count": int(total.get("donation_count", 0)),
-		"total_amount": float(total.get("total_amount", 0.0)),
-		"total_prestige": float(total.get("total_prestige", 0.0)),
-		"donated_slots": donated_slots,
-		"total_slots": total_slots,
-		"records": total.get("records", []) as Array
-	}
+	return _get_palace_system().palace_need_donation_summary_for_cycle(self, cycle_id, rows)
 
 func get_palace_ruler_demand_completion_summary() -> Dictionary:
-	# Compatibility name. This is now a donation/prestige summary, not a completion
-	# or quality score.
-	var rows: Array[Dictionary] = []
-	for row_variant: Variant in (_current_palace_ruler_demand_set().get("demands", []) as Array):
-		if row_variant is Dictionary:
-			rows.append(_palace_ruler_demand_row(row_variant as Dictionary))
-	return _palace_need_donation_summary_for_cycle(_palace_ruler_demand_cycle_id(), rows)
+	return _get_palace_system().get_palace_ruler_demand_completion_summary(self)
 
 func _palace_ruler_demand_row(raw_row: Dictionary) -> Dictionary:
-	var slot_id: String = String(raw_row.get("slot", ""))
-	var resource_id: String = String(raw_row.get("resource_id", ""))
-	var need_marker: float = float(raw_row.get("amount", 0.0))
-	var stored: float = _stock(resource_id)
-	var free_value: float = free_stock_after_reserves(resource_id)
-	var base_value: float = _resource_base_value(resource_id)
-	var donation: Dictionary = _palace_donation_total_for_slot(_palace_ruler_demand_cycle_id(), slot_id)
-	var donated_amount: float = float(donation.get("amount", 0.0))
-	var donated_prestige: float = float(donation.get("prestige", 0.0))
-	var can_donate_status: Dictionary = can_donate_palace_need(slot_id, minf(maxf(1.0, need_marker), free_value)) if free_value > 0.001 else {"ok": false, "reason": "No free stock available after reserves."}
-	return {
-		"slot": slot_id,
-		"slot_name": String(raw_row.get("slot_name", "Court need")),
-		"resource_id": resource_id,
-		"resource_name": get_resource_name(resource_id),
-		"requested": need_marker, # Legacy UI field; now means visible need marker, not a completion requirement.
-		"needed_marker": need_marker,
-		"stored": stored,
-		"free_after_reserves": free_value,
-		"shortfall": 0.0,
-		"ready": free_value > 0.001,
-		"delivered": donated_amount > 0.001, # Legacy field; means donated at least once.
-		"can_deliver": free_value > 0.001,
-		"can_donate": free_value > 0.001,
-		"delivery_status": String(can_donate_status.get("reason", "")),
-		"donation_status": String(can_donate_status.get("reason", "")),
-		"delivered_amount": donated_amount,
-		"donated_amount": donated_amount,
-		"delivered_veintena": 0,
-		"delivery_quality": "",
-		"donated_prestige": donated_prestige,
-		"base_value": base_value,
-		"prestige_for_need_marker": need_marker * base_value,
-		"max_donation": free_value,
-		"status": "Donated " + _format_amount(donated_amount) if donated_amount > 0.001 else ("Open need" if free_value > 0.001 else "No free stock"),
-		"quality_hint": "Prestige = donated amount × base value (" + _format_amount(base_value) + ").",
-		"note": String(raw_row.get("note", "Court-facing need."))
-	}
+	return _get_palace_system().palace_ruler_demand_row(self, raw_row)
 
 func get_palace_ruler_demands_summary() -> Dictionary:
-	var demand_sets: Array[Dictionary] = _palace_ruler_demand_sets()
-	var selected_index: int = _current_palace_ruler_demand_index()
-	var selected: Dictionary = demand_sets[selected_index] if demand_sets.size() > 0 else {}
-	var rows: Array[Dictionary] = []
-	var open_count: int = 0
-	var donated_slot_count: int = 0
-	var total_count: int = 0
-	var total_need_marker_value: float = 0.0
-	var total_free_matching_value: float = 0.0
-	var raw_rows: Array = selected.get("demands", []) as Array
-	for row_variant: Variant in raw_rows:
-		if not (row_variant is Dictionary):
-			continue
-		var row: Dictionary = _palace_ruler_demand_row(row_variant as Dictionary)
-		rows.append(row)
-		total_count += 1
-		if bool(row.get("delivered", false)):
-			donated_slot_count += 1
-		if bool(row.get("can_donate", false)):
-			open_count += 1
-		total_need_marker_value += float(row.get("prestige_for_need_marker", 0.0))
-		total_free_matching_value += float(row.get("free_after_reserves", 0.0)) * float(row.get("base_value", 1.0))
-	var donation_summary: Dictionary = _palace_need_donation_summary_for_cycle(String(selected.get("id", "")), rows)
-	var deadline: Dictionary = _palace_ruler_demand_deadline_summary(selected_index)
-	var donated_prestige: float = float(donation_summary.get("total_prestige", 0.0))
-	var headline: String = "Court needs: " + str(open_count) + " goods available to donate; this cycle has generated +" + _format_amount(donated_prestige) + " Prestige. Deadline: " + String(deadline.get("urgency", "Time remains")) + "."
-	if total_count <= 0:
-		headline = "Court needs have no active rows."
-	return {
-		"schema_version": "palace_court_needs_v0_36",
-		"active": true,
-		"donation_enabled": true,
-		"delivery_enabled": false,
-		"current_veintena": current_veintena,
-		"cycle_index": selected_index,
-		"cycle_id": String(selected.get("id", "")),
-		"title": String(selected.get("title", "Current Court Needs")),
-		"veintena_band": String(selected.get("veintena_band", "Prototype cycle")),
-		"cycle_window": String(deadline.get("headline", "Court need cycle")),
-		"cycle_start_veintena": int(deadline.get("start_veintena", 1)),
-		"cycle_end_veintena": int(deadline.get("end_veintena", 6)),
-		"veintenas_remaining": int(deadline.get("veintenas_remaining", 0)),
-		"urgency_label": String(deadline.get("urgency", "Time remains")),
-		"deadline_summary": deadline,
-		"flavour": String(selected.get("flavour", "The court needs goods; donating needed goods creates public prestige.")),
-		"rows": rows,
-		"ready_count": open_count,
-		"delivered_count": donated_slot_count,
-		"donated_slot_count": donated_slot_count,
-		"total_count": total_count,
-		"headline": headline,
-		"completion_label": str(donated_slot_count) + " / " + str(total_count) + " needs donated to",
-		"donation_label": str(donated_slot_count) + " / " + str(total_count) + " needs donated to",
-		"completion_quality": "Prestige +" + _format_amount(donated_prestige),
-		"donation_prestige_label": "Prestige +" + _format_amount(donated_prestige),
-		"completion_detail": String(donation_summary.get("detail", "No donations yet.")),
-		"completion_summary": donation_summary,
-		"readiness_label": str(open_count) + " needs have free stock available",
-		"delivery_records": get_palace_ruler_demand_delivery_records(),
-		"donation_records": get_palace_ruler_demand_delivery_records(),
-		"cycle_archive": get_palace_ruler_demand_cycle_archive(),
-		"total_requested_value": total_need_marker_value,
-		"total_free_matching_value": total_free_matching_value,
-		"total_donated_prestige": donated_prestige,
-		"player_prestige": player_prestige,
-		"mechanics_note": "v0.36 reframes court needs as court needs. Donating a needed good grants Prestige equal to donated amount × that good's base value. Prestige is score only and is never spent. No royal favour, local stability or palace-route credit is created."
-	}
+	return _get_palace_system().get_palace_ruler_demands_summary(self)
 
 func get_palace_summary() -> Dictionary:
 	var dedicated_god: String = get_palace_dedicated_god()
@@ -4549,23 +3066,10 @@ func get_palace_summary() -> Dictionary:
 	}
 
 func get_flower_war_options() -> Array[Dictionary]:
-	var rows: Array[Dictionary] = []
-	for option_id: String in ["minor", "standard", "major"]:
-		var data: Dictionary = FLOWER_WAR_OPTIONS[option_id] as Dictionary
-		var row: Dictionary = data.duplicate(true)
-		row["id"] = option_id
-		row["can_launch_standard"] = get_warrior_count() >= int(row.get("warriors", 0))
-		rows.append(row)
-	return rows
+	return _get_flower_war_system().get_flower_war_options(self)
 
 func get_flower_war_defence_strategies() -> Array[Dictionary]:
-	var rows: Array[Dictionary] = []
-	for strategy_id: String in ["balanced", "depth", "good_offence"]:
-		var data: Dictionary = FLOWER_WAR_DEFENCE_STRATEGIES[strategy_id] as Dictionary
-		var row: Dictionary = data.duplicate(true)
-		row["id"] = strategy_id
-		rows.append(row)
-	return rows
+	return _get_flower_war_system().get_flower_war_defence_strategies()
 
 func start_flower_war_attack_event(option_id: String = "standard", source_id: String = "player", context: Dictionary = {}) -> Dictionary:
 	# Event-hook infrastructure only. This does not resolve a Flower War. It returns
@@ -4636,68 +3140,10 @@ func get_flower_war_event_hook_summary() -> Dictionary:
 	}
 
 func _flower_war_defence_strategy_data(strategy_id: String) -> Dictionary:
-	var cleaned: String = strategy_id
-	if not FLOWER_WAR_DEFENCE_STRATEGIES.has(cleaned):
-		cleaned = "balanced"
-	var data: Dictionary = (FLOWER_WAR_DEFENCE_STRATEGIES[cleaned] as Dictionary).duplicate(true)
-	data["id"] = cleaned
-	return data
+	return _get_flower_war_system().flower_war_defence_strategy_data(strategy_id)
 
 func get_flower_war_preview(option_id: String = "minor", doctrine_id: String = "unspecialised", provisioning_id: String = "standard") -> Dictionary:
-	if not FLOWER_WAR_OPTIONS.has(option_id):
-		return {"ok": false, "reason": "Unknown Flower War option."}
-	if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
-		doctrine_id = "unspecialised"
-	if not FLOWER_WAR_PROVISIONING.has(provisioning_id):
-		provisioning_id = "standard"
-	var option: Dictionary = FLOWER_WAR_OPTIONS[option_id] as Dictionary
-	var doctrine: Dictionary = FLOWER_WAR_DOCTRINES[doctrine_id] as Dictionary
-	var provisioning: Dictionary = FLOWER_WAR_PROVISIONING[provisioning_id] as Dictionary
-	var warriors_committed: int = int(option.get("warriors", 0))
-	var enemy_warriors: int = int(option.get("enemy_warriors", warriors_committed))
-	var combat_multiplier: float = float(provisioning.get("combat_multiplier", 1.0))
-	var attacker_attack: float = float(warriors_committed) * float(doctrine.get("offence", 1.0)) * combat_multiplier
-	var defender_defence: float = float(enemy_warriors) * float(option.get("enemy_defence", 1.0))
-	var defender_casualties: int = clampi(int(round(maxf(0.0, attacker_attack - defender_defence * 0.55))), 0, enemy_warriors)
-	var surviving_defenders: int = max(0, enemy_warriors - defender_casualties)
-	var defender_attack: float = float(surviving_defenders) * float(option.get("enemy_offence", 1.0))
-	var attacker_defence: float = float(warriors_committed) * float(doctrine.get("defence", 1.0))
-	var attacker_casualties: int = clampi(int(round(maxf(0.0, defender_attack - attacker_defence * 0.55))), 0, warriors_committed)
-	var net_damage: int = defender_casualties - attacker_casualties
-	var result: String = _flower_war_result_label(net_damage, warriors_committed, enemy_warriors)
-	var captives: int = _flower_war_captives(result, defender_casualties, warriors_committed, doctrine_id)
-	var loot: Dictionary = _flower_war_loot(result, defender_casualties, doctrine_id, float(option.get("base_loot_value", 1.2)))
-	var loot_value: float = _flower_war_loot_display_value(loot)
-	var provisioning_cost: Dictionary = _flower_war_provisioning_cost(warriors_committed, float(provisioning.get("supply_multiplier", 1.0)))
-	return {
-		"ok": true,
-		"option_id": option_id,
-		"option_name": String(option.get("name", option_id.capitalize())),
-		"doctrine_id": doctrine_id,
-		"doctrine_name": String(doctrine.get("name", doctrine_id.capitalize())),
-		"provisioning_id": provisioning_id,
-		"provisioning_name": String(provisioning.get("name", provisioning_id.capitalize())),
-		"warriors_committed": warriors_committed,
-		"committed_warriors": warriors_committed,
-		"injured_not_fighting": int(get_army_muster_summary().get("injured_not_fighting", 0)),
-		"enemy_warriors": enemy_warriors,
-		"attacker_attack": attacker_attack,
-		"attacker_defence": attacker_defence,
-		"defender_casualties": defender_casualties,
-		"attacker_casualties": attacker_casualties,
-		"attacker_losses": attacker_casualties,
-		"attacker_injured": int(ceil(float(attacker_casualties) * 0.6)),
-		"attacker_dead": int(floor(float(attacker_casualties) * 0.4)),
-		"result": result,
-		"captives": captives,
-		"loot": loot,
-		"loot_value": loot_value,
-		"provisioning_cost": provisioning_cost,
-		"prestige_pending": false,
-		"prestige_breakdown": _flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value),
-		"prestige_gain": float(_flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value).get("total", 0.0)),
-		"prestige_text": _prestige_text_from_breakdown(_flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value))
-	}
+	return _get_flower_war_system().get_single_doctrine_attack_preview(self, option_id, doctrine_id, provisioning_id)
 
 func can_launch_flower_war(option_id: String = "minor", doctrine_id: String = "unspecialised", provisioning_id: String = "standard") -> Dictionary:
 	# Backwards-compatible wrapper. The old generic launch path now sends all
@@ -4747,23 +3193,12 @@ func _flower_war_archive_title(report: Dictionary) -> String:
 		return "Defence — " + option_name + " — " + result
 	return "Muster — " + option_name + " — " + result
 
-func get_flower_war_preview_with_all_warbands(option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
+func _flower_war_participant_rows_for_ids(selected_ids: Array[String]) -> Array[Dictionary]:
 	_ensure_warband_state()
-	if not FLOWER_WAR_OPTIONS.has(option_id):
-		return {"ok": false, "reason": "Unknown Flower War option."}
-	if not FLOWER_WAR_PROVISIONING.has(provisioning_id):
-		provisioning_id = "standard"
-	var option: Dictionary = FLOWER_WAR_OPTIONS[option_id] as Dictionary
-	var provisioning: Dictionary = FLOWER_WAR_PROVISIONING[provisioning_id] as Dictionary
 	var participants: Array[Dictionary] = []
-	var warriors_committed: int = 0
-	var weighted_offence: float = 0.0
-	var weighted_defence: float = 0.0
-	var eagle_warriors: int = 0
-	var coyote_warriors: int = 0
-
-	for warband_id_variant: Variant in warbands.keys():
-		var warband_id: String = String(warband_id_variant)
+	for warband_id: String in selected_ids:
+		if not warbands.has(warband_id):
+			continue
 		var warband: Dictionary = warbands[warband_id] as Dictionary
 		var ready: int = max(0, int(warband.get("ready_warriors", 0)))
 		if ready <= 0:
@@ -4772,6 +3207,7 @@ func get_flower_war_preview_with_all_warbands(option_id: String = "minor", provi
 		if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
 			doctrine_id = "unspecialised"
 		var synced: Dictionary = _sync_warband_progress(warband.duplicate(true))
+		warbands[warband_id] = synced
 		var stats: Dictionary = _warband_combat_stats_from_warband(synced)
 		participants.append({
 			"id": warband_id,
@@ -4781,6 +3217,7 @@ func get_flower_war_preview_with_all_warbands(option_id: String = "minor", provi
 			"injured": int(stats.get("injured", 0)),
 			"level": int(synced.get("level", 1)),
 			"doctrine_id": doctrine_id,
+			"doctrine": doctrine_id,
 			"doctrine_name": String(stats.get("doctrine_name", doctrine_id.capitalize())),
 			"offence": float(stats.get("offence_modifier", 1.0)),
 			"defence": float(stats.get("defence_modifier", 1.0)),
@@ -4788,189 +3225,20 @@ func get_flower_war_preview_with_all_warbands(option_id: String = "minor", provi
 			"effective_defence": float(stats.get("effective_defence", 0.0)),
 			"combat_stats": stats
 		})
-		warriors_committed += ready
-		weighted_offence += float(stats.get("effective_offence", 0.0))
-		weighted_defence += float(stats.get("effective_defence", 0.0))
-		if doctrine_id == "eagle":
-			eagle_warriors += ready
-		elif doctrine_id == "coyote":
-			coyote_warriors += ready
+	return participants
 
-	if warriors_committed <= 0:
-		return {"ok": false, "reason": "No ready warriors are assigned to warbands."}
-
-	var enemy_warriors: int = int(option.get("enemy_warriors", option.get("warriors", warriors_committed)))
-	var minimum_warriors: int = int(option.get("warriors", enemy_warriors))
-	var combat_multiplier: float = float(provisioning.get("combat_multiplier", 1.0))
-	var attacker_attack: float = weighted_offence * combat_multiplier
-	var defender_defence: float = float(enemy_warriors) * float(option.get("enemy_defence", 1.0))
-	var defender_casualties: int = clampi(int(round(maxf(0.0, attacker_attack - defender_defence * 0.55))), 0, enemy_warriors)
-	var surviving_defenders: int = max(0, enemy_warriors - defender_casualties)
-	var defender_attack: float = float(surviving_defenders) * float(option.get("enemy_offence", 1.0))
-	var attacker_defence: float = weighted_defence
-	var attacker_casualties: int = clampi(int(round(maxf(0.0, defender_attack - attacker_defence * 0.55))), 0, warriors_committed)
-	var net_damage: int = defender_casualties - attacker_casualties
-	var result: String = _flower_war_result_label(net_damage, warriors_committed, enemy_warriors)
-	var captives: int = _flower_war_captives_for_all_warbands(result, defender_casualties, warriors_committed, eagle_warriors)
-	var loot: Dictionary = _flower_war_loot_for_all_warbands(result, defender_casualties, coyote_warriors, warriors_committed, float(option.get("base_loot_value", 1.2)))
-	var loot_value: float = _flower_war_loot_display_value(loot)
-	var provisioning_cost: Dictionary = _flower_war_provisioning_cost(warriors_committed, float(provisioning.get("supply_multiplier", 1.0)))
-	var xp_gained: int = _flower_war_xp_gain(result, warriors_committed, defender_casualties, captives)
-
-	return {
-		"ok": true,
-		"all_warbands": true,
-		"warband_id": "all_warbands",
-		"warband_name": "All Warbands",
-		"option_id": option_id,
-		"option_name": String(option.get("name", option_id.capitalize())),
-		"option_minimum_warriors": minimum_warriors,
-		"doctrine_id": "combined",
-		"doctrine_name": "Combined Warbands",
-		"provisioning_id": provisioning_id,
-		"provisioning_name": String(provisioning.get("name", provisioning_id.capitalize())),
-		"participants": participants,
-		"participating_warband_count": participants.size(),
-		"warriors_committed": warriors_committed,
-		"committed_warriors": warriors_committed,
-		"injured_not_fighting": int(get_army_muster_summary().get("injured_not_fighting", 0)),
-		"enemy_warriors": enemy_warriors,
-		"attacker_attack": attacker_attack,
-		"attacker_defence": attacker_defence,
-		"defender_casualties": defender_casualties,
-		"attacker_casualties": attacker_casualties,
-		"attacker_losses": attacker_casualties,
-		"attacker_injured": int(ceil(float(attacker_casualties) * 0.6)),
-		"attacker_dead": int(floor(float(attacker_casualties) * 0.4)),
-		"result": result,
-		"captives": captives,
-		"loot": loot,
-		"loot_value": loot_value,
-		"provisioning_cost": provisioning_cost,
-		"xp_gained": xp_gained,
-		"eagle_warriors": eagle_warriors,
-		"coyote_warriors": coyote_warriors,
-		"prestige_pending": false,
-		"prestige_breakdown": _flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value),
-		"prestige_gain": float(_flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value).get("total", 0.0)),
-		"prestige_text": _prestige_text_from_breakdown(_flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value))
-	}
+func get_flower_war_preview_with_all_warbands(option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
+	_ensure_warband_state()
+	var selected_ids: Array[String] = _selected_warband_ids_or_all_ready([])
+	var participants: Array[Dictionary] = _flower_war_participant_rows_for_ids(selected_ids)
+	var injured_not_fighting: int = int(get_army_muster_summary().get("injured_not_fighting", 0))
+	return _get_flower_war_system().get_combined_attack_preview(self, option_id, provisioning_id, participants, injured_not_fighting, selected_ids, true)
 
 func can_launch_flower_war_with_all_warbands(option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
-	_ensure_warband_state()
-	if not flower_war_palace_gate_passed():
-		return {"ok": false, "reason": flower_war_palace_gate_status_text()}
-	var preview: Dictionary = get_flower_war_preview_with_all_warbands(option_id, provisioning_id)
-	if not bool(preview.get("ok", false)):
-		return preview
-	var committed: int = int(preview.get("warriors_committed", 0))
-	var minimum_warriors: int = int(preview.get("option_minimum_warriors", 0))
-	if committed < minimum_warriors:
-		return {"ok": false, "reason": "This scale needs at least " + str(minimum_warriors) + " ready warriors across all warbands; only " + str(committed) + " ready."}
-	var cost_status: Dictionary = _can_pay_free_stock(preview.get("provisioning_cost", {}) as Dictionary)
-	if not bool(cost_status.get("ok", false)):
-		return cost_status
-	return {"ok": true, "reason": "Ready. All ready warbands will be committed.", "preview": preview}
+	return _get_flower_war_system().can_launch_combined_attack(self, [], option_id, provisioning_id, true)
 
 func launch_flower_war_with_all_warbands(option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
-	var status: Dictionary = can_launch_flower_war_with_all_warbands(option_id, provisioning_id)
-	if not bool(status.get("ok", false)):
-		last_flower_war_report = {"ok": false, "reason": String(status.get("reason", "Flower War cannot launch.")), "warband_id": "all_warbands", "all_warbands": true}
-		last_report.append("Flower War not launched: " + String(last_flower_war_report.get("reason", "blocked")) + ".")
-		emit_signal("state_changed")
-		return last_flower_war_report.duplicate(true)
-
-	var preview: Dictionary = status.get("preview", {}) as Dictionary
-	if preview.is_empty():
-		preview = get_flower_war_preview_with_all_warbands(option_id, provisioning_id)
-	_pay_free_stock(preview.get("provisioning_cost", {}) as Dictionary)
-
-	var participants: Array = preview.get("participants", []) as Array
-	var committed: int = int(preview.get("warriors_committed", 0))
-	var casualties: int = int(preview.get("attacker_casualties", 0))
-	var captives: int = int(preview.get("captives", 0))
-	var xp_total: int = int(preview.get("xp_gained", 0))
-	var casualty_alloc: Dictionary = _distribute_integer_by_weights(casualties, participants, "committed", true)
-	var xp_alloc: Dictionary = _distribute_integer_by_weights(xp_total, participants, "committed", false)
-	var total_injured: int = 0
-	var total_dead: int = 0
-	var participant_reports: Array[Dictionary] = []
-	var level_reports: Array[String] = []
-
-	for participant_variant: Variant in participants:
-		var participant: Dictionary = participant_variant as Dictionary
-		var warband_id: String = String(participant.get("id", ""))
-		if not warbands.has(warband_id):
-			continue
-		var warband: Dictionary = warbands[warband_id] as Dictionary
-		var level_before: int = int(_sync_warband_progress(warband.duplicate(true)).get("level", 1))
-		var committed_i: int = int(participant.get("committed", 0))
-		var casualties_i: int = clampi(int(casualty_alloc.get(warband_id, 0)), 0, committed_i)
-		var dead_i: int = int(floor(float(casualties_i) * 0.4))
-		var injured_i: int = max(0, casualties_i - dead_i)
-		var xp_i: int = max(0, int(xp_alloc.get(warband_id, 0)))
-		total_injured += injured_i
-		total_dead += dead_i
-		warband["ready_warriors"] = max(0, int(warband.get("ready_warriors", 0)) - casualties_i)
-		warband["injured_warriors"] = max(0, int(warband.get("injured_warriors", 0)) + injured_i)
-		warband["dead_total"] = max(0, int(warband.get("dead_total", 0)) + dead_i)
-		warband["xp"] = max(0, int(warband.get("xp", 0)) + xp_i)
-		var history: Array = warband.get("battle_history", []) as Array
-		history.append({
-			"veintena": current_veintena,
-			"option_id": option_id,
-			"result": String(preview.get("result", "Unknown")),
-			"committed": committed_i,
-			"casualties": casualties_i,
-			"injured": injured_i,
-			"dead": dead_i,
-			"captives": captives,
-			"xp_gained": xp_i,
-			"all_warbands": true
-		})
-		warband["battle_history"] = history
-		warbands[warband_id] = _sync_warband_progress(warband)
-		var level_after: int = int((warbands[warband_id] as Dictionary).get("level", level_before))
-		if level_after > level_before:
-			level_reports.append(String(warband.get("name", "Warband")) + " reached Level " + str(level_after) + " and gained " + str(max(0, level_after - level_before)) + " skill point(s)")
-		participant_reports.append({
-			"id": warband_id,
-			"name": String(warband.get("name", "Warband")),
-			"committed": committed_i,
-			"casualties": casualties_i,
-			"injured": injured_i,
-			"dead": dead_i,
-			"xp_gained": xp_i,
-			"level_before": level_before,
-			"level_after": level_after
-		})
-
-	if total_dead > 0:
-		population["yaotequihuaqueh"] = max(0, get_warrior_count() - total_dead)
-	if captives > 0:
-		estate_stockpiles["captives"] = float(estate_stockpiles.get("captives", 0.0)) + float(captives)
-	add_looted_goods_bundle(preview.get("loot", {}) as Dictionary)
-
-	last_flower_war_report = preview.duplicate(true)
-	last_flower_war_report["ok"] = true
-	last_flower_war_report["all_warbands"] = true
-	last_flower_war_report["warband_id"] = "all_warbands"
-	last_flower_war_report["warband_name"] = "All Warbands"
-	last_flower_war_report["warriors_returned"] = max(0, committed - casualties)
-	last_flower_war_report["attacker_injured"] = total_injured
-	last_flower_war_report["attacker_dead"] = total_dead
-	last_flower_war_report["participant_reports"] = participant_reports
-	last_flower_war_report["level_reports"] = level_reports
-	last_flower_war_report = _apply_flower_war_prestige_to_report(last_flower_war_report)
-	_archive_flower_war_report(last_flower_war_report)
-
-	var line: String = "All warbands fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_total) + " shared by participating warbands. " + String(last_flower_war_report.get("prestige_text", "Prestige +0")) + "."
-	if not level_reports.is_empty():
-		line += " " + "; ".join(level_reports) + "."
-	last_report.append(line)
-	emit_signal("state_changed")
-	return last_flower_war_report.duplicate(true)
-
+	return _get_flower_war_system().launch_combined_attack(self, [], option_id, provisioning_id, true)
 
 func _selected_warband_ids_or_all_ready(warband_ids: Array) -> Array[String]:
 	_ensure_warband_state()
@@ -4992,471 +3260,32 @@ func _selected_warband_ids_or_all_ready(warband_ids: Array) -> Array[String]:
 
 func get_flower_war_preview_with_selected_warbands(warband_ids: Array, option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
 	_ensure_warband_state()
-	if not FLOWER_WAR_OPTIONS.has(option_id):
-		return {"ok": false, "reason": "Unknown Flower War option."}
-	if not FLOWER_WAR_PROVISIONING.has(provisioning_id):
-		provisioning_id = "standard"
 	var selected_ids: Array[String] = _selected_warband_ids_or_all_ready(warband_ids)
-	var option: Dictionary = FLOWER_WAR_OPTIONS[option_id] as Dictionary
-	var provisioning: Dictionary = FLOWER_WAR_PROVISIONING[provisioning_id] as Dictionary
-	var participants: Array[Dictionary] = []
-	var warriors_committed: int = 0
-	var weighted_offence: float = 0.0
-	var weighted_defence: float = 0.0
-	var eagle_warriors: int = 0
-	var coyote_warriors: int = 0
-
-	for warband_id: String in selected_ids:
-		if not warbands.has(warband_id):
-			continue
-		var warband: Dictionary = warbands[warband_id] as Dictionary
-		var ready: int = max(0, int(warband.get("ready_warriors", 0)))
-		if ready <= 0:
-			continue
-		var doctrine_id: String = String(warband.get("doctrine", "unspecialised"))
-		if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
-			doctrine_id = "unspecialised"
-		var synced: Dictionary = _sync_warband_progress(warband.duplicate(true))
-		var stats: Dictionary = _warband_combat_stats_from_warband(synced)
-		participants.append({
-			"id": warband_id,
-			"name": String(stats.get("name", "Warband")),
-			"committed": ready,
-			"ready": ready,
-			"injured": int(stats.get("injured", 0)),
-			"level": int(synced.get("level", 1)),
-			"doctrine_id": doctrine_id,
-			"doctrine_name": String(stats.get("doctrine_name", doctrine_id.capitalize())),
-			"offence": float(stats.get("offence_modifier", 1.0)),
-			"defence": float(stats.get("defence_modifier", 1.0)),
-			"effective_offence": float(stats.get("effective_offence", 0.0)),
-			"effective_defence": float(stats.get("effective_defence", 0.0)),
-			"combat_stats": stats
-		})
-		warriors_committed += ready
-		weighted_offence += float(stats.get("effective_offence", 0.0))
-		weighted_defence += float(stats.get("effective_defence", 0.0))
-		if doctrine_id == "eagle":
-			eagle_warriors += ready
-		elif doctrine_id == "coyote":
-			coyote_warriors += ready
-
-	if warriors_committed <= 0:
-		return {"ok": false, "reason": "No selected warbands have ready warriors."}
-
-	var enemy_warriors: int = int(option.get("enemy_warriors", option.get("warriors", warriors_committed)))
-	var minimum_warriors: int = int(option.get("warriors", enemy_warriors))
-	var combat_multiplier: float = float(provisioning.get("combat_multiplier", 1.0))
-	var attacker_attack: float = weighted_offence * combat_multiplier
-	var defender_defence: float = float(enemy_warriors) * float(option.get("enemy_defence", 1.0))
-	var defender_casualties: int = clampi(int(round(maxf(0.0, attacker_attack - defender_defence * 0.55))), 0, enemy_warriors)
-	var surviving_defenders: int = max(0, enemy_warriors - defender_casualties)
-	var defender_attack: float = float(surviving_defenders) * float(option.get("enemy_offence", 1.0))
-	var attacker_defence: float = weighted_defence
-	var attacker_casualties: int = clampi(int(round(maxf(0.0, defender_attack - attacker_defence * 0.55))), 0, warriors_committed)
-	var net_damage: int = defender_casualties - attacker_casualties
-	var result: String = _flower_war_result_label(net_damage, warriors_committed, enemy_warriors)
-	var captives: int = _flower_war_captives_for_all_warbands(result, defender_casualties, warriors_committed, eagle_warriors)
-	var loot: Dictionary = _flower_war_loot_for_all_warbands(result, defender_casualties, coyote_warriors, warriors_committed, float(option.get("base_loot_value", 1.2)))
-	var loot_value: float = _flower_war_loot_display_value(loot)
-	var provisioning_cost: Dictionary = _flower_war_provisioning_cost(warriors_committed, float(provisioning.get("supply_multiplier", 1.0)))
-	var xp_gained: int = _flower_war_xp_gain(result, warriors_committed, defender_casualties, captives)
-
-	return {
-		"ok": true,
-		"event_type": "flower_war_attack",
-		"selected_warbands": true,
-		"selected_warband_ids": selected_ids.duplicate(),
-		"all_warbands": false,
-		"warband_id": "selected_warbands",
-		"warband_name": "Selected Warbands",
-		"option_id": option_id,
-		"option_name": String(option.get("name", option_id.capitalize())),
-		"option_minimum_warriors": minimum_warriors,
-		"doctrine_id": "combined",
-		"doctrine_name": "Combined Warbands",
-		"provisioning_id": provisioning_id,
-		"provisioning_name": String(provisioning.get("name", provisioning_id.capitalize())),
-		"participants": participants,
-		"participating_warband_count": participants.size(),
-		"warriors_committed": warriors_committed,
-		"committed_warriors": warriors_committed,
-		"injured_not_fighting": int(get_army_muster_summary().get("injured_not_fighting", 0)),
-		"enemy_warriors": enemy_warriors,
-		"attacker_attack": attacker_attack,
-		"attacker_defence": attacker_defence,
-		"defender_casualties": defender_casualties,
-		"attacker_casualties": attacker_casualties,
-		"attacker_losses": attacker_casualties,
-		"attacker_injured": int(ceil(float(attacker_casualties) * 0.6)),
-		"attacker_dead": int(floor(float(attacker_casualties) * 0.4)),
-		"result": result,
-		"captives": captives,
-		"loot": loot,
-		"loot_value": loot_value,
-		"provisioning_cost": provisioning_cost,
-		"xp_gained": xp_gained,
-		"eagle_warriors": eagle_warriors,
-		"coyote_warriors": coyote_warriors,
-		"prestige_pending": false,
-		"prestige_breakdown": _flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value),
-		"prestige_gain": float(_flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value).get("total", 0.0)),
-		"prestige_text": _prestige_text_from_breakdown(_flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value))
-	}
+	var participants: Array[Dictionary] = _flower_war_participant_rows_for_ids(selected_ids)
+	var injured_not_fighting: int = int(get_army_muster_summary().get("injured_not_fighting", 0))
+	return _get_flower_war_system().get_combined_attack_preview(self, option_id, provisioning_id, participants, injured_not_fighting, selected_ids, false)
 
 func can_launch_flower_war_with_selected_warbands(warband_ids: Array, option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
-	_ensure_warband_state()
-	if not flower_war_palace_gate_passed():
-		return {"ok": false, "reason": flower_war_palace_gate_status_text()}
-	var preview: Dictionary = get_flower_war_preview_with_selected_warbands(warband_ids, option_id, provisioning_id)
-	if not bool(preview.get("ok", false)):
-		return preview
-	var committed: int = int(preview.get("warriors_committed", 0))
-	var minimum_warriors: int = int(preview.get("option_minimum_warriors", 0))
-	if committed < minimum_warriors:
-		return {"ok": false, "reason": "This scale needs at least " + str(minimum_warriors) + " ready warriors; selected warbands provide " + str(committed) + "."}
-	var cost_status: Dictionary = _can_pay_free_stock(preview.get("provisioning_cost", {}) as Dictionary)
-	if not bool(cost_status.get("ok", false)):
-		return cost_status
-	return {"ok": true, "reason": "Ready. Selected warbands will be committed.", "preview": preview}
+	return _get_flower_war_system().can_launch_combined_attack(self, warband_ids, option_id, provisioning_id, false)
 
 func launch_flower_war_with_selected_warbands(warband_ids: Array, option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
-	var status: Dictionary = can_launch_flower_war_with_selected_warbands(warband_ids, option_id, provisioning_id)
-	if not bool(status.get("ok", false)):
-		last_flower_war_report = {"ok": false, "reason": String(status.get("reason", "Flower War cannot launch.")), "warband_id": "selected_warbands", "selected_warbands": true}
-		last_report.append("Flower War not launched: " + String(last_flower_war_report.get("reason", "blocked")) + ".")
-		emit_signal("state_changed")
-		return last_flower_war_report.duplicate(true)
-
-	var preview: Dictionary = status.get("preview", {}) as Dictionary
-	if preview.is_empty():
-		preview = get_flower_war_preview_with_selected_warbands(warband_ids, option_id, provisioning_id)
-	_pay_free_stock(preview.get("provisioning_cost", {}) as Dictionary)
-
-	var participants: Array = preview.get("participants", []) as Array
-	var committed: int = int(preview.get("warriors_committed", 0))
-	var casualties: int = int(preview.get("attacker_casualties", 0))
-	var captives: int = int(preview.get("captives", 0))
-	var xp_total: int = int(preview.get("xp_gained", 0))
-	var casualty_alloc: Dictionary = _distribute_integer_by_weights(casualties, participants, "committed", true)
-	var xp_alloc: Dictionary = _distribute_integer_by_weights(xp_total, participants, "committed", false)
-	var total_injured: int = 0
-	var total_dead: int = 0
-	var participant_reports: Array[Dictionary] = []
-	var level_reports: Array[String] = []
-
-	for participant_variant: Variant in participants:
-		var participant: Dictionary = participant_variant as Dictionary
-		var warband_id: String = String(participant.get("id", ""))
-		if not warbands.has(warband_id):
-			continue
-		var warband: Dictionary = warbands[warband_id] as Dictionary
-		var level_before: int = int(_sync_warband_progress(warband.duplicate(true)).get("level", 1))
-		var committed_i: int = int(participant.get("committed", 0))
-		var casualties_i: int = clampi(int(casualty_alloc.get(warband_id, 0)), 0, committed_i)
-		var dead_i: int = int(floor(float(casualties_i) * 0.4))
-		var injured_i: int = max(0, casualties_i - dead_i)
-		var xp_i: int = max(0, int(xp_alloc.get(warband_id, 0)))
-		total_injured += injured_i
-		total_dead += dead_i
-		warband["ready_warriors"] = max(0, int(warband.get("ready_warriors", 0)) - casualties_i)
-		warband["injured_warriors"] = max(0, int(warband.get("injured_warriors", 0)) + injured_i)
-		warband["dead_total"] = max(0, int(warband.get("dead_total", 0)) + dead_i)
-		warband["xp"] = max(0, int(warband.get("xp", 0)) + xp_i)
-		var history: Array = warband.get("battle_history", []) as Array
-		history.append({
-			"veintena": current_veintena,
-			"option_id": option_id,
-			"provisioning_id": provisioning_id,
-			"result": String(preview.get("result", "Unknown")),
-			"committed": committed_i,
-			"casualties": casualties_i,
-			"injured": injured_i,
-			"dead": dead_i,
-			"captives": captives,
-			"xp_gained": xp_i,
-			"selected_warbands": true
-		})
-		warband["battle_history"] = history
-		warbands[warband_id] = _sync_warband_progress(warband)
-		var level_after: int = int((warbands[warband_id] as Dictionary).get("level", level_before))
-		if level_after > level_before:
-			level_reports.append(String(warband.get("name", "Warband")) + " reached Level " + str(level_after) + " and gained " + str(max(0, level_after - level_before)) + " skill point(s)")
-		participant_reports.append({
-			"id": warband_id,
-			"name": String(warband.get("name", "Warband")),
-			"committed": committed_i,
-			"sent": committed_i,
-			"returned_ready": max(0, committed_i - casualties_i),
-			"casualties": casualties_i,
-			"injured": injured_i,
-			"dead": dead_i,
-			"xp_gained": xp_i,
-			"level_before": level_before,
-			"level_after": level_after
-		})
-
-	if total_dead > 0:
-		population["yaotequihuaqueh"] = max(0, get_warrior_count() - total_dead)
-	if captives > 0:
-		estate_stockpiles["captives"] = float(estate_stockpiles.get("captives", 0.0)) + float(captives)
-	add_looted_goods_bundle(preview.get("loot", {}) as Dictionary)
-
-	last_flower_war_report = preview.duplicate(true)
-	last_flower_war_report["ok"] = true
-	last_flower_war_report["event_type"] = "flower_war_return"
-	last_flower_war_report["selected_warbands"] = true
-	last_flower_war_report["all_warbands"] = false
-	last_flower_war_report["warband_id"] = "selected_warbands"
-	last_flower_war_report["warband_name"] = "Selected Warbands"
-	last_flower_war_report["warriors_returned"] = max(0, committed - casualties)
-	last_flower_war_report["attacker_injured"] = total_injured
-	last_flower_war_report["attacker_dead"] = total_dead
-	last_flower_war_report["participant_reports"] = participant_reports
-	last_flower_war_report["level_reports"] = level_reports
-	last_flower_war_report = _apply_flower_war_prestige_to_report(last_flower_war_report)
-	_archive_flower_war_report(last_flower_war_report)
-
-	var line: String = "Selected warbands fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_total) + " shared by participating warbands. " + String(last_flower_war_report.get("prestige_text", "Prestige +0")) + "."
-	if not level_reports.is_empty():
-		line += " " + "; ".join(level_reports) + "."
-	last_report.append(line)
-	emit_signal("state_changed")
-	return last_flower_war_report.duplicate(true)
+	return _get_flower_war_system().launch_combined_attack(self, warband_ids, option_id, provisioning_id, false)
 
 func get_flower_war_defence_preview(option_id: String = "standard", strategy_id: String = "balanced") -> Dictionary:
 	_ensure_warband_state()
-	if not FLOWER_WAR_OPTIONS.has(option_id):
-		return {"ok": false, "reason": "Unknown Flower War option."}
-	var option: Dictionary = FLOWER_WAR_OPTIONS[option_id] as Dictionary
-	var strategy: Dictionary = _flower_war_defence_strategy_data(strategy_id)
-	var participants: Array[Dictionary] = []
-	var warriors_committed: int = 0
-	var weighted_offence: float = 0.0
-	var weighted_defence: float = 0.0
-	for warband_id_variant: Variant in warbands.keys():
-		var warband_id: String = String(warband_id_variant)
-		var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
-		warbands[warband_id] = warband
-		var stats: Dictionary = _warband_combat_stats_from_warband(warband)
-		var ready: int = int(stats.get("ready", 0))
-		if ready <= 0:
-			continue
-		participants.append({
-			"id": warband_id,
-			"name": String(warband.get("name", "Warband")),
-			"committed": ready,
-			"ready": ready,
-			"doctrine": String(warband.get("doctrine", "unspecialised")),
-			"doctrine_name": String(stats.get("doctrine_name", "Unspecialised")),
-			"effective_offence": float(stats.get("effective_offence", 0.0)),
-			"effective_defence": float(stats.get("effective_defence", 0.0))
-		})
-		warriors_committed += ready
-		weighted_offence += float(stats.get("effective_offence", 0.0))
-		weighted_defence += float(stats.get("effective_defence", 0.0))
-	if warriors_committed <= 0:
-		return {"ok": false, "reason": "No ready warbands can defend."}
-	var enemy_warriors: int = int(option.get("enemy_warriors", option.get("warriors", 0)))
-	var player_attack: float = weighted_offence * float(strategy.get("offence_multiplier", 1.0))
-	var player_defence: float = weighted_defence * float(strategy.get("defence_multiplier", 1.0))
-	var enemy_attack: float = float(enemy_warriors) * float(option.get("enemy_offence", 1.0))
-	var enemy_defence: float = float(enemy_warriors) * float(option.get("enemy_defence", 1.0))
-	var enemy_casualties: int = clampi(int(round(maxf(0.0, player_attack - enemy_defence * 0.55))), 0, enemy_warriors)
-	var surviving_enemy: int = max(0, enemy_warriors - enemy_casualties)
-	var returning_enemy_attack: float = float(surviving_enemy) * float(option.get("enemy_offence", 1.0))
-	var defender_casualties: int = clampi(int(round(maxf(0.0, returning_enemy_attack - player_defence * 0.55))), 0, warriors_committed)
-	var net_damage: int = enemy_casualties - defender_casualties
-	var result: String = _flower_war_result_label(net_damage, warriors_committed, enemy_warriors)
-	var xp_gained: int = _flower_war_xp_gain(result, warriors_committed, enemy_casualties, 0)
-	return {
-		"ok": true,
-		"event_type": "flower_war_defence_preview",
-		"war_direction": "defence",
-		"option_id": option_id,
-		"option_name": String(option.get("name", option_id.capitalize())),
-		"option_minimum_warriors": int(option.get("warriors", 0)),
-		"defence_strategy_id": String(strategy.get("id", "balanced")),
-		"defence_strategy_name": String(strategy.get("name", "Balanced Defence")),
-		"defence_strategy_description": String(strategy.get("description", "")),
-		"offence_multiplier": float(strategy.get("offence_multiplier", 1.0)),
-		"defence_multiplier": float(strategy.get("defence_multiplier", 1.0)),
-		"participants": participants,
-		"participating_warband_count": participants.size(),
-		"warriors_committed": warriors_committed,
-		"committed_warriors": warriors_committed,
-		"enemy_warriors": enemy_warriors,
-		"attacker_attack": enemy_attack,
-		"attacker_defence": enemy_defence,
-		"defender_attack": player_attack,
-		"defender_defence": player_defence,
-		"enemy_casualties": enemy_casualties,
-		"defender_casualties": defender_casualties,
-		"attacker_casualties": defender_casualties,
-		"attacker_losses": defender_casualties,
-		"attacker_injured": int(ceil(float(defender_casualties) * 0.6)),
-		"attacker_dead": int(floor(float(defender_casualties) * 0.4)),
-		"result": result,
-		"captives": 0,
-		"loot": {},
-		"loot_value": 0.0,
-		"provisioning_cost": {},
-		"xp_gained": xp_gained,
-		"prestige_pending": false,
-		"prestige_breakdown": _flower_war_preview_prestige_for_defence(result, enemy_casualties),
-		"prestige_gain": float(_flower_war_preview_prestige_for_defence(result, enemy_casualties).get("total", 0.0)),
-		"prestige_text": _prestige_text_from_breakdown(_flower_war_preview_prestige_for_defence(result, enemy_casualties))
-	}
+	return _get_flower_war_system().get_defence_preview(self, option_id, strategy_id)
 
 func can_resolve_flower_war_defence(option_id: String = "standard", strategy_id: String = "balanced") -> Dictionary:
-	_ensure_warband_state()
-	var preview: Dictionary = get_flower_war_defence_preview(option_id, strategy_id)
-	if not bool(preview.get("ok", false)):
-		return preview
-	var committed: int = int(preview.get("warriors_committed", 0))
-	var minimum_warriors: int = int(preview.get("option_minimum_warriors", 0))
-	if committed < minimum_warriors:
-		return {"ok": false, "reason": "This defence needs at least " + str(minimum_warriors) + " ready warriors; defending warbands provide " + str(committed) + "."}
-	return {"ok": true, "reason": "Ready. Warbands will defend the estate.", "preview": preview}
+	return _get_flower_war_system().can_resolve_defence(self, option_id, strategy_id)
 
 func resolve_flower_war_defence(option_id: String = "standard", strategy_id: String = "balanced") -> Dictionary:
-	var status: Dictionary = can_resolve_flower_war_defence(option_id, strategy_id)
-	if not bool(status.get("ok", false)):
-		last_flower_war_report = {"ok": false, "reason": String(status.get("reason", "Flower War defence cannot resolve.")), "war_direction": "defence"}
-		last_report.append("Flower War defence not resolved: " + String(last_flower_war_report.get("reason", "blocked")) + ".")
-		emit_signal("state_changed")
-		return last_flower_war_report.duplicate(true)
-
-	var preview: Dictionary = status.get("preview", {}) as Dictionary
-	if preview.is_empty():
-		preview = get_flower_war_defence_preview(option_id, strategy_id)
-	var participants: Array = preview.get("participants", []) as Array
-	var committed: int = int(preview.get("warriors_committed", 0))
-	var casualties: int = int(preview.get("defender_casualties", preview.get("attacker_casualties", 0)))
-	var xp_total: int = int(preview.get("xp_gained", 0))
-	var casualty_alloc: Dictionary = _distribute_integer_by_weights(casualties, participants, "committed", true)
-	var xp_alloc: Dictionary = _distribute_integer_by_weights(xp_total, participants, "committed", false)
-	var total_injured: int = 0
-	var total_dead: int = 0
-	var participant_reports: Array[Dictionary] = []
-	var level_reports: Array[String] = []
-
-	for participant_variant: Variant in participants:
-		var participant: Dictionary = participant_variant as Dictionary
-		var warband_id: String = String(participant.get("id", ""))
-		if not warbands.has(warband_id):
-			continue
-		var warband: Dictionary = warbands[warband_id] as Dictionary
-		var level_before: int = int(_sync_warband_progress(warband.duplicate(true)).get("level", 1))
-		var committed_i: int = int(participant.get("committed", 0))
-		var casualties_i: int = clampi(int(casualty_alloc.get(warband_id, 0)), 0, committed_i)
-		var dead_i: int = int(floor(float(casualties_i) * 0.4))
-		var injured_i: int = max(0, casualties_i - dead_i)
-		var xp_i: int = max(0, int(xp_alloc.get(warband_id, 0)))
-		total_injured += injured_i
-		total_dead += dead_i
-		warband["ready_warriors"] = max(0, int(warband.get("ready_warriors", 0)) - casualties_i)
-		warband["injured_warriors"] = max(0, int(warband.get("injured_warriors", 0)) + injured_i)
-		warband["dead_total"] = max(0, int(warband.get("dead_total", 0)) + dead_i)
-		warband["xp"] = max(0, int(warband.get("xp", 0)) + xp_i)
-		var history: Array = warband.get("battle_history", []) as Array
-		history.append({
-			"veintena": current_veintena,
-			"option_id": option_id,
-			"strategy_id": strategy_id,
-			"result": String(preview.get("result", "Unknown")),
-			"committed": committed_i,
-			"casualties": casualties_i,
-			"injured": injured_i,
-			"dead": dead_i,
-			"captives": 0,
-			"xp_gained": xp_i,
-			"defensive": true
-		})
-		warband["battle_history"] = history
-		warbands[warband_id] = _sync_warband_progress(warband)
-		var level_after: int = int((warbands[warband_id] as Dictionary).get("level", level_before))
-		if level_after > level_before:
-			level_reports.append(String(warband.get("name", "Warband")) + " reached Level " + str(level_after) + " and gained " + str(max(0, level_after - level_before)) + " skill point(s)")
-		participant_reports.append({
-			"id": warband_id,
-			"name": String(warband.get("name", "Warband")),
-			"committed": committed_i,
-			"sent": committed_i,
-			"returned_ready": max(0, committed_i - casualties_i),
-			"casualties": casualties_i,
-			"injured": injured_i,
-			"dead": dead_i,
-			"xp_gained": xp_i,
-			"level_before": level_before,
-			"level_after": level_after
-		})
-
-	if total_dead > 0:
-		population["yaotequihuaqueh"] = max(0, get_warrior_count() - total_dead)
-
-	last_flower_war_report = preview.duplicate(true)
-	last_flower_war_report["ok"] = true
-	last_flower_war_report["event_type"] = "flower_war_return"
-	last_flower_war_report["war_direction"] = "defence"
-	last_flower_war_report["warband_id"] = "defending_warbands"
-	last_flower_war_report["warband_name"] = "Defending Warbands"
-	last_flower_war_report["warriors_returned"] = max(0, committed - casualties)
-	last_flower_war_report["attacker_injured"] = total_injured
-	last_flower_war_report["attacker_dead"] = total_dead
-	last_flower_war_report["participant_reports"] = participant_reports
-	last_flower_war_report["level_reports"] = level_reports
-	last_flower_war_report = _apply_flower_war_prestige_to_report(last_flower_war_report)
-	_archive_flower_war_report(last_flower_war_report)
-
-	var line: String = "Defending warbands resolved " + String(preview.get("option_name", "Flower War")) + " using " + String(preview.get("defence_strategy_name", "Balanced Defence")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors defending " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Enemy casualties " + str(int(preview.get("enemy_casualties", 0))) + ". XP +" + str(xp_total) + " shared by defending warbands. " + String(last_flower_war_report.get("prestige_text", "Prestige +0")) + "."
-	if not level_reports.is_empty():
-		line += " " + "; ".join(level_reports) + "."
-	last_report.append(line)
-	emit_signal("state_changed")
-	return last_flower_war_report.duplicate(true)
+	return _get_flower_war_system().resolve_defence(self, option_id, strategy_id)
 
 func _flower_war_captives_for_all_warbands(result: String, defender_casualties: int, warriors_committed: int, eagle_warriors: int) -> int:
-	if defender_casualties <= 0:
-		return 0
-	var rate: float = 0.0
-	match result:
-		"Crushing Victory":
-			rate = 0.45
-		"Victory":
-			rate = 0.30
-		"Marginal Victory":
-			rate = 0.15
-		_:
-			rate = 0.0
-	if eagle_warriors > 0:
-		rate += float(eagle_warriors) * 0.02
-	var raw: float = float(defender_casualties) * rate
-	if raw > 0.0:
-		return mini(defender_casualties, max(1, int(ceil(raw))))
-	return 0
+	return _get_flower_war_system().flower_war_captives_for_all_warbands(result, defender_casualties, warriors_committed, eagle_warriors)
 
 func _flower_war_loot_for_all_warbands(result: String, defender_casualties: int, coyote_warriors: int, warriors_committed: int, base_loot_value: float) -> Dictionary:
-	var multiplier: float = 0.0
-	match result:
-		"Crushing Victory":
-			multiplier = 2.0
-		"Victory":
-			multiplier = 1.2
-		"Marginal Victory":
-			multiplier = 0.6
-		"Stalemate":
-			multiplier = 0.3
-		"Defeat":
-			multiplier = 0.1
-		_:
-			multiplier = 0.0
-	if coyote_warriors > 0 and warriors_committed > 0:
-		multiplier *= 1.0 + 0.5 * (float(coyote_warriors) / float(warriors_committed))
-	var units: float = maxf(0.0, float(defender_casualties) * base_loot_value * multiplier)
-	if units <= 0.0:
-		return {}
-	return {"maize": snappedf(units * 0.50, 0.01), "wood": snappedf(units * 0.25, 0.01), "cloth": snappedf(units * 0.15, 0.01), "obsidian": snappedf(units * 0.10, 0.01)}
+	return _get_flower_war_system().flower_war_loot_for_all_warbands(result, defender_casualties, coyote_warriors, warriors_committed, base_loot_value)
 
 func _distribute_integer_by_weights(total: int, participants: Array, weight_key: String = "committed", cap_by_weight: bool = false) -> Dictionary:
 	var result: Dictionary = {}
@@ -5607,92 +3436,22 @@ func launch_flower_war_with_warband(warband_id: String, option_id: String = "min
 	return last_flower_war_report.duplicate(true)
 
 func _flower_war_result_label(net_damage: int, attacker_size: int, defender_size: int) -> String:
-	var scale: float = maxf(1.0, float(max(attacker_size, defender_size)))
-	var ratio: float = float(net_damage) / scale
-	if ratio >= 0.65:
-		return "Crushing Victory"
-	if ratio >= 0.25:
-		return "Victory"
-	if ratio > 0.05:
-		return "Marginal Victory"
-	if ratio >= -0.05:
-		return "Stalemate"
-	if ratio > -0.35:
-		return "Defeat"
-	return "Crushing Defeat"
+	return _get_flower_war_system().flower_war_result_label(net_damage, attacker_size, defender_size)
 
 func _flower_war_captives(result: String, defender_casualties: int, warriors_committed: int, doctrine_id: String) -> int:
-	if defender_casualties <= 0:
-		return 0
-	var rate: float = 0.0
-	match result:
-		"Crushing Victory":
-			rate = 0.45
-		"Victory":
-			rate = 0.30
-		"Marginal Victory":
-			rate = 0.15
-		_:
-			rate = 0.0
-	if doctrine_id == "eagle":
-		rate += float(warriors_committed) * 0.02
-	var raw: float = float(defender_casualties) * rate
-	if raw > 0.0:
-		return mini(defender_casualties, max(1, int(ceil(raw))))
-	return 0
+	return _get_flower_war_system().flower_war_captives(result, defender_casualties, warriors_committed, doctrine_id)
 
 func _flower_war_loot(result: String, defender_casualties: int, doctrine_id: String, base_loot_value: float) -> Dictionary:
-	var multiplier: float = 0.0
-	match result:
-		"Crushing Victory":
-			multiplier = 2.0
-		"Victory":
-			multiplier = 1.2
-		"Marginal Victory":
-			multiplier = 0.6
-		"Stalemate":
-			multiplier = 0.3
-		"Defeat":
-			multiplier = 0.1
-		_:
-			multiplier = 0.0
-	if doctrine_id == "coyote":
-		multiplier *= 1.5
-	var units: float = maxf(0.0, float(defender_casualties) * base_loot_value * multiplier)
-	if units <= 0.0:
-		return {}
-	return {"maize": snappedf(units * 0.50, 0.01), "wood": snappedf(units * 0.25, 0.01), "cloth": snappedf(units * 0.15, 0.01), "obsidian": snappedf(units * 0.10, 0.01)}
+	return _get_flower_war_system().flower_war_loot(result, defender_casualties, doctrine_id, base_loot_value)
 
 func _flower_war_loot_display_value(loot: Dictionary) -> float:
-	var total: float = 0.0
-	for resource_variant: Variant in loot.keys():
-		var resource_id: String = String(resource_variant)
-		var base_value: float = 1.0
-		if resources.has(resource_id):
-			var resource_data: Dictionary = resources[resource_id] as Dictionary
-			base_value = float(resource_data.get("base_value", 1.0))
-		total += float(loot[resource_variant]) * base_value
-	return snappedf(total, 0.01)
+	return _get_flower_war_system().flower_war_loot_display_value(self, loot)
 
 func _flower_war_xp_gain(result: String, warriors_committed: int, defender_casualties: int, captives: int) -> int:
-	var result_bonus: int = 0
-	match result:
-		"Crushing Victory":
-			result_bonus = 8
-		"Victory":
-			result_bonus = 5
-		"Marginal Victory":
-			result_bonus = 3
-		"Stalemate":
-			result_bonus = 2
-		"Defeat":
-			result_bonus = 1
-		_:
-			result_bonus = 1
-	return max(1, warriors_committed + defender_casualties * 2 + captives * 4 + result_bonus)
+	return _get_flower_war_system().flower_war_xp_gain(result, warriors_committed, defender_casualties, captives)
 
 func _flower_war_provisioning_cost(warriors_committed: int, supply_multiplier: float) -> Dictionary:
-	return {"maize": float(warriors_committed) * 1.0 * supply_multiplier, "weapons": float(warriors_committed) * 0.2 * supply_multiplier}
+	return _get_flower_war_system().flower_war_provisioning_cost(warriors_committed, supply_multiplier)
 
 func _can_pay_free_stock(cost: Dictionary) -> Dictionary:
 	for resource_variant: Variant in cost.keys():
@@ -5796,380 +3555,94 @@ func _warband_doctrine_from_specialisation(warband: Dictionary) -> String:
 
 
 func recover_injured_warriors_now() -> Dictionary:
-	# Test/dev helper. Normal recovery happens automatically when the Veintena advances.
-	_ensure_warband_state()
-	var report: Dictionary = _recover_injured_warriors()
-	emit_signal("state_changed")
-	return report
+	return _get_warband_system().recover_injured_warriors_now(self)
 
 func _recover_injured_warriors() -> Dictionary:
-	_ensure_warband_state()
-	var recovered_total: int = 0
-	var lines: Array[String] = []
-	for warband_id_variant: Variant in warbands.keys():
-		var warband_id: String = String(warband_id_variant)
-		var warband: Dictionary = warbands[warband_id] as Dictionary
-		var injured: int = max(0, int(warband.get("injured_warriors", 0)))
-		if injured <= 0:
-			continue
-		warband["ready_warriors"] = max(0, int(warband.get("ready_warriors", 0))) + injured
-		warband["injured_warriors"] = 0
-		warbands[warband_id] = _sync_warband_progress(warband)
-		recovered_total += injured
-		var name: String = String(warband.get("name", "Warband"))
-		lines.append(str(injured) + " injured warrior" + ("s" if injured != 1 else "") + " returned to " + name + ".")
-	if recovered_total > 0:
-		last_report.append("Warband recovery: " + " ".join(lines))
-	return {"recovered": recovered_total, "lines": lines}
+	return _get_warband_system().recover_injured_warriors(self)
 
 func get_warband_rows() -> Array[Dictionary]:
-	_ensure_warband_state()
-	var rows: Array[Dictionary] = []
-	for warband_id_variant: Variant in warbands.keys():
-		var warband_id: String = String(warband_id_variant)
-		var row: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
-		warbands[warband_id] = row
-		var spec: Dictionary = row.get("specialisation", {}) as Dictionary
-		var combat_stats: Dictionary = _warband_combat_stats_from_warband(row)
-		row["specialisation_name"] = String(spec.get("name", "None"))
-		row["doctrine_name"] = String(combat_stats.get("doctrine_name", _warband_doctrine_name(String(row.get("doctrine", "unspecialised")))))
-		row["combat_stats"] = combat_stats
-		row["offence_modifier"] = float(combat_stats.get("offence_modifier", 1.0))
-		row["defence_modifier"] = float(combat_stats.get("defence_modifier", 1.0))
-		row["effective_offence"] = float(combat_stats.get("effective_offence", 0.0))
-		row["effective_defence"] = float(combat_stats.get("effective_defence", 0.0))
-		row["ready"] = int(row.get("ready_warriors", 0))
-		row["injured"] = int(row.get("injured_warriors", 0))
-		row["total"] = int(row.get("ready_warriors", 0)) + int(row.get("injured_warriors", 0))
-		row["warriors"] = int(row.get("ready_warriors", 0))
-		row["total_warriors"] = int(row.get("total", 0))
-		row["can_launch"] = int(row.get("ready_warriors", 0)) > 0
-		row["injured_recovery_text"] = "Injured warriors recover on the next Veintena advance." if int(row.get("injured_warriors", 0)) > 0 else "No injured warriors awaiting recovery."
-		rows.append(row)
-	return rows
+	return _get_warband_system().get_warband_rows(self)
 
 func get_warband_by_id(warband_id: String) -> Dictionary:
-	_ensure_warband_state()
-	if warbands.has(warband_id):
-		var row: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
-		warbands[warband_id] = row
-		var spec: Dictionary = row.get("specialisation", {}) as Dictionary
-		var combat_stats: Dictionary = _warband_combat_stats_from_warband(row)
-		row["specialisation_name"] = String(spec.get("name", "None"))
-		row["doctrine_name"] = String(combat_stats.get("doctrine_name", _warband_doctrine_name(String(row.get("doctrine", "unspecialised")))))
-		row["combat_stats"] = combat_stats
-		row["offence_modifier"] = float(combat_stats.get("offence_modifier", 1.0))
-		row["defence_modifier"] = float(combat_stats.get("defence_modifier", 1.0))
-		row["effective_offence"] = float(combat_stats.get("effective_offence", 0.0))
-		row["effective_defence"] = float(combat_stats.get("effective_defence", 0.0))
-		return row
-	return {}
+	return _get_warband_system().get_warband_by_id(self, warband_id)
 
 func can_rename_warband(warband_id: String, new_name: String) -> Dictionary:
-	_ensure_warband_state()
-	if not warbands.has(warband_id):
-		return {"ok": false, "reason": "Unknown warband."}
-	var cleaned: String = new_name.strip_edges()
-	if cleaned == "":
-		return {"ok": false, "reason": "Warband name cannot be empty."}
-	if cleaned.length() > 32:
-		return {"ok": false, "reason": "Warband name must be 32 characters or fewer."}
-	for other_id_variant: Variant in warbands.keys():
-		var other_id: String = String(other_id_variant)
-		if other_id == warband_id:
-			continue
-		var other: Dictionary = warbands[other_id] as Dictionary
-		if String(other.get("name", "")).strip_edges().to_lower() == cleaned.to_lower():
-			return {"ok": false, "reason": "Another warband already uses that name."}
-	return {"ok": true, "reason": "Ready.", "clean_name": cleaned}
+	return _get_warband_system().can_rename_warband(self, warband_id, new_name)
 
 func rename_warband(warband_id: String, new_name: String) -> Dictionary:
-	var status: Dictionary = can_rename_warband(warband_id, new_name)
-	if not bool(status.get("ok", false)):
-		last_report.append("Warband rename failed: " + String(status.get("reason", "Unknown reason.")))
-		emit_signal("state_changed")
-		return status
-	var warband: Dictionary = warbands[warband_id] as Dictionary
-	var old_name: String = String(warband.get("name", "Warband"))
-	var clean_name: String = String(status.get("clean_name", new_name.strip_edges()))
-	warband["name"] = clean_name
-	warbands[warband_id] = _sync_warband_progress(warband)
-	last_report.append(old_name + " renamed to " + clean_name + ".")
-	emit_signal("state_changed")
-	return {"ok": true, "reason": "Warband renamed.", "warband_id": warband_id, "name": clean_name}
+	return _get_warband_system().rename_warband(self, warband_id, new_name)
 
 func can_set_warband_name(warband_id: String, new_name: String) -> Dictionary:
-	return can_rename_warband(warband_id, new_name)
+	return _get_warband_system().can_set_warband_name(self, warband_id, new_name)
 
 func set_warband_name(warband_id: String, new_name: String) -> Dictionary:
-	return rename_warband(warband_id, new_name)
+	return _get_warband_system().set_warband_name(self, warband_id, new_name)
 
 func get_primary_warband() -> Dictionary:
-	return get_warband_by_id("first_warband")
+	return _get_warband_system().get_primary_warband(self)
 
 func get_unassigned_warrior_pool() -> int:
-	return _unassigned_warrior_pool()
+	return _get_warband_system().get_unassigned_warrior_pool(self)
 
 func can_create_warband(name: String = "New Warband", warriors: int = 0, doctrine_id: String = "unspecialised", commander: String = "Household Captain") -> Dictionary:
-	_ensure_warband_state()
-	if warriors < 0:
-		return {"ok": false, "reason": "Warrior count cannot be negative."}
-	if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
-		return {"ok": false, "reason": "Unknown doctrine."}
-	var available: int = _unassigned_warrior_pool()
-	if warriors > available:
-		return {"ok": false, "reason": "Need " + str(warriors) + " unassigned warriors; only " + str(available) + " available."}
-	return {"ok": true, "reason": "Ready."}
+	return _get_warband_system().can_create_warband(self, name, warriors, doctrine_id, commander)
 
 func create_warband(name: String = "New Warband", warriors: int = 0, doctrine_id: String = "unspecialised", commander: String = "Household Captain") -> Dictionary:
-	var status: Dictionary = can_create_warband(name, warriors, doctrine_id, commander)
-	if not bool(status.get("ok", false)):
-		return status
-	var base_id: String = name.strip_edges().to_lower().replace(" ", "_")
-	if base_id == "":
-		base_id = "warband"
-	var warband_id: String = base_id
-	var suffix: int = 2
-	while warbands.has(warband_id):
-		warband_id = base_id + "_" + str(suffix)
-		suffix += 1
-	warbands[warband_id] = _make_starting_warband(warband_id, name, commander, warriors)
-	warbands[warband_id]["doctrine"] = doctrine_id
-	emit_signal("state_changed")
-	return {"ok": true, "reason": "Created warband.", "warband_id": warband_id}
+	return _get_warband_system().create_warband(self, name, warriors, doctrine_id, commander)
 
 func can_reinforce_warband(warband_id: String, amount: int) -> Dictionary:
-	return can_assign_warriors_to_warband(warband_id, amount)
+	return _get_warband_system().can_reinforce_warband(self, warband_id, amount)
 
 func reinforce_warband(warband_id: String, amount: int) -> Dictionary:
-	return assign_warriors_to_warband(warband_id, amount)
+	return _get_warband_system().reinforce_warband(self, warband_id, amount)
 
 func can_assign_warriors_to_warband(warband_id: String, amount: int) -> Dictionary:
-	_ensure_warband_state()
-	if not warbands.has(warband_id):
-		return {"ok": false, "reason": "Unknown warband."}
-	if amount <= 0:
-		return {"ok": false, "reason": "Choose at least 1 warrior."}
-	var available: int = _unassigned_warrior_pool()
-	if amount > available:
-		return {"ok": false, "reason": "Need " + str(amount) + " unassigned warriors; only " + str(available) + " available."}
-	return {"ok": true, "reason": "Ready."}
+	return _get_warband_system().can_assign_warriors_to_warband(self, warband_id, amount)
 
 func assign_warriors_to_warband(warband_id: String, amount: int) -> Dictionary:
-	var status: Dictionary = can_assign_warriors_to_warband(warband_id, amount)
-	if not bool(status.get("ok", false)):
-		return status
-	var warband: Dictionary = warbands[warband_id] as Dictionary
-	warband["ready_warriors"] = int(warband.get("ready_warriors", 0)) + amount
-	warbands[warband_id] = _sync_warband_progress(warband)
-	emit_signal("state_changed")
-	return {"ok": true, "reason": "Assigned " + str(amount) + " warriors to " + String(warband.get("name", "warband")) + "."}
+	return _get_warband_system().assign_warriors_to_warband(self, warband_id, amount)
 
 func can_unassign_warriors_from_warband(warband_id: String, amount: int) -> Dictionary:
-	_ensure_warband_state()
-	if not warbands.has(warband_id):
-		return {"ok": false, "reason": "Unknown warband."}
-	if amount <= 0:
-		return {"ok": false, "reason": "Choose at least 1 warrior."}
-	var warband: Dictionary = warbands[warband_id] as Dictionary
-	var ready: int = int(warband.get("ready_warriors", 0))
-	if amount > ready:
-		return {"ok": false, "reason": "Only " + str(ready) + " ready warriors can be unassigned."}
-	return {"ok": true, "reason": "Ready."}
+	return _get_warband_system().can_unassign_warriors_from_warband(self, warband_id, amount)
 
 func unassign_warriors_from_warband(warband_id: String, amount: int) -> Dictionary:
-	var status: Dictionary = can_unassign_warriors_from_warband(warband_id, amount)
-	if not bool(status.get("ok", false)):
-		return status
-	var warband: Dictionary = warbands[warband_id] as Dictionary
-	warband["ready_warriors"] = max(0, int(warband.get("ready_warriors", 0)) - amount)
-	warbands[warband_id] = _sync_warband_progress(warband)
-	emit_signal("state_changed")
-	return {"ok": true, "reason": "Unassigned " + str(amount) + " warriors from " + String(warband.get("name", "warband")) + "."}
+	return _get_warband_system().unassign_warriors_from_warband(self, warband_id, amount)
 
 func can_specialise_warband(warband_id: String, doctrine_id: String) -> Dictionary:
-	# Deprecated compatibility hook. Doctrine is no longer chosen through a
-	# separate oath/action; it is derived from the Skill Web specialism gateway.
-	_ensure_warband_state()
-	if not warbands.has(warband_id):
-		return {"ok": false, "reason": "Unknown warband."}
-	return {"ok": false, "reason": "Choose doctrine by purchasing a Skill Web specialism gateway."}
+	return _get_warband_system().can_specialise_warband(self, warband_id, doctrine_id)
 
 func specialise_warband(warband_id: String, doctrine_id: String) -> Dictionary:
-	# Deprecated compatibility hook. Kept so older UI calls fail safely instead of
-	# silently changing doctrine outside the Skill Web.
-	return can_specialise_warband(warband_id, doctrine_id)
+	return _get_warband_system().specialise_warband(self, warband_id, doctrine_id)
 
 func get_warband_skill_web(warband_id: String = "") -> Dictionary:
-	_ensure_warband_state()
-	var nodes: Array[Dictionary] = _warband_skill_node_definitions()
-	var connections: Array[Dictionary] = _warband_skill_connections()
-	if warband_id == "":
-		return {"ok": true, "nodes": nodes, "connections": connections, "description": "Warband Skill Web backend data. UI drawing comes later."}
-	if not warbands.has(warband_id):
-		return {"ok": false, "reason": "Unknown warband.", "nodes": nodes, "connections": connections}
-	var stored: Dictionary = warbands[warband_id] as Dictionary
-	var warband: Dictionary = _sync_warband_progress(stored.duplicate(true))
-	warbands[warband_id] = warband
-	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
-	var statuses: Dictionary = {}
-	for node: Dictionary in nodes:
-		var trait_id: String = String(node.get("id", ""))
-		if trait_id == "":
-			continue
-		var status: Dictionary = can_purchase_warband_trait(warband_id, trait_id)
-		var requirements_met: bool = _warband_trait_requirements_met(purchased, node)
-		statuses[trait_id] = {
-			"purchased": purchased.has(trait_id),
-			"requirements_met": requirements_met,
-			"can_purchase": bool(status.get("ok", false)),
-			"reason": String(status.get("reason", "")),
-			"cost": int(node.get("cost", 1)),
-			"cluster": String(node.get("cluster", "general"))
-		}
-	return {
-		"ok": true,
-		"warband": warband,
-		"combat_stats": _warband_combat_stats_from_warband(warband),
-		"nodes": nodes,
-		"traits": nodes,
-		"connections": connections,
-		"statuses": statuses,
-		"points_available": int(warband.get("trait_points", 0)),
-		"points_total": int(warband.get("total_trait_points", 0)),
-		"points_spent": int(warband.get("spent_trait_points", 0)),
-		"purchased_traits": purchased,
-		"available_traits": get_warband_available_traits(warband_id),
-		"locked_traits": get_warband_locked_traits(warband_id),
-		"effect_totals": get_warband_trait_effect_totals(warband_id),
-		"specialisation": get_warband_specialisation_summary(warband_id)
-	}
+	return _get_warband_system().get_warband_skill_web(self, warband_id)
 
 func get_warband_trait_tree(warband_id: String) -> Dictionary:
-	# Backwards-compatible name. The old rigid trait tree is now a Diablo/PoE-style
-	# connected skill web with clusters and mutually exclusive specialism gateways.
-	return get_warband_skill_web(warband_id)
+	return _get_warband_system().get_warband_trait_tree(self, warband_id)
 
 func get_warband_trait_points(warband_id: String) -> int:
-	_ensure_warband_state()
-	if not warbands.has(warband_id):
-		return 0
-	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
-	warbands[warband_id] = warband
-	return int(warband.get("trait_points", 0))
+	return _get_warband_system().get_warband_trait_points(self, warband_id)
 
 func get_warband_purchased_traits(warband_id: String) -> Array[String]:
-	_ensure_warband_state()
-	if not warbands.has(warband_id):
-		return []
-	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
-	warbands[warband_id] = warband
-	return _warband_purchased_trait_ids(warband)
+	return _get_warband_system().get_warband_purchased_traits(self, warband_id)
 
 func get_warband_available_traits(warband_id: String) -> Array[Dictionary]:
-	_ensure_warband_state()
-	var output: Array[Dictionary] = []
-	if not warbands.has(warband_id):
-		return output
-	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
-	warbands[warband_id] = warband
-	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
-	var points: int = int(warband.get("trait_points", 0))
-	for node: Dictionary in _warband_skill_node_definitions():
-		var trait_id: String = String(node.get("id", ""))
-		if trait_id == "" or purchased.has(trait_id):
-			continue
-		if _warband_trait_locked_by_specialisation(purchased, node):
-			continue
-		if not _warband_trait_requirements_met(purchased, node):
-			continue
-		var row: Dictionary = node.duplicate(true)
-		row["can_afford"] = points >= int(node.get("cost", 1))
-		row["status_text"] = "Available" if bool(row.get("can_afford", false)) else "Connected, but needs more skill points"
-		output.append(row)
-	return output
+	return _get_warband_system().get_warband_available_traits(self, warband_id)
 
 func get_warband_locked_traits(warband_id: String) -> Array[Dictionary]:
-	_ensure_warband_state()
-	var output: Array[Dictionary] = []
-	if not warbands.has(warband_id):
-		return output
-	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
-	warbands[warband_id] = warband
-	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
-	for node: Dictionary in _warband_skill_node_definitions():
-		var trait_id: String = String(node.get("id", ""))
-		if trait_id == "" or purchased.has(trait_id):
-			continue
-		if _warband_trait_locked_by_specialisation(purchased, node):
-			var spec_row: Dictionary = node.duplicate(true)
-			spec_row["status_text"] = _warband_specialisation_lock_text(purchased)
-			output.append(spec_row)
-			continue
-		if _warband_trait_requirements_met(purchased, node):
-			continue
-		var row: Dictionary = node.duplicate(true)
-		row["status_text"] = "Locked: requires " + _warband_requirements_text(node)
-		output.append(row)
-	return output
+	return _get_warband_system().get_warband_locked_traits(self, warband_id)
 
 func can_purchase_warband_trait(warband_id: String, trait_id: String) -> Dictionary:
-	_ensure_warband_state()
-	if not warbands.has(warband_id):
-		return {"ok": false, "reason": "Unknown warband."}
-	var node: Dictionary = _warband_skill_node_by_id(trait_id)
-	if node.is_empty():
-		return {"ok": false, "reason": "Unknown skill node."}
-	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
-	warbands[warband_id] = warband
-	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
-	if purchased.has(trait_id):
-		return {"ok": false, "reason": "Already purchased."}
-	if _warband_trait_locked_by_specialisation(purchased, node):
-		return {"ok": false, "reason": _warband_specialisation_lock_text(purchased)}
-	if not _warband_trait_requirements_met(purchased, node):
-		return {"ok": false, "reason": "Requires " + _warband_requirements_text(node) + "."}
-	var cost: int = max(0, int(node.get("cost", 1)))
-	var points: int = int(warband.get("trait_points", 0))
-	if points < cost:
-		return {"ok": false, "reason": "Need " + str(cost) + " skill point(s); only " + str(points) + " available."}
-	return {"ok": true, "reason": "Ready.", "cost": cost, "points_available": points, "trait": node.duplicate(true)}
+	return _get_warband_system().can_purchase_warband_trait(self, warband_id, trait_id)
 
 func purchase_warband_trait(warband_id: String, trait_id: String) -> Dictionary:
-	var status: Dictionary = can_purchase_warband_trait(warband_id, trait_id)
-	if not bool(status.get("ok", false)):
-		return status
-	var node: Dictionary = _warband_skill_node_by_id(trait_id)
-	var warband: Dictionary = warbands[warband_id] as Dictionary
-	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
-	purchased.append(trait_id)
-	warband["purchased_traits"] = purchased
-	warband["traits"] = purchased.duplicate()
-	warband = _sync_warband_progress(warband)
-	warbands[warband_id] = warband
-	var spec: Dictionary = warband.get("specialisation", {}) as Dictionary
-	var message: String = String(warband.get("name", "Warband")) + " purchased skill node: " + String(node.get("name", trait_id)) + ". Specialisation: " + String(spec.get("name", "Unspecialised")) + "."
-	if bool(node.get("specialisation", false)):
-		message += " Combat doctrine is now " + _warband_doctrine_name(String(warband.get("doctrine", "unspecialised"))) + "."
-	last_report.append(message)
-	emit_signal("state_changed")
-	return {"ok": true, "reason": message, "warband": warband.duplicate(true), "specialisation": spec}
+	return _get_warband_system().purchase_warband_trait(self, warband_id, trait_id)
 
 func get_warband_trait_effect_totals(warband_id: String) -> Dictionary:
-	_ensure_warband_state()
-	if not warbands.has(warband_id):
-		return {}
-	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
-	warbands[warband_id] = warband
-	return _warband_trait_effect_totals_from_purchased(_warband_purchased_trait_ids(warband))
+	return _get_warband_system().get_warband_trait_effect_totals(self, warband_id)
 
 func get_warband_specialisation_summary(warband_id: String) -> Dictionary:
-	_ensure_warband_state()
-	if not warbands.has(warband_id):
-		return {"name": "Unknown", "primary": "", "secondary": "", "keystones": [], "points_by_cluster": {}}
-	var warband: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
-	warbands[warband_id] = warband
-	return (warband.get("specialisation", {}) as Dictionary).duplicate(true)
+	return _get_warband_system().get_warband_specialisation_summary(self, warband_id)
 
 func _ensure_warband_skill_defaults(warband: Dictionary) -> Dictionary:
 	var purchased: Array[String] = _warband_purchased_trait_ids(warband)
@@ -7909,38 +5382,7 @@ func _unassigned_warrior_pool() -> int:
 	return max(0, get_warrior_count() - assigned)
 
 func get_warband_flower_war_stability_audit() -> Dictionary:
-	# Non-mechanical audit helper for testing the current canonical warband rules.
-	_ensure_warband_state()
-	var issues: Array[String] = []
-	var rows: Array[Dictionary] = []
-	for warband_id_variant: Variant in warbands.keys():
-		var warband_id: String = String(warband_id_variant)
-		var row: Dictionary = _sync_warband_progress((warbands[warband_id] as Dictionary).duplicate(true))
-		warbands[warband_id] = row
-		var spec: Dictionary = row.get("specialisation", {}) as Dictionary
-		var doctrine_id: String = String(row.get("doctrine", "unspecialised"))
-		var expected_doctrine: String = String(spec.get("doctrine_id", "unspecialised"))
-		if doctrine_id != expected_doctrine:
-			issues.append(String(row.get("name", warband_id)) + " doctrine mismatch: " + doctrine_id + " vs " + expected_doctrine)
-		rows.append({
-			"id": warband_id,
-			"name": String(row.get("name", "Warband")),
-			"doctrine": doctrine_id,
-			"specialism": String(spec.get("name", "None")),
-			"ready": int(row.get("ready_warriors", 0)),
-			"injured": int(row.get("injured_warriors", 0)),
-			"dead_total_report_only": int(row.get("dead_total", 0))
-		})
-	return {
-		"ok": issues.is_empty(),
-		"issues": issues,
-		"warbands": rows,
-		"specialism_sets_doctrine": true,
-		"other_specialisms_lock": true,
-		"dead_normal_cards": false,
-		"skill_node_effects_connected": false,
-		"event_hooks_ready": true
-	}
+	return _get_warband_system().get_warband_flower_war_stability_audit(self)
 
 func _warband_doctrine_name(doctrine_id: String) -> String:
 	if FLOWER_WAR_DOCTRINES.has(doctrine_id):
