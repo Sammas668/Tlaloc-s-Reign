@@ -15,6 +15,8 @@ const RESOURCE_DATA_PATH: String = "res://Data/Prototype0/resources.json"
 const BUILDING_DATA_PATH: String = "res://Data/Prototype0/buildings.json"
 const START_STATE_PATH: String = "res://Data/Prototype0/start_state.json"
 const MARKET_ECONOMY_DATA_PATH: String = "res://Data/Prototype0/market_economy.json"
+const PRESTIGE_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/PrestigeSystem.gd")
+
 
 const GOD_TLALOC: String = "tlaloc"
 const GOD_HUITZILOPOCHTLI: String = "huitzilopochtli"
@@ -54,6 +56,7 @@ var last_palace_maintenance_report: Array[String] = []
 # a Palace dedicated to Huitzilopochtli. Defensive Flower Wars can still happen
 # regardless of dedication because the player is responding to an attack.
 var flower_war_palace_gate_enabled: bool = true
+var _prestige_system_instance: PrestigeSystem = null
 
 var population_upkeep_rates: Dictionary = {
 	"macehualtin": {"maize": 1.0, "cotton": 0.05, "cloth": 0.2, "tools": 0.1},
@@ -64,6 +67,12 @@ var population_upkeep_rates: Dictionary = {
 	"pipiltin": {"maize": 1.0, "cloth": 0.4, "ritual_goods": 0.1, "cacao": 0.3, "fine_textiles": 0.2},
 	"malli": {"maize": 0.5}
 }
+
+
+func _get_prestige_system() -> PrestigeSystem:
+	if _prestige_system_instance == null:
+		_prestige_system_instance = PRESTIGE_SYSTEM_SCRIPT.new() as PrestigeSystem
+	return _prestige_system_instance
 
 func _ready() -> void:
 	if not initialized:
@@ -3975,10 +3984,7 @@ func _palace_ruler_demand_raw_row_by_slot(slot_id: String) -> Dictionary:
 	return {}
 
 func _resource_base_value(resource_id: String) -> float:
-	if resources.has(resource_id):
-		var data: Dictionary = resources[resource_id] as Dictionary
-		return float(data.get("base_value", 1.0))
-	return 1.0
+	return _get_prestige_system().resource_base_value(self, resource_id)
 
 func get_player_prestige() -> float:
 	return player_prestige
@@ -4001,205 +4007,43 @@ func add_player_prestige(amount: float, source_id: String, detail: String, conte
 	return {"ok": true, "amount": amount, "prestige": player_prestige, "record": record}
 
 func get_savvy_trade_prestige_scale() -> float:
-	# Economic Prestige should be small, deliberate and tied to good market judgement.
-	# Selling high and buying low produce Prestige from the value advantage over the
-	# good's base value. This is not passive surplus Prestige.
-	return 0.25
+	return _get_prestige_system().get_savvy_trade_prestige_scale()
 
 func get_savvy_trade_prestige_for_line(resource_id: String, amount: float, average_unit_value: float) -> Dictionary:
-	var traded_amount: float = absf(amount)
-	var base_value: float = _resource_base_value(resource_id)
-	var direction: String = "none"
-	var advantage_per_unit: float = 0.0
-	if amount < -0.001:
-		direction = "sell_high"
-		advantage_per_unit = maxf(0.0, average_unit_value - base_value)
-	elif amount > 0.001:
-		direction = "buy_low"
-		advantage_per_unit = maxf(0.0, base_value - average_unit_value)
-	var prestige_gain: float = snappedf(traded_amount * advantage_per_unit * get_savvy_trade_prestige_scale(), 0.01)
-	var label: String = "No savvy trade Prestige"
-	if prestige_gain > 0.001:
-		if direction == "sell_high":
-			label = "Sold high: " + get_resource_name(resource_id) + " +" + _format_amount(prestige_gain) + " Prestige"
-		elif direction == "buy_low":
-			label = "Bought low: " + get_resource_name(resource_id) + " +" + _format_amount(prestige_gain) + " Prestige"
-	return {
-		"resource_id": resource_id,
-		"resource_name": get_resource_name(resource_id),
-		"amount": amount,
-		"traded_amount": traded_amount,
-		"direction": direction,
-		"base_value": base_value,
-		"average_unit_value": average_unit_value,
-		"advantage_per_unit": advantage_per_unit,
-		"scale": get_savvy_trade_prestige_scale(),
-		"prestige_gain": prestige_gain,
-		"label": label
-	}
+	return _get_prestige_system().get_savvy_trade_prestige_for_line(self, resource_id, amount, average_unit_value)
 
 func get_savvy_trade_prestige_preview(trade_lines: Array) -> Dictionary:
-	var lines: Array[Dictionary] = []
-	var total: float = 0.0
-	for line_variant: Variant in trade_lines:
-		if not (line_variant is Dictionary):
-			continue
-		var line: Dictionary = line_variant as Dictionary
-		var resource_id: String = String(line.get("resource_id", ""))
-		if resource_id == "":
-			continue
-		var amount: float = float(line.get("amount", 0.0))
-		var average_unit_value: float = float(line.get("average_unit_value", line.get("average_value", line.get("unit_value", _resource_base_value(resource_id)))))
-		var result: Dictionary = get_savvy_trade_prestige_for_line(resource_id, amount, average_unit_value)
-		lines.append(result)
-		total += float(result.get("prestige_gain", 0.0))
-	total = snappedf(total, 0.01)
-	var positive_lines: Array[String] = []
-	for result: Dictionary in lines:
-		if float(result.get("prestige_gain", 0.0)) > 0.001:
-			positive_lines.append(String(result.get("label", "Savvy trade")))
-	var headline: String = "No savvy trade Prestige."
-	if total > 0.001:
-		headline = "Savvy trade Prestige: +" + _format_amount(total)
-	return {
-		"schema_version": "savvy_trade_prestige_v0_41",
-		"total_prestige": total,
-		"lines": lines,
-		"positive_lines": positive_lines,
-		"headline": headline,
-		"scale": get_savvy_trade_prestige_scale(),
-		"mechanics_note": "Economic Prestige comes from market skill only: sell above base value or buy below base value. No passive surplus, maize stockpile or production-output Prestige is granted."
-	}
+	return _get_prestige_system().get_savvy_trade_prestige_preview(self, trade_lines)
 
 func record_savvy_trade_prestige(trade_lines: Array, detail: String = "Savvy market trade") -> Dictionary:
-	var preview: Dictionary = get_savvy_trade_prestige_preview(trade_lines)
-	var amount: float = float(preview.get("total_prestige", 0.0))
-	if amount <= 0.001:
-		return {"ok": true, "amount": 0.0, "prestige": player_prestige, "preview": preview}
-	var result: Dictionary = add_player_prestige(amount, "economic_savvy_trade", detail, preview)
-	last_report.append(detail + ": +" + _format_amount(amount) + " Prestige from savvy trade.")
-	emit_signal("state_changed")
-	return {"ok": true, "amount": amount, "prestige": player_prestige, "preview": preview, "record": result.get("record", {})}
+	return _get_prestige_system().record_savvy_trade_prestige(self, trade_lines, detail)
 
 func get_economic_prestige_summary() -> Dictionary:
-	var recent: Array[Dictionary] = []
-	var history: Array[Dictionary] = get_prestige_history()
-	history.reverse()
-	for item: Dictionary in history:
-		if String(item.get("source_id", "")) != "economic_savvy_trade":
-			continue
-		if recent.size() >= 8:
-			break
-		recent.append(item.duplicate(true))
-	return {
-		"schema_version": "economic_prestige_savvy_trade_v0_41",
-		"active": true,
-		"scale": get_savvy_trade_prestige_scale(),
-		"recent_savvy_trades": recent,
-		"headline": "Economic Prestige comes from savvy market trades.",
-		"mechanics_note": "Sell goods above base value or buy goods below base value. Passive surplus, stored maize and production output do not grant economic Prestige."
-	}
+	return _get_prestige_system().get_economic_prestige_summary(self)
 
 func _format_signed_prestige(amount: float) -> String:
-	var prefix: String = "+" if amount >= 0.0 else ""
-	return prefix + _format_amount(amount)
+	return _get_prestige_system().format_signed_prestige(amount)
 
 func _flower_war_result_prestige_value(result: String) -> float:
-	match result:
-		"Crushing Victory":
-			return 20.0
-		"Victory":
-			return 12.0
-		"Marginal Victory", "Narrow Victory":
-			return 6.0
-		"Stalemate":
-			return 0.0
-		"Defeat":
-			return -5.0
-		"Crushing Defeat":
-			return -15.0
-	return 0.0
+	return _get_prestige_system().flower_war_result_prestige_value(result)
 
 func _flower_war_prestige_breakdown(report: Dictionary) -> Dictionary:
-	var direction: String = String(report.get("war_direction", "attack"))
-	var result: String = String(report.get("result", "Stalemate"))
-	var outcome_prestige: float = _flower_war_result_prestige_value(result)
-	var enemy_casualties: int = 0
-	if direction == "defence":
-		enemy_casualties = int(report.get("enemy_casualties", 0))
-	else:
-		enemy_casualties = int(report.get("defender_casualties", 0))
-	var enemy_casualty_prestige: float = snappedf(float(enemy_casualties) * 0.20, 0.01)
-	var captives: int = 0
-	var captive_prestige: float = 0.0
-	var loot_value: float = 0.0
-	var loot_prestige: float = 0.0
-	if direction != "defence":
-		captives = int(report.get("captives", 0))
-		captive_prestige = snappedf(float(captives) * 2.0, 0.01)
-		loot_value = float(report.get("loot_value", 0.0))
-		loot_prestige = snappedf(maxf(0.0, loot_value) * 0.05, 0.01)
-	var total: float = snappedf(outcome_prestige + enemy_casualty_prestige + captive_prestige + loot_prestige, 0.01)
-	var lines: Array[String] = []
-	lines.append("Outcome " + result + ": " + _format_signed_prestige(outcome_prestige))
-	if enemy_casualties > 0:
-		lines.append("Enemy casualties " + str(enemy_casualties) + ": +" + _format_amount(enemy_casualty_prestige))
-	if captives > 0:
-		lines.append("Captives " + str(captives) + ": +" + _format_amount(captive_prestige))
-	if loot_prestige > 0.0:
-		lines.append("Loot value " + _format_amount(loot_value) + ": +" + _format_amount(loot_prestige))
-	if lines.is_empty():
-		lines.append("No Prestige change.")
-	return {
-		"direction": direction,
-		"result": result,
-		"outcome_prestige": outcome_prestige,
-		"enemy_casualties": enemy_casualties,
-		"enemy_casualty_prestige": enemy_casualty_prestige,
-		"captives": captives,
-		"captive_prestige": captive_prestige,
-		"loot_value": loot_value,
-		"loot_prestige": loot_prestige,
-		"total": total,
-		"lines": lines
-	}
+	return _get_prestige_system().flower_war_prestige_breakdown(report)
 
 func _flower_war_preview_prestige_for_attack(result: String, defender_casualties: int, captives: int, loot_value: float) -> Dictionary:
-	return _flower_war_prestige_breakdown({
-		"war_direction": "attack",
-		"result": result,
-		"defender_casualties": defender_casualties,
-		"captives": captives,
-		"loot_value": loot_value
-	})
+	return _get_prestige_system().flower_war_preview_prestige_for_attack(result, defender_casualties, captives, loot_value)
 
 func _flower_war_preview_prestige_for_defence(result: String, enemy_casualties: int) -> Dictionary:
-	return _flower_war_prestige_breakdown({
-		"war_direction": "defence",
-		"result": result,
-		"enemy_casualties": enemy_casualties
-	})
+	return _get_prestige_system().flower_war_preview_prestige_for_defence(result, enemy_casualties)
 
 func get_flower_war_prestige_preview(report: Dictionary) -> Dictionary:
-	return _flower_war_prestige_breakdown(report)
+	return _get_prestige_system().flower_war_prestige_breakdown(report)
 
 func _prestige_text_from_breakdown(breakdown: Dictionary) -> String:
-	return "Prestige " + _format_signed_prestige(float(breakdown.get("total", 0.0)))
+	return _get_prestige_system().prestige_text_from_breakdown(breakdown)
 
 func _apply_flower_war_prestige_to_report(report: Dictionary) -> Dictionary:
-	var breakdown: Dictionary = _flower_war_prestige_breakdown(report)
-	var amount: float = float(breakdown.get("total", 0.0))
-	var direction: String = String(report.get("war_direction", "attack"))
-	var result: String = String(report.get("result", "Stalemate"))
-	var source_id: String = "flower_war_defence" if direction == "defence" else "flower_war_attack"
-	var detail: String = "Flower War " + ("defence" if direction == "defence" else "muster") + ": " + result
-	if absf(amount) > 0.0001:
-		add_player_prestige(amount, source_id, detail, breakdown)
-	report["prestige_pending"] = false
-	report["prestige_gain"] = amount
-	report["prestige_breakdown"] = breakdown
-	report["prestige_text"] = _prestige_text_from_breakdown(breakdown)
-	return report
+	return _get_prestige_system().apply_flower_war_prestige_to_report(self, report)
 
 func get_prestige_history() -> Array[Dictionary]:
 	var output: Array[Dictionary] = []
@@ -4208,26 +4052,10 @@ func get_prestige_history() -> Array[Dictionary]:
 	return output
 
 func _default_rival_prestige_values() -> Dictionary:
-	# Prototype leaderboard placeholders. Rival prestige is displayed so the player
-	# understands that Prestige is relative, but rival gain/loss logic is not
-	# implemented yet. Future Rival AI patches should replace these with real values.
-	return {
-		"war_rival": 30.0,
-		"cunning_rival": 24.0,
-		"diplomatic_rival": 36.0
-	}
+	return _get_prestige_system().default_rival_prestige_values()
 
 func _prestige_house_name(house_id: String) -> String:
-	match house_id:
-		"player":
-			return "Player House"
-		"war_rival":
-			return "War Rival"
-		"cunning_rival":
-			return "Cunning Rival"
-		"diplomatic_rival":
-			return "Diplomatic Rival"
-	return house_id.capitalize()
+	return _get_prestige_system().prestige_house_name(house_id)
 
 func get_rival_prestige() -> Dictionary:
 	if rival_prestige.is_empty():
@@ -4243,63 +4071,13 @@ func set_rival_prestige(house_id: String, value: float) -> Dictionary:
 	return {"ok": true, "house_id": house_id, "prestige": value}
 
 func get_prestige_leaderboard() -> Array[Dictionary]:
-	if rival_prestige.is_empty():
-		rival_prestige = _default_rival_prestige_values()
-	var rows: Array[Dictionary] = []
-	rows.append({"house_id": "player", "name": _prestige_house_name("player"), "prestige": player_prestige, "is_player": true, "source": "live"})
-	for rival_id_variant: Variant in rival_prestige.keys():
-		var rival_id: String = String(rival_id_variant)
-		rows.append({"house_id": rival_id, "name": _prestige_house_name(rival_id), "prestige": float(rival_prestige[rival_id_variant]), "is_player": false, "source": "placeholder"})
-	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
-		var a_value: float = float(a.get("prestige", 0.0))
-		var b_value: float = float(b.get("prestige", 0.0))
-		if is_equal_approx(a_value, b_value):
-			return String(a.get("name", "")) < String(b.get("name", ""))
-		return a_value > b_value
-	)
-	var rank: int = 1
-	for index: int in range(rows.size()):
-		var row: Dictionary = rows[index]
-		if index > 0:
-			var previous: Dictionary = rows[index - 1] as Dictionary
-			if not is_equal_approx(float(row.get("prestige", 0.0)), float(previous.get("prestige", 0.0))):
-				rank = index + 1
-		row["rank"] = rank
-		rows[index] = row
-	return rows
+	return _get_prestige_system().get_prestige_leaderboard(self)
 
 func get_player_prestige_rank() -> Dictionary:
-	for row: Dictionary in get_prestige_leaderboard():
-		if bool(row.get("is_player", false)):
-			return row.duplicate(true)
-	return {"rank": 0, "name": "Player House", "prestige": player_prestige, "is_player": true}
+	return _get_prestige_system().get_player_prestige_rank(self)
 
 func get_prestige_summary() -> Dictionary:
-	var leaderboard: Array[Dictionary] = get_prestige_leaderboard()
-	var player_rank: Dictionary = get_player_prestige_rank()
-	var history_rows: Array[Dictionary] = get_prestige_history()
-	history_rows.reverse()
-	var latest_history: Array[Dictionary] = []
-	for item: Dictionary in history_rows:
-		if latest_history.size() >= 8:
-			break
-		latest_history.append(item.duplicate(true))
-	return {
-		"schema_version": "prestige_core_v0_37",
-		"player_prestige": player_prestige,
-		"rival_prestige": get_rival_prestige(),
-		"leaderboard": leaderboard,
-		"player_rank": player_rank,
-		"player_rank_number": int(player_rank.get("rank", 0)),
-		"prestige_history": get_prestige_history(),
-		"recent_history": latest_history,
-		"mechanics_note": "Prestige is the main score. It is earned, lost, displayed and compared against rivals. It is never spent. Court-need donations, Flower War outcomes, rituals, shrine levels, sacrifices and savvy market trades currently add Prestige."
-	}
-
-
-# -----------------------------------------------------------------------------
-# Religious Sacrifice Prestige + Favour v0.40.1
-# -----------------------------------------------------------------------------
+	return _get_prestige_system().get_prestige_summary(self)
 
 func _sacrifice_prestige_option_definitions() -> Array[Dictionary]:
 	# Prototype values follow the agreed hierarchy: Captive > Priest > Slave/Tlacotin.
