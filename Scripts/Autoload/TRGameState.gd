@@ -118,6 +118,15 @@ func _apply_campaign_state_to_current_runtime() -> void:
 		return
 	campaign_state.apply_to_game_state(self)
 
+func _ensure_campaign_state_stockpile_bridge() -> CampaignState:
+	# v0.44.7 bridge: stockpile helper methods now write through CampaignState
+	# first, while keeping the legacy TRGameState dictionaries synchronised for
+	# UI and systems that still read state.get("estate_stockpiles").
+	var runtime_state: CampaignState = _get_campaign_state()
+	if runtime_state.estate_stockpiles.is_empty() and not estate_stockpiles.is_empty():
+		runtime_state.copy_from_game_state(self)
+	return runtime_state
+
 func _emit_state_changed_and_sync() -> void:
 	# v0.44.4 bridge: keep the CampaignState mirror current whenever TRGameState
 	# completes a local runtime mutation. TRGameState is still the public API and
@@ -396,7 +405,12 @@ func validate_market_trade_plan(trade_plan: Dictionary) -> Dictionary:
 	return _get_market_trade_system().validate_trade_plan(self, trade_plan)
 
 func apply_market_trade_plan(trade_plan: Dictionary) -> Dictionary:
-	return _get_market_trade_system().apply_trade_plan(self, trade_plan)
+	var result: Dictionary = _get_market_trade_system().apply_trade_plan(self, trade_plan)
+	# v0.44.7: MarketTradeSystem still mutates the TRGameState compatibility
+	# dictionaries directly. Sync the CampaignState mirror immediately after the
+	# public trade API returns so stockpile data remains migration-safe.
+	_sync_campaign_state_from_current_runtime()
+	return result
 
 func get_market_trade_prestige_lines(trade_plan: Dictionary) -> Array[Dictionary]:
 	var preview: Dictionary = get_market_trade_preview(trade_plan)
@@ -1773,10 +1787,18 @@ func _dictionary_to_named_string(values: Dictionary, suffix: String = "") -> Str
 	return "; ".join(parts)
 
 func _stock(resource_id: String) -> float:
-	return float(estate_stockpiles.get(resource_id, 0.0))
+	# v0.44.7: estate stockpile reads now pass through the CampaignState bridge.
+	# The legacy estate_stockpiles dictionary is kept synchronised until
+	# CampaignState becomes fully authoritative.
+	var runtime_state: CampaignState = _ensure_campaign_state_stockpile_bridge()
+	return runtime_state.get_estate_stock(resource_id)
 
 func _add_stock(resource_id: String, amount: float) -> void:
-	estate_stockpiles[resource_id] = maxf(0.0, _stock(resource_id) + amount)
+	# v0.44.7: estate stockpile writes now update CampaignState first, then mirror
+	# back to TRGameState's compatibility dictionary for old UI/system paths.
+	var runtime_state: CampaignState = _ensure_campaign_state_stockpile_bridge()
+	var new_value: float = runtime_state.add_estate_stock(resource_id, amount)
+	estate_stockpiles[resource_id] = new_value
 
 func _reserve_breakdown(resource_id: String, upkeep_value: float, input_value: float, housing_value: float = 0.0) -> Array[String]:
 	var lines: Array[String] = []

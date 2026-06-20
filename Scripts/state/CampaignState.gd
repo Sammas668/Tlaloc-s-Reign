@@ -12,7 +12,7 @@
 class_name CampaignState
 extends RefCounted
 
-const SCHEMA_VERSION: String = "campaign_state_v0_44_3"
+const SCHEMA_VERSION: String = "campaign_state_v0_44_7"
 
 # -----------------------------------------------------------------------------
 # Calendar / report state
@@ -304,6 +304,32 @@ func apply_to_game_state(game_state: Node) -> void:
 	game_state.set("last_flower_war_report", _duplicate_dictionary(last_flower_war_report))
 	game_state.set("flower_war_report_archive", _duplicate_dictionary_array(flower_war_report_archive))
 	game_state.set("warbands", _duplicate_dictionary(warbands))
+
+# -----------------------------------------------------------------------------
+# Stockpile access helpers
+# -----------------------------------------------------------------------------
+
+func get_estate_stock(resource_id: String) -> float:
+	return float(estate_stockpiles.get(resource_id, 0.0))
+
+func set_estate_stock(resource_id: String, amount: float) -> float:
+	var value: float = maxf(0.0, amount)
+	estate_stockpiles[resource_id] = value
+	return value
+
+func add_estate_stock(resource_id: String, amount: float) -> float:
+	return set_estate_stock(resource_id, get_estate_stock(resource_id) + amount)
+
+func get_market_stock(resource_id: String) -> float:
+	return float(market_stockpiles.get(resource_id, 0.0))
+
+func set_market_stock(resource_id: String, amount: float) -> float:
+	var value: float = maxf(0.0, amount)
+	market_stockpiles[resource_id] = value
+	return value
+
+func add_market_stock(resource_id: String, amount: float) -> float:
+	return set_market_stock(resource_id, get_market_stock(resource_id) + amount)
 
 # -----------------------------------------------------------------------------
 # Save/load-facing helpers
