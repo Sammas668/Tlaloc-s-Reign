@@ -15,6 +15,7 @@ const RESOURCE_DATA_PATH: String = "res://Data/Prototype0/resources.json"
 const BUILDING_DATA_PATH: String = "res://Data/Prototype0/buildings.json"
 const START_STATE_PATH: String = "res://Data/Prototype0/start_state.json"
 const MARKET_ECONOMY_DATA_PATH: String = "res://Data/Prototype0/market_economy.json"
+const CAMPAIGN_STATE_SCRIPT: GDScript = preload("res://Scripts/state/CampaignState.gd")
 const PRESTIGE_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/PrestigeSystem.gd")
 const MARKET_TRADE_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/MarketTradeSystem.gd")
 const POPULATION_UPKEEP_SYSTEM_SCRIPT: GDScript = preload("res://Scripts/Systems/PopulationUpkeepSystem.gd")
@@ -66,6 +67,12 @@ var last_palace_maintenance_report: Array[String] = []
 # a Palace dedicated to Huitzilopochtli. Defensive Flower Wars can still happen
 # regardless of dedication because the player is responding to an attack.
 var flower_war_palace_gate_enabled: bool = true
+
+# v0.44.2 bridge: CampaignState is the future live save-state owner.
+# During this phase TRGameState still owns the active variables, but keeps a
+# CampaignState snapshot so the migration can proceed without changing UI calls.
+var campaign_state: CampaignState = null
+
 var _prestige_system_instance: PrestigeSystem = null
 var _market_trade_system_instance: MarketTradeSystem = null
 var _population_upkeep_system_instance: PopulationUpkeepSystem = null
@@ -88,6 +95,136 @@ var population_upkeep_rates: Dictionary = {
 	"malli": {"maize": 0.5}
 }
 
+
+func _get_campaign_state() -> CampaignState:
+	if campaign_state == null:
+		campaign_state = CAMPAIGN_STATE_SCRIPT.new() as CampaignState
+	return campaign_state
+
+func get_campaign_state_snapshot() -> CampaignState:
+	# Public bridge for migration/debugging. Returns a fresh snapshot of the
+	# current TRGameState-owned runtime without changing gameplay ownership yet.
+	_sync_campaign_state_from_current_runtime()
+	return _get_campaign_state()
+
+func _sync_campaign_state_from_current_runtime() -> void:
+	var snapshot: CampaignState = _get_campaign_state()
+	snapshot.copy_from_game_state(self)
+
+func _apply_campaign_state_to_current_runtime() -> void:
+	# Migration bridge only. Do not use casually until CampaignState becomes the
+	# authoritative live-state owner in a later patch.
+	if campaign_state == null:
+		return
+	campaign_state.apply_to_game_state(self)
+
+func _emit_state_changed_and_sync() -> void:
+	# v0.44.4 bridge: keep the CampaignState mirror current whenever TRGameState
+	# completes a local runtime mutation. TRGameState is still the public API and
+	# active runtime owner; CampaignState is not authoritative yet.
+	_sync_campaign_state_from_current_runtime()
+	emit_signal("state_changed")
+
+func get_campaign_state_sync_report(sync_first: bool = false) -> Dictionary:
+	# v0.44.5 bridge audit: compare the current TRGameState-owned runtime
+	# against the CampaignState mirror. This is a migration/debug helper only;
+	# it does not make CampaignState authoritative.
+	if sync_first:
+		_sync_campaign_state_from_current_runtime()
+	var snapshot: CampaignState = _get_campaign_state()
+	var fields: Array[String] = [
+		"resources",
+		"resource_order",
+		"buildings",
+		"building_order",
+		"estate_stockpiles",
+		"market_stockpiles",
+		"market_demand",
+		"market_economy",
+		"estate_buildings",
+		"active_housing_counts",
+		"population",
+		"base_housing_capacity",
+		"labour_assignments",
+		"current_veintena",
+		"last_report",
+		"initialized",
+		"player_palace_dedicated_god",
+		"palace_built_structures",
+		"palace_structure_runtime_statuses",
+		"palace_delivered_ruler_demands",
+		"palace_ruler_demand_donations",
+		"last_palace_maintenance_report",
+		"player_prestige",
+		"rival_prestige",
+		"prestige_history",
+		"sacrifice_prestige_records",
+		"flower_war_palace_gate_enabled",
+		"last_flower_war_report",
+		"flower_war_report_archive",
+		"warbands"
+	]
+	var rows: Array[Dictionary] = []
+	var mismatch_count: int = 0
+	for field_name: String in fields:
+		var live_value: Variant = get(field_name)
+		var mirror_value: Variant = snapshot.get(field_name)
+		var live_text: String = _campaign_state_compare_text(live_value)
+		var mirror_text: String = _campaign_state_compare_text(mirror_value)
+		var matches: bool = live_text == mirror_text
+		if not matches:
+			mismatch_count += 1
+		rows.append({
+			"field": field_name,
+			"matches": matches,
+			"live_type": type_string(typeof(live_value)),
+			"mirror_type": type_string(typeof(mirror_value)),
+			"live_preview": _campaign_state_preview(live_value),
+			"mirror_preview": _campaign_state_preview(mirror_value)
+		})
+	return {
+		"schema_version": "campaign_state_sync_report_v0_44_5",
+		"sync_first": sync_first,
+		"field_count": fields.size(),
+		"mismatch_count": mismatch_count,
+		"in_sync": mismatch_count == 0,
+		"rows": rows
+	}
+
+func is_campaign_state_mirror_in_sync() -> bool:
+	var report: Dictionary = get_campaign_state_sync_report(false)
+	return bool(report.get("in_sync", false))
+
+func _campaign_state_compare_text(value: Variant) -> String:
+	if value is Dictionary:
+		var dictionary: Dictionary = value as Dictionary
+		var keys: Array[String] = []
+		for key_variant: Variant in dictionary.keys():
+			keys.append(str(key_variant))
+		keys.sort()
+		var parts: Array[String] = []
+		for key: String in keys:
+			parts.append(key + ":" + _campaign_state_compare_text(dictionary.get(key)))
+		return "{" + ",".join(parts) + "}"
+	if value is Array:
+		var array_value: Array = value as Array
+		var parts: Array[String] = []
+		for item: Variant in array_value:
+			parts.append(_campaign_state_compare_text(item))
+		return "[" + ",".join(parts) + "]"
+	return str(value)
+
+func _campaign_state_preview(value: Variant) -> String:
+	if value is Dictionary:
+		var dictionary: Dictionary = value as Dictionary
+		return "Dictionary(" + str(dictionary.size()) + ")"
+	if value is Array:
+		var array_value: Array = value as Array
+		return "Array(" + str(array_value.size()) + ")"
+	var text: String = str(value)
+	if text.length() > 80:
+		return text.substr(0, 77) + "..."
+	return text
 
 func _get_prestige_system() -> PrestigeSystem:
 	if _prestige_system_instance == null:
@@ -149,10 +286,7 @@ func _ready() -> void:
 		new_game()
 
 func new_game() -> void:
-	_load_resource_definitions()
-	_load_building_definitions()
-	_load_market_economy_definitions()
-	_load_start_state()
+	_load_project_data_into_campaign_state()
 	palace_built_structures.clear()
 	palace_delivered_ruler_demands.clear()
 	palace_ruler_demand_donations.clear()
@@ -166,74 +300,22 @@ func new_game() -> void:
 	initialized = true
 	last_report.clear()
 	last_report.append("New estate simulation started.")
-	emit_signal("state_changed")
+	_emit_state_changed_and_sync()
 
-func _load_json_dictionary(path: String) -> Dictionary:
-	if not FileAccess.file_exists(path):
-		push_warning("Missing data file: " + path)
-		return {}
-	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
-	if file == null:
-		push_warning("Could not open data file: " + path)
-		return {}
-	var raw_text: String = file.get_as_text()
-	var parsed: Variant = JSON.parse_string(raw_text)
-	if parsed is Dictionary:
-		return parsed as Dictionary
-	push_warning("Data file did not parse as Dictionary: " + path)
-	return {}
-
-func _load_resource_definitions() -> void:
-	resources.clear()
-	resource_order.clear()
-	var data: Dictionary = _load_json_dictionary(RESOURCE_DATA_PATH)
-	var rows: Array = data.get("resources", []) as Array
-	for row_variant: Variant in rows:
-		var row: Dictionary = row_variant as Dictionary
-		var resource_id: String = String(row.get("id", ""))
-		if resource_id == "":
-			continue
-		resources[resource_id] = row
-		resource_order.append(resource_id)
-
-func _load_building_definitions() -> void:
-	buildings.clear()
-	building_order.clear()
-	var data: Dictionary = _load_json_dictionary(BUILDING_DATA_PATH)
-	var rows: Array = data.get("buildings", []) as Array
-	for row_variant: Variant in rows:
-		var row: Dictionary = row_variant as Dictionary
-		var building_id: String = String(row.get("id", ""))
-		if building_id == "":
-			continue
-		buildings[building_id] = row
-		building_order.append(building_id)
-	building_order.sort_custom(func(a: String, b: String) -> bool:
-		var a_data: Dictionary = buildings[a] as Dictionary
-		var b_data: Dictionary = buildings[b] as Dictionary
-		return int(a_data.get("priority", 999)) < int(b_data.get("priority", 999))
+func _load_project_data_into_campaign_state() -> void:
+	# v0.44.6: CampaignState now owns JSON/start-state shaping for the bridge.
+	# TRGameState remains the public API and active runtime owner, but no longer
+	# carries duplicate project-data loading helpers.
+	var runtime_state: CampaignState = _get_campaign_state()
+	var result: Dictionary = runtime_state.load_project_data_from_paths(
+		RESOURCE_DATA_PATH,
+		BUILDING_DATA_PATH,
+		START_STATE_PATH,
+		MARKET_ECONOMY_DATA_PATH
 	)
-
-func _load_market_economy_definitions() -> void:
-	market_economy.clear()
-	var data: Dictionary = _load_json_dictionary(MARKET_ECONOMY_DATA_PATH)
-	if data.is_empty():
-		return
-	market_economy = data
-
-func _load_start_state() -> void:
-	var data: Dictionary = _load_json_dictionary(START_STATE_PATH)
-	current_veintena = int(data.get("current_veintena", 1))
-	estate_stockpiles = _float_dictionary(data.get("estate_stockpiles", {}) as Dictionary)
-	market_stockpiles = _float_dictionary(data.get("market_stockpiles", {}) as Dictionary)
-	market_demand = _float_dictionary(data.get("market_demand", {}) as Dictionary)
-	estate_buildings = _int_dictionary(data.get("estate_buildings", {}) as Dictionary)
-	active_housing_counts = _int_dictionary(data.get("active_housing_counts", {}) as Dictionary)
-	population = _int_dictionary(data.get("population", {}) as Dictionary)
-	base_housing_capacity = _int_dictionary(data.get("base_housing_capacity", {}) as Dictionary)
-	labour_assignments = _nested_int_dictionary(data.get("labour_assignments", {}) as Dictionary)
-	_ensure_all_resource_keys()
-	_ensure_all_building_keys()
+	for warning_variant: Variant in result.get("warnings", []):
+		push_warning(String(warning_variant))
+	runtime_state.apply_to_game_state(self)
 	_ensure_base_housing_capacity()
 	_ensure_active_housing_counts()
 	# New-game start states should not begin with productive buildings idle just
@@ -241,43 +323,6 @@ func _load_start_state() -> void:
 	# Default setup staffs production automatically in priority order, with maize
 	# protected first, then other production buildings until population runs out.
 	_auto_staff_all_productive_buildings()
-
-func _float_dictionary(source: Dictionary) -> Dictionary:
-	var output: Dictionary = {}
-	for key_variant: Variant in source.keys():
-		var key: String = String(key_variant)
-		output[key] = float(source[key])
-	return output
-
-func _int_dictionary(source: Dictionary) -> Dictionary:
-	var output: Dictionary = {}
-	for key_variant: Variant in source.keys():
-		var key: String = String(key_variant)
-		output[key] = int(source[key])
-	return output
-
-func _nested_int_dictionary(source: Dictionary) -> Dictionary:
-	var output: Dictionary = {}
-	for key_variant: Variant in source.keys():
-		var key: String = String(key_variant)
-		var value: Variant = source[key_variant]
-		if value is Dictionary:
-			output[key] = _int_dictionary(value as Dictionary)
-	return output
-
-func _ensure_all_resource_keys() -> void:
-	for resource_id: String in resource_order:
-		if not estate_stockpiles.has(resource_id):
-			estate_stockpiles[resource_id] = 0.0
-		if not market_stockpiles.has(resource_id):
-			market_stockpiles[resource_id] = 0.0
-		if not market_demand.has(resource_id):
-			market_demand[resource_id] = 0.0
-
-func _ensure_all_building_keys() -> void:
-	for building_id: String in building_order:
-		if not estate_buildings.has(building_id):
-			estate_buildings[building_id] = 0
 
 func get_current_veintena() -> int:
 	return current_veintena
@@ -533,7 +578,7 @@ func set_active_housing_count(building_id: String, active_count: int) -> bool:
 	var result: bool = _get_housing_system().set_active_housing_count(self, building_id, active_count)
 	if result:
 		_ensure_labour_assignments()
-		emit_signal("state_changed")
+		_emit_state_changed_and_sync()
 	return result
 
 func get_housing_mothball_rows() -> Array[Dictionary]:
@@ -1071,7 +1116,7 @@ func build_building(building_id: String) -> bool:
 		var reason: String = build_status_text(building_id)
 		last_report.append(get_building_name(building_id) + " not built. " + reason)
 		emit_signal("build_failed", building_id, reason)
-		emit_signal("state_changed")
+		_emit_state_changed_and_sync()
 		return false
 	var definition: Dictionary = buildings[building_id] as Dictionary
 	var cost: Dictionary = definition.get("build_cost", {}) as Dictionary
@@ -1095,7 +1140,7 @@ func build_building(building_id: String) -> bool:
 	var message: String = "Built " + get_building_name(building_id) + "."
 	last_report.append(message)
 	emit_signal("build_completed", building_id)
-	emit_signal("state_changed")
+	_emit_state_changed_and_sync()
 	return true
 
 func can_destroy(building_id: String) -> bool:
@@ -1131,7 +1176,7 @@ func destroy_building(building_id: String) -> bool:
 		var reason: String = destroy_status_text(building_id)
 		last_report.append(get_building_name(building_id) + " not destroyed. " + reason)
 		emit_signal("destroy_failed", building_id, reason)
-		emit_signal("state_changed")
+		_emit_state_changed_and_sync()
 		return false
 	var before_destroy_count: int = int(estate_buildings.get(building_id, 0))
 	estate_buildings[building_id] = max(0, before_destroy_count - 1)
@@ -1141,11 +1186,12 @@ func destroy_building(building_id: String) -> bool:
 	_ensure_labour_assignments()
 	last_report.append("Destroyed one " + get_building_name(building_id) + ". No refund given.")
 	emit_signal("destroy_completed", building_id)
-	emit_signal("state_changed")
+	_emit_state_changed_and_sync()
 	return true
 
 func advance_veintena() -> void:
 	_get_turn_resolution_system().advance_veintena(self)
+	_sync_campaign_state_from_current_runtime()
 
 func estimate_population_upkeep() -> Dictionary:
 	return _get_population_upkeep_system().calculate_population_upkeep(active_population_by_group(), population_upkeep_rates)
@@ -1701,7 +1747,7 @@ func add_looted_goods_bundle(loot: Dictionary) -> void:
 		gained_parts.append(_format_amount(amount) + " " + get_resource_name(resource_id))
 	if not gained_parts.is_empty():
 		last_report.append("Loot assigned into goods: " + ", ".join(gained_parts) + ".")
-	emit_signal("state_changed")
+	_emit_state_changed_and_sync()
 
 func _dictionary_to_named_string(values: Dictionary, suffix: String = "") -> String:
 	var parts: Array[String] = []
@@ -3377,7 +3423,7 @@ func launch_flower_war_with_warband(warband_id: String, option_id: String = "min
 	if not bool(status.get("ok", false)):
 		last_flower_war_report = {"ok": false, "reason": String(status.get("reason", "Flower War cannot launch.")), "warband_id": warband_id}
 		last_report.append("Flower War not launched: " + String(last_flower_war_report.get("reason", "blocked")) + ".")
-		emit_signal("state_changed")
+		_emit_state_changed_and_sync()
 		return last_flower_war_report.duplicate(true)
 	var preview: Dictionary = status.get("preview", {}) as Dictionary
 	if preview.is_empty():
@@ -3432,7 +3478,7 @@ func launch_flower_war_with_warband(warband_id: String, option_id: String = "min
 	if level_after > level_before:
 		line += " " + String(warband.get("name", "Warband")) + " reached Level " + str(level_after) + " and gained " + str(max(0, level_after - level_before)) + " skill point(s)."
 	last_report.append(line)
-	emit_signal("state_changed")
+	_emit_state_changed_and_sync()
 	return last_flower_war_report.duplicate(true)
 
 func _flower_war_result_label(net_damage: int, attacker_size: int, defender_size: int) -> String:

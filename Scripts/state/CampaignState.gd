@@ -2,17 +2,17 @@
 # Godot 4.x
 # Project path: res://Scripts/state/CampaignState.gd
 #
-# v0.44.1 data-container pass.
+# v0.44.3 start-state shaping pass.
 #
 # CampaignState is the future owner of live campaign/save data.
-# It intentionally contains data-shaping helpers, but not gameplay rules.
+# It intentionally contains data-shaping helpers, including start-state loading, but not gameplay rules.
 # During the TRGameState migration, TRGameState remains the public API and
 # compatibility wrapper while systems increasingly read/write through this object.
 
 class_name CampaignState
 extends RefCounted
 
-const SCHEMA_VERSION: String = "campaign_state_v0_44_1"
+const SCHEMA_VERSION: String = "campaign_state_v0_44_3"
 
 # -----------------------------------------------------------------------------
 # Calendar / report state
@@ -146,6 +146,80 @@ func ensure_all_building_keys() -> void:
 	for building_id: String in building_order:
 		if not estate_buildings.has(building_id):
 			estate_buildings[building_id] = 0
+
+
+# -----------------------------------------------------------------------------
+# Project-data loading helpers
+# -----------------------------------------------------------------------------
+
+func load_project_data_from_paths(resource_path: String, building_path: String, start_state_path: String, market_economy_path: String) -> Dictionary:
+	# v0.44.6 bridge: CampaignState now owns project/start-data shaping.
+	# This keeps TRGameState from carrying JSON-loading and dictionary-conversion
+	# helpers while CampaignState is prepared to become the authoritative live-state
+	# owner. This method does not run gameplay rules.
+	reset_runtime_state()
+	var warnings: Array[String] = []
+	var resource_data: Dictionary = _load_json_dictionary(resource_path, warnings)
+	var building_data: Dictionary = _load_json_dictionary(building_path, warnings)
+	var market_data: Dictionary = _load_json_dictionary(market_economy_path, warnings)
+	var start_data: Dictionary = _load_json_dictionary(start_state_path, warnings)
+	_load_resource_definitions_from_data(resource_data)
+	_load_building_definitions_from_data(building_data)
+	market_economy = _duplicate_dictionary(market_data)
+	load_start_state(start_data)
+	return {
+		"schema_version": "campaign_state_project_data_load_v0_44_6",
+		"ok": warnings.is_empty(),
+		"warnings": warnings,
+		"resource_count": resources.size(),
+		"building_count": buildings.size(),
+		"market_economy_loaded": not market_economy.is_empty(),
+		"start_state_loaded": not start_data.is_empty()
+	}
+
+func _load_json_dictionary(path: String, warnings: Array[String]) -> Dictionary:
+	if not FileAccess.file_exists(path):
+		warnings.append("Missing data file: " + path)
+		return {}
+	var file: FileAccess = FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		warnings.append("Could not open data file: " + path)
+		return {}
+	var raw_text: String = file.get_as_text()
+	var parsed: Variant = JSON.parse_string(raw_text)
+	if parsed is Dictionary:
+		return parsed as Dictionary
+	warnings.append("Data file did not parse as Dictionary: " + path)
+	return {}
+
+func _load_resource_definitions_from_data(data: Dictionary) -> void:
+	resources.clear()
+	resource_order.clear()
+	var rows: Array = data.get("resources", []) as Array
+	for row_variant: Variant in rows:
+		var row: Dictionary = row_variant as Dictionary
+		var resource_id: String = String(row.get("id", ""))
+		if resource_id == "":
+			continue
+		resources[resource_id] = row
+		resource_order.append(resource_id)
+
+func _load_building_definitions_from_data(data: Dictionary) -> void:
+	buildings.clear()
+	building_order.clear()
+	var rows: Array = data.get("buildings", []) as Array
+	for row_variant: Variant in rows:
+		var row: Dictionary = row_variant as Dictionary
+		var building_id: String = String(row.get("id", ""))
+		if building_id == "":
+			continue
+		buildings[building_id] = row
+		building_order.append(building_id)
+	building_order.sort_custom(func(a: String, b: String) -> bool:
+		var a_data: Dictionary = buildings[a] as Dictionary
+		var b_data: Dictionary = buildings[b] as Dictionary
+		return int(a_data.get("priority", 999)) < int(b_data.get("priority", 999))
+	)
 
 # -----------------------------------------------------------------------------
 # TRGameState bridge helpers
