@@ -2,9 +2,10 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/MarketTradeSystem.gd
 #
-# v0.43.2 extraction target.
-# Owns barter-trade pricing, validation and application rules while TRGameState
-# remains the live state owner during the CampaignState migration.
+# v0.44.8 stockpile-authority update.
+# Owns barter-trade pricing, validation and application rules. When available,
+# accepted trades mutate stockpiles through CampaignState rather than directly
+# treating TRGameState dictionaries as the authority.
 
 class_name MarketTradeSystem
 extends RefCounted
@@ -103,21 +104,32 @@ func apply_trade_plan(state: Node, trade_plan: Dictionary) -> Dictionary:
 		return {"valid": false, "reason": "Trade data is not connected."}
 
 	var plan: Dictionary = validation.get("plan", {}) as Dictionary
-	var estate_variant: Variant = state.get("estate_stockpiles")
-	var market_variant: Variant = state.get("market_stockpiles")
-	if not (estate_variant is Dictionary) or not (market_variant is Dictionary):
-		return {"valid": false, "reason": "Stockpile data is not connected."}
-	var estate_stockpiles: Dictionary = estate_variant as Dictionary
-	var market_stockpiles: Dictionary = market_variant as Dictionary
+	var campaign_state: Variant = null
+	if state.has_method("_ensure_campaign_state_stockpile_bridge"):
+		campaign_state = state.call("_ensure_campaign_state_stockpile_bridge")
 
-	for key_variant: Variant in plan.keys():
-		var resource_id: String = String(key_variant)
-		var amount: float = float(plan[key_variant])
-		estate_stockpiles[resource_id] = maxf(0.0, float(estate_stockpiles.get(resource_id, 0.0)) + amount)
-		market_stockpiles[resource_id] = maxf(0.0, float(market_stockpiles.get(resource_id, 0.0)) - amount)
-
-	state.set("estate_stockpiles", estate_stockpiles)
-	state.set("market_stockpiles", market_stockpiles)
+	if campaign_state != null and campaign_state.has_method("add_estate_stock") and campaign_state.has_method("add_market_stock"):
+		for key_variant: Variant in plan.keys():
+			var resource_id: String = String(key_variant)
+			var amount: float = float(plan[key_variant])
+			campaign_state.call("add_estate_stock", resource_id, amount)
+			campaign_state.call("add_market_stock", resource_id, -amount)
+		if state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
+			state.call("_mirror_stockpile_compatibility_from_campaign_state")
+	else:
+		var estate_variant: Variant = state.get("estate_stockpiles")
+		var market_variant: Variant = state.get("market_stockpiles")
+		if not (estate_variant is Dictionary) or not (market_variant is Dictionary):
+			return {"valid": false, "reason": "Stockpile data is not connected."}
+		var estate_stockpiles: Dictionary = estate_variant as Dictionary
+		var market_stockpiles: Dictionary = market_variant as Dictionary
+		for key_variant: Variant in plan.keys():
+			var resource_id: String = String(key_variant)
+			var amount: float = float(plan[key_variant])
+			estate_stockpiles[resource_id] = maxf(0.0, float(estate_stockpiles.get(resource_id, 0.0)) + amount)
+			market_stockpiles[resource_id] = maxf(0.0, float(market_stockpiles.get(resource_id, 0.0)) - amount)
+		state.set("estate_stockpiles", estate_stockpiles)
+		state.set("market_stockpiles", market_stockpiles)
 
 	var report_line: String = accepted_trade_report_line(validation)
 	var report_variant: Variant = state.get("last_report")

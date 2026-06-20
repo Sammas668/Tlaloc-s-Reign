@@ -68,9 +68,9 @@ var last_palace_maintenance_report: Array[String] = []
 # regardless of dedication because the player is responding to an attack.
 var flower_war_palace_gate_enabled: bool = true
 
-# v0.44.2 bridge: CampaignState is the future live save-state owner.
-# During this phase TRGameState still owns the active variables, but keeps a
-# CampaignState snapshot so the migration can proceed without changing UI calls.
+# v0.44.12 bridge: CampaignState is becoming the live save-state owner.
+# Stockpiles are CampaignState-first. Population, buildings, housing and labour
+# now have CampaignState bridge helpers while TRGameState keeps compatibility fields.
 var campaign_state: CampaignState = null
 
 var _prestige_system_instance: PrestigeSystem = null
@@ -109,7 +109,20 @@ func get_campaign_state_snapshot() -> CampaignState:
 
 func _sync_campaign_state_from_current_runtime() -> void:
 	var snapshot: CampaignState = _get_campaign_state()
+	# v0.44.8: stockpile data is now CampaignState-authoritative.
+	# Preserve CampaignState stockpiles while syncing all other live fields from the
+	# TRGameState compatibility wrapper. Afterwards mirror the authoritative
+	# stockpiles back into TRGameState for legacy readers.
+	var authoritative_estate_stockpiles: Dictionary = snapshot.estate_stockpiles.duplicate(true)
+	var authoritative_market_stockpiles: Dictionary = snapshot.market_stockpiles.duplicate(true)
 	snapshot.copy_from_game_state(self)
+	if not authoritative_estate_stockpiles.is_empty():
+		snapshot.estate_stockpiles = authoritative_estate_stockpiles
+	if not authoritative_market_stockpiles.is_empty():
+		snapshot.market_stockpiles = authoritative_market_stockpiles
+	_mirror_stockpile_compatibility_from_campaign_state()
+	_mirror_estate_structure_compatibility_from_campaign_state()
+	_mirror_warband_flower_war_compatibility_from_campaign_state()
 
 func _apply_campaign_state_to_current_runtime() -> void:
 	# Migration bridge only. Do not use casually until CampaignState becomes the
@@ -118,19 +131,116 @@ func _apply_campaign_state_to_current_runtime() -> void:
 		return
 	campaign_state.apply_to_game_state(self)
 
-func _ensure_campaign_state_stockpile_bridge() -> CampaignState:
-	# v0.44.7 bridge: stockpile helper methods now write through CampaignState
-	# first, while keeping the legacy TRGameState dictionaries synchronised for
-	# UI and systems that still read state.get("estate_stockpiles").
+func _mirror_palace_state_from_campaign_state_to_legacy() -> void:
+	# v0.44.11 bridge: CampaignState is now the first-read bridge for palace
+	# state, while TRGameState keeps legacy mirror variables for UI/system
+	# compatibility during the migration.
+	_get_campaign_state().mirror_palace_state_to_game_state(self)
+
+
+func _ensure_campaign_state_estate_structure_bridge() -> CampaignState:
+	# v0.44.12 bridge: CampaignState now has helpers for population,
+	# estate buildings, active housing counts, base housing capacity and labour
+	# assignments. TRGameState still owns most live mutation paths, so this helper
+	# seeds CampaignState from legacy fields when needed and mirrors back for old UI.
 	var runtime_state: CampaignState = _get_campaign_state()
-	if runtime_state.estate_stockpiles.is_empty() and not estate_stockpiles.is_empty():
-		runtime_state.copy_from_game_state(self)
+	if runtime_state.population.is_empty() and not population.is_empty():
+		runtime_state.population = population.duplicate(true)
+	if runtime_state.estate_buildings.is_empty() and not estate_buildings.is_empty():
+		runtime_state.estate_buildings = estate_buildings.duplicate(true)
+	if runtime_state.active_housing_counts.is_empty() and not active_housing_counts.is_empty():
+		runtime_state.active_housing_counts = active_housing_counts.duplicate(true)
+	if runtime_state.base_housing_capacity.is_empty() and not base_housing_capacity.is_empty():
+		runtime_state.base_housing_capacity = base_housing_capacity.duplicate(true)
+	if runtime_state.labour_assignments.is_empty() and not labour_assignments.is_empty():
+		runtime_state.labour_assignments = labour_assignments.duplicate(true)
+	_mirror_estate_structure_compatibility_from_campaign_state()
 	return runtime_state
 
+func _mirror_estate_structure_compatibility_from_campaign_state() -> void:
+	# Keep legacy fields readable for systems/UI that have not yet been migrated.
+	_get_campaign_state().mirror_population_building_housing_to_game_state(self)
+
+func _ensure_campaign_state_warband_flower_war_bridge() -> CampaignState:
+	# v0.44.13 bridge: CampaignState now has helpers for warband roster state,
+	# last Flower War report and the Flower War report archive. TRGameState still
+	# owns most warband mutation paths, so this helper seeds CampaignState from
+	# legacy fields when needed and mirrors back for old UI/system readers.
+	var runtime_state: CampaignState = _get_campaign_state()
+	if runtime_state.warbands.is_empty() and not warbands.is_empty():
+		runtime_state.warbands = warbands.duplicate(true)
+	if runtime_state.last_flower_war_report.is_empty() and not last_flower_war_report.is_empty():
+		runtime_state.last_flower_war_report = last_flower_war_report.duplicate(true)
+	if runtime_state.flower_war_report_archive.is_empty() and not flower_war_report_archive.is_empty():
+		runtime_state.flower_war_report_archive = flower_war_report_archive.duplicate(true)
+	_mirror_warband_flower_war_compatibility_from_campaign_state()
+	return runtime_state
+
+func _mirror_warband_flower_war_compatibility_from_campaign_state() -> void:
+	# Keep legacy warband/report fields readable until CampaignState becomes the
+	# only live-state owner.
+	_get_campaign_state().mirror_warband_flower_war_state_to_game_state(self)
+
+func _ensure_campaign_state_stockpile_bridge() -> CampaignState:
+	# v0.44.8: CampaignState is the authoritative stockpile owner. If this is an
+	# old save/session where the CampaignState stockpile dictionaries are still
+	# empty, seed them from the TRGameState compatibility dictionaries once.
+	# Afterwards, mirror CampaignState back to TRGameState, not the reverse.
+	var runtime_state: CampaignState = _get_campaign_state()
+	if runtime_state.estate_stockpiles.is_empty() and not estate_stockpiles.is_empty():
+		runtime_state.estate_stockpiles = estate_stockpiles.duplicate(true)
+	if runtime_state.market_stockpiles.is_empty() and not market_stockpiles.is_empty():
+		runtime_state.market_stockpiles = market_stockpiles.duplicate(true)
+	_mirror_stockpile_compatibility_from_campaign_state()
+	return runtime_state
+
+func _mirror_stockpile_compatibility_from_campaign_state() -> void:
+	# Keep legacy dictionaries readable for UI/system code that has not been
+	# migrated yet. This is a compatibility mirror, not the authority source.
+	var runtime_state: CampaignState = _get_campaign_state()
+	estate_stockpiles = runtime_state.estate_stockpiles.duplicate(true)
+	market_stockpiles = runtime_state.market_stockpiles.duplicate(true)
+
+func _mirror_calendar_report_compatibility_from_campaign_state() -> void:
+	# v0.44.9: Calendar/report values can now be read through CampaignState while
+	# TRGameState remains the compatibility API. Direct report writers still exist
+	# in older paths, so this is a bridge step rather than the final handover.
+	var runtime_state: CampaignState = _get_campaign_state()
+	current_veintena = runtime_state.get_current_veintena_value()
+	last_report = runtime_state.get_last_report_copy()
+	initialized = runtime_state.initialized
+
+func _ensure_campaign_state_prestige_bridge() -> CampaignState:
+	# v0.44.10: Prestige state now has a CampaignState bridge. TRGameState is
+	# still the public API, but player Prestige, rival Prestige and Prestige
+	# history can be read/written through CampaignState before being mirrored
+	# back into the legacy fields for compatibility.
+	var runtime_state: CampaignState = _get_campaign_state()
+	if runtime_state.prestige_history.is_empty() and not prestige_history.is_empty():
+		runtime_state.prestige_history = prestige_history.duplicate(true)
+	if absf(runtime_state.player_prestige) <= 0.0001 and absf(player_prestige) > 0.0001:
+		runtime_state.player_prestige = player_prestige
+	if runtime_state.rival_prestige.is_empty():
+		if not rival_prestige.is_empty():
+			runtime_state.rival_prestige = rival_prestige.duplicate(true)
+		else:
+			runtime_state.rival_prestige = _default_rival_prestige_values()
+	if runtime_state.sacrifice_prestige_records.is_empty() and not sacrifice_prestige_records.is_empty():
+		runtime_state.sacrifice_prestige_records = sacrifice_prestige_records.duplicate(true)
+	_mirror_prestige_compatibility_from_campaign_state()
+	return runtime_state
+
+func _mirror_prestige_compatibility_from_campaign_state() -> void:
+	# Keep legacy fields readable for systems/UI that have not yet been migrated.
+	var runtime_state: CampaignState = _get_campaign_state()
+	player_prestige = runtime_state.get_player_prestige_value()
+	rival_prestige = runtime_state.get_rival_prestige_copy()
+	prestige_history = runtime_state.get_prestige_history_copy()
+	sacrifice_prestige_records = runtime_state.get_sacrifice_prestige_records_copy()
+
 func _emit_state_changed_and_sync() -> void:
-	# v0.44.4 bridge: keep the CampaignState mirror current whenever TRGameState
-	# completes a local runtime mutation. TRGameState is still the public API and
-	# active runtime owner; CampaignState is not authoritative yet.
+	# Keep CampaignState and the TRGameState compatibility wrapper aligned after
+	# local runtime mutations. Stockpiles remain CampaignState-authoritative.
 	_sync_campaign_state_from_current_runtime()
 	emit_signal("state_changed")
 
@@ -306,9 +416,12 @@ func new_game() -> void:
 	_ensure_warband_state()
 	last_flower_war_report.clear()
 	flower_war_report_archive.clear()
-	initialized = true
-	last_report.clear()
-	last_report.append("New estate simulation started.")
+	var runtime_state: CampaignState = _get_campaign_state()
+	runtime_state.set_initialized(true)
+	runtime_state.set_current_veintena(current_veintena)
+	runtime_state.clear_last_report()
+	runtime_state.append_report_line("New estate simulation started.")
+	_mirror_calendar_report_compatibility_from_campaign_state()
 	_emit_state_changed_and_sync()
 
 func _load_project_data_into_campaign_state() -> void:
@@ -334,13 +447,16 @@ func _load_project_data_into_campaign_state() -> void:
 	_auto_staff_all_productive_buildings()
 
 func get_current_veintena() -> int:
-	return current_veintena
+	# v0.44.9 bridge: expose calendar reads through CampaignState while old
+	# systems continue to mutate TRGameState directly during the transition.
+	_sync_campaign_state_from_current_runtime()
+	return _get_campaign_state().get_current_veintena_value()
 
 func get_last_report() -> Array[String]:
-	var output: Array[String] = []
-	for line_variant: Variant in last_report:
-		output.append(String(line_variant))
-	return output
+	# v0.44.9 bridge: expose report reads through CampaignState. Direct report
+	# appends are still migrated gradually, so sync before reading.
+	_sync_campaign_state_from_current_runtime()
+	return _get_campaign_state().get_last_report_copy()
 
 func get_resource_name(resource_id: String) -> String:
 	if resources.has(resource_id):
@@ -405,10 +521,11 @@ func validate_market_trade_plan(trade_plan: Dictionary) -> Dictionary:
 	return _get_market_trade_system().validate_trade_plan(self, trade_plan)
 
 func apply_market_trade_plan(trade_plan: Dictionary) -> Dictionary:
+	# v0.44.8: MarketTradeSystem now applies stockpile changes through the
+	# CampaignState bridge when available, then the compatibility dictionaries are
+	# mirrored for older UI/system readers.
 	var result: Dictionary = _get_market_trade_system().apply_trade_plan(self, trade_plan)
-	# v0.44.7: MarketTradeSystem still mutates the TRGameState compatibility
-	# dictionaries directly. Sync the CampaignState mirror immediately after the
-	# public trade API returns so stockpile data remains migration-safe.
+	_mirror_stockpile_compatibility_from_campaign_state()
 	_sync_campaign_state_from_current_runtime()
 	return result
 
@@ -490,7 +607,7 @@ func _base_market_goods() -> Array[Dictionary]:
 	var output: Array[Dictionary] = []
 	for resource_id: String in resource_order:
 		var resource_data: Dictionary = resources[resource_id] as Dictionary
-		var stock_value: float = float(market_stockpiles.get(resource_id, 0.0))
+		var stock_value: float = _ensure_campaign_state_stockpile_bridge().get_market_stock(resource_id)
 		var demand_value: float = maxf(0.0, float(market_demand.get(resource_id, 0.0)))
 		var coverage: float = 0.0
 		if demand_value > 0.0:
@@ -806,6 +923,7 @@ func set_staffed_building_count(building_id: String, requested_count: int) -> bo
 		remaining -= amount
 	labour_assignments[building_id] = requested
 	_ensure_labour_assignments()
+	_sync_campaign_state_from_current_runtime()
 	return _staffed_count_for_building(building_id) == wanted
 
 func set_staffed_building_count_for_group(building_id: String, group_id: String, requested_count: int) -> bool:
@@ -851,6 +969,7 @@ func set_staffed_building_count_for_group(building_id: String, group_id: String,
 
 	labour_assignments[building_id] = current
 	_ensure_labour_assignments()
+	_sync_campaign_state_from_current_runtime()
 	return int((_staff_assignments_for_building(building_id)).get(group_id, 0)) == requested_count
 
 func set_staffed_building_count_for_field_labour(building_id: String, requested_count: int) -> bool:
@@ -889,6 +1008,7 @@ func set_staffed_building_count_for_field_labour(building_id: String, requested_
 
 	labour_assignments[building_id] = current
 	_ensure_labour_assignments()
+	_sync_campaign_state_from_current_runtime()
 	return _field_labour_staffed_count_for_building(building_id) == wanted
 
 func _productive_labour_required() -> Dictionary:
@@ -1137,13 +1257,15 @@ func build_building(building_id: String) -> bool:
 	for resource_variant: Variant in cost.keys():
 		var resource_id: String = String(resource_variant)
 		_add_stock(resource_id, -float(cost[resource_id]))
-	var previous_count: int = int(estate_buildings.get(building_id, 0))
+	var runtime_state: CampaignState = _ensure_campaign_state_estate_structure_bridge()
+	var previous_count: int = runtime_state.get_estate_building_count(building_id)
 	var previous_staffed: int = _staffed_count_for_building(building_id)
-	estate_buildings[building_id] = previous_count + 1
+	runtime_state.set_estate_building_count(building_id, previous_count + 1)
+	_mirror_estate_structure_compatibility_from_campaign_state()
 	if _is_housing_building_id(building_id):
 		_ensure_active_housing_counts()
-		active_housing_counts[building_id] = int(active_housing_counts.get(building_id, previous_count)) + 1
-		active_housing_counts[building_id] = clampi(int(active_housing_counts[building_id]), 0, int(estate_buildings.get(building_id, 0)))
+		runtime_state.set_active_housing_count_value(building_id, int(active_housing_counts.get(building_id, previous_count)) + 1)
+		_mirror_estate_structure_compatibility_from_campaign_state()
 	# If this building type was previously fully staffed, try to staff the new
 	# copy automatically. If the player had deliberately left copies unstaffed,
 	# keep that manual choice instead of silently overriding it.
@@ -1192,11 +1314,14 @@ func destroy_building(building_id: String) -> bool:
 		emit_signal("destroy_failed", building_id, reason)
 		_emit_state_changed_and_sync()
 		return false
-	var before_destroy_count: int = int(estate_buildings.get(building_id, 0))
-	estate_buildings[building_id] = max(0, before_destroy_count - 1)
+	var runtime_state: CampaignState = _ensure_campaign_state_estate_structure_bridge()
+	var before_destroy_count: int = runtime_state.get_estate_building_count(building_id)
+	runtime_state.set_estate_building_count(building_id, max(0, before_destroy_count - 1))
+	_mirror_estate_structure_compatibility_from_campaign_state()
 	if _is_housing_building_id(building_id):
 		_ensure_active_housing_counts()
-		active_housing_counts[building_id] = mini(int(active_housing_counts.get(building_id, 0)), int(estate_buildings.get(building_id, 0)))
+		runtime_state.set_active_housing_count_value(building_id, mini(int(active_housing_counts.get(building_id, 0)), int(estate_buildings.get(building_id, 0))))
+		_mirror_estate_structure_compatibility_from_campaign_state()
 	_ensure_labour_assignments()
 	last_report.append("Destroyed one " + get_building_name(building_id) + ". No refund given.")
 	emit_signal("destroy_completed", building_id)
@@ -1206,6 +1331,7 @@ func destroy_building(building_id: String) -> bool:
 func advance_veintena() -> void:
 	_get_turn_resolution_system().advance_veintena(self)
 	_sync_campaign_state_from_current_runtime()
+	_mirror_calendar_report_compatibility_from_campaign_state()
 
 func estimate_population_upkeep() -> Dictionary:
 	return _get_population_upkeep_system().calculate_population_upkeep(active_population_by_group(), population_upkeep_rates)
@@ -1244,7 +1370,8 @@ func _add_dictionary_amounts(target: Dictionary, amounts: Dictionary) -> void:
 		target[resource_id] = float(target.get(resource_id, 0.0)) + float(amounts[resource_variant])
 
 func _pay_population_upkeep() -> void:
-	var resolution: Dictionary = _get_population_upkeep_system().resolve_population_upkeep(estate_stockpiles, active_population_by_group(), population_upkeep_rates)
+	var runtime_state: CampaignState = _ensure_campaign_state_stockpile_bridge()
+	var resolution: Dictionary = _get_population_upkeep_system().resolve_population_upkeep(runtime_state.estate_stockpiles, active_population_by_group(), population_upkeep_rates)
 	var payments: Array = resolution.get("payments", []) as Array
 	for payment_variant: Variant in payments:
 		if not (payment_variant is Dictionary):
@@ -1258,6 +1385,7 @@ func _pay_population_upkeep() -> void:
 			last_report.append("Paid population upkeep: " + _format_amount(needed) + " " + get_resource_name(resource_id) + ".")
 		else:
 			last_report.append("Shortage: paid only " + _format_amount(paid) + " / " + _format_amount(needed) + " " + get_resource_name(resource_id) + " for population upkeep.")
+	_mirror_stockpile_compatibility_from_campaign_state()
 
 func _pay_housing_maintenance() -> void:
 	var payments: Array = _get_housing_system().pay_housing_maintenance(self)
@@ -2024,7 +2152,7 @@ func get_barracks_summary() -> Dictionary:
 		"unassigned_warriors": _unassigned_warrior_pool(),
 		"status": "Ready" if warriors > 0 else "No warriors available",
 		"weapons": free_stock_after_reserves("weapons"),
-		"captives": int(estate_stockpiles.get("captives", 0.0)),
+		"captives": int(_stock("captives")),
 		"palace_dedicated_god": get_player_palace_dedicated_god(),
 		"has_war_god_palace": has_war_god_palace(),
 		"flower_war_palace_gate_enabled": is_flower_war_palace_gate_enabled(),
@@ -2116,19 +2244,25 @@ func _warband_combat_stats_from_warband(warband: Dictionary) -> Dictionary:
 
 
 func get_player_palace_dedicated_god() -> String:
-	return _get_palace_system().get_player_palace_dedicated_god(self)
+	return _get_campaign_state().get_palace_dedicated_god_value()
 
 func set_player_palace_dedicated_god(god_id: String) -> Dictionary:
-	return _get_palace_system().set_player_palace_dedicated_god(self, god_id)
+	var result: Dictionary = _get_palace_system().set_player_palace_dedicated_god(self, god_id)
+	_sync_campaign_state_from_current_runtime()
+	_mirror_palace_state_from_campaign_state_to_legacy()
+	return result
 
 func has_war_god_palace() -> bool:
 	return _get_palace_system().has_war_god_palace(self)
 
 func is_flower_war_palace_gate_enabled() -> bool:
-	return _get_palace_system().is_flower_war_palace_gate_enabled(self)
+	return _get_campaign_state().get_flower_war_palace_gate_enabled_value()
 
 func set_flower_war_palace_gate_enabled(enabled: bool) -> Dictionary:
-	return _get_palace_system().set_flower_war_palace_gate_enabled(self, enabled)
+	var result: Dictionary = _get_palace_system().set_flower_war_palace_gate_enabled(self, enabled)
+	_sync_campaign_state_from_current_runtime()
+	_mirror_palace_state_from_campaign_state_to_legacy()
+	return result
 
 func flower_war_palace_gate_passed() -> bool:
 	return _get_palace_system().flower_war_palace_gate_passed(self)
@@ -2140,7 +2274,7 @@ func _god_display_name(god_id: String) -> String:
 	return _get_palace_system().god_display_name(god_id)
 
 func get_palace_dedicated_god() -> String:
-	return _get_palace_system().get_palace_dedicated_god(self)
+	return _get_campaign_state().get_palace_dedicated_god_value()
 
 func get_palace_route_name(god_id: String) -> String:
 	return _get_palace_system().get_palace_route_name(god_id)
@@ -2152,7 +2286,10 @@ func can_dedicate_palace_to_god(god_id: String) -> Dictionary:
 	return _get_palace_system().can_dedicate_palace_to_god(self, god_id)
 
 func dedicate_palace_to_god(god_id: String) -> Dictionary:
-	return _get_palace_system().dedicate_palace_to_god(self, god_id)
+	var result: Dictionary = _get_palace_system().dedicate_palace_to_god(self, god_id)
+	_sync_campaign_state_from_current_runtime()
+	_mirror_palace_state_from_campaign_state_to_legacy()
+	return result
 
 func get_palace_structure_tree_shell(god_id: String = "") -> Dictionary:
 	var route_id: String = god_id.strip_edges().to_lower()
@@ -2331,7 +2468,10 @@ func can_build_palace_structure(structure_id: String) -> Dictionary:
 	return _get_palace_system().can_build_palace_structure(self, structure_id)
 
 func build_palace_structure(structure_id: String) -> Dictionary:
-	return _get_palace_system().build_palace_structure(self, structure_id)
+	var result: Dictionary = _get_palace_system().build_palace_structure(self, structure_id)
+	_sync_campaign_state_from_current_runtime()
+	_mirror_palace_state_from_campaign_state_to_legacy()
+	return result
 
 func _palace_built_structure_ids_in_tree_order(god_id: String) -> Array[String]:
 	return _get_palace_system().palace_built_structure_ids_in_tree_order(self, god_id)
@@ -2349,7 +2489,9 @@ func get_palace_structure_operation_preview() -> Dictionary:
 	return _get_palace_system().get_palace_structure_operation_preview(self)
 
 func get_palace_structure_runtime_statuses() -> Dictionary:
-	return _get_palace_system().get_palace_structure_runtime_statuses(self)
+	var statuses: Dictionary = _get_palace_system().get_palace_structure_runtime_statuses(self)
+	_sync_campaign_state_from_current_runtime()
+	return statuses
 
 func get_active_palace_structure_ids() -> Array[String]:
 	return _get_palace_system().get_active_palace_structure_ids(self)
@@ -2358,10 +2500,15 @@ func get_inactive_palace_structure_ids() -> Array[String]:
 	return _get_palace_system().get_inactive_palace_structure_ids(self)
 
 func _resolve_palace_structure_operation(pay_costs: bool) -> Dictionary:
-	return _get_palace_system().resolve_palace_structure_operation(self, pay_costs)
+	var result: Dictionary = _get_palace_system().resolve_palace_structure_operation(self, pay_costs)
+	_sync_campaign_state_from_current_runtime()
+	_mirror_palace_state_from_campaign_state_to_legacy()
+	return result
 
 func _pay_palace_maintenance() -> void:
 	_get_palace_system().pay_palace_maintenance(self)
+	_sync_campaign_state_from_current_runtime()
+	_mirror_palace_state_from_campaign_state_to_legacy()
 
 func get_palace_total_maintenance() -> Dictionary:
 	return _get_palace_system().get_palace_total_maintenance(self)
@@ -2926,24 +3073,13 @@ func _resource_base_value(resource_id: String) -> float:
 	return _get_prestige_system().resource_base_value(self, resource_id)
 
 func get_player_prestige() -> float:
-	return player_prestige
+	return _ensure_campaign_state_prestige_bridge().get_player_prestige_value()
 
 func add_player_prestige(amount: float, source_id: String, detail: String, context: Dictionary = {}) -> Dictionary:
-	if absf(amount) <= 0.0001:
-		return {"ok": true, "amount": 0.0, "prestige": player_prestige}
-	var before: float = player_prestige
-	player_prestige += amount
-	var record: Dictionary = {
-		"veintena": current_veintena,
-		"source_id": source_id,
-		"detail": detail,
-		"amount": amount,
-		"prestige_before": before,
-		"prestige_after": player_prestige,
-		"context": context.duplicate(true)
-	}
-	prestige_history.append(record)
-	return {"ok": true, "amount": amount, "prestige": player_prestige, "record": record}
+	var runtime_state: CampaignState = _ensure_campaign_state_prestige_bridge()
+	var result: Dictionary = runtime_state.add_player_prestige_record(amount, source_id, detail, context, get_current_veintena())
+	_mirror_prestige_compatibility_from_campaign_state()
+	return result
 
 func get_savvy_trade_prestige_scale() -> float:
 	return _get_prestige_system().get_savvy_trade_prestige_scale()
@@ -2985,10 +3121,7 @@ func _apply_flower_war_prestige_to_report(report: Dictionary) -> Dictionary:
 	return _get_prestige_system().apply_flower_war_prestige_to_report(self, report)
 
 func get_prestige_history() -> Array[Dictionary]:
-	var output: Array[Dictionary] = []
-	for item: Dictionary in prestige_history:
-		output.append(item.duplicate(true))
-	return output
+	return _ensure_campaign_state_prestige_bridge().get_prestige_history_copy()
 
 func get_rival_house_definitions() -> Array[Dictionary]:
 	return _get_rival_system().get_rival_house_definitions()
@@ -3006,10 +3139,18 @@ func _prestige_house_name(house_id: String) -> String:
 	return _get_prestige_system().prestige_house_name(house_id)
 
 func get_rival_prestige() -> Dictionary:
-	return _get_rival_system().get_rival_prestige(self)
+	var runtime_state: CampaignState = _ensure_campaign_state_prestige_bridge()
+	if runtime_state.rival_prestige.is_empty():
+		runtime_state.set_rival_prestige_values(_default_rival_prestige_values())
+		_mirror_prestige_compatibility_from_campaign_state()
+	return runtime_state.get_rival_prestige_copy()
 
 func set_rival_prestige(house_id: String, value: float) -> Dictionary:
-	return _get_rival_system().set_rival_prestige(self, house_id, value)
+	var runtime_state: CampaignState = _ensure_campaign_state_prestige_bridge()
+	var result: Dictionary = runtime_state.set_rival_prestige_value(house_id, value)
+	_mirror_prestige_compatibility_from_campaign_state()
+	_emit_state_changed_and_sync()
+	return result
 
 func get_prestige_leaderboard() -> Array[Dictionary]:
 	return _get_prestige_system().get_prestige_leaderboard(self)
@@ -3033,10 +3174,16 @@ func can_sacrifice_for_prestige(sacrifice_id: String, amount: int = 1) -> Dictio
 	return _get_religion_system().can_sacrifice_for_prestige(self, sacrifice_id, amount)
 
 func sacrifice_for_prestige(sacrifice_id: String, amount: int = 1, god_id: String = "") -> Dictionary:
-	return _get_religion_system().sacrifice_for_prestige(self, sacrifice_id, amount, god_id)
+	var result: Dictionary = _get_religion_system().sacrifice_for_prestige(self, sacrifice_id, amount, god_id)
+	# ReligionSystem still appends sacrifice records through the TRGameState
+	# compatibility field. Mirror those records into CampaignState after the call.
+	var runtime_state: CampaignState = _get_campaign_state()
+	runtime_state.set_sacrifice_prestige_records(sacrifice_prestige_records)
+	_mirror_prestige_compatibility_from_campaign_state()
+	return result
 
 func get_sacrifice_prestige_records() -> Array[Dictionary]:
-	return _get_religion_system().get_sacrifice_prestige_records(self)
+	return _ensure_campaign_state_prestige_bridge().get_sacrifice_prestige_records_copy()
 
 func _palace_donation_records_for_cycle(cycle_id: String = "") -> Array[Dictionary]:
 	return _get_palace_system().palace_donation_records_for_cycle(self, cycle_id)
@@ -3054,7 +3201,10 @@ func can_donate_palace_need(slot_id: String, amount: float) -> Dictionary:
 	return _get_palace_system().can_donate_palace_need(self, slot_id, amount)
 
 func donate_palace_need(slot_id: String, amount: float) -> Dictionary:
-	return _get_palace_system().donate_palace_need(self, slot_id, amount)
+	var result: Dictionary = _get_palace_system().donate_palace_need(self, slot_id, amount)
+	_sync_campaign_state_from_current_runtime()
+	_mirror_palace_state_from_campaign_state_to_legacy()
+	return result
 
 func is_palace_ruler_demand_delivered(slot_id: String) -> bool:
 	return _get_palace_system().is_palace_ruler_demand_delivered(self, slot_id)
@@ -3063,7 +3213,10 @@ func can_deliver_palace_ruler_demand(slot_id: String) -> Dictionary:
 	return _get_palace_system().can_deliver_palace_ruler_demand(self, slot_id)
 
 func deliver_palace_ruler_demand(slot_id: String) -> Dictionary:
-	return _get_palace_system().deliver_palace_ruler_demand(self, slot_id)
+	var result: Dictionary = _get_palace_system().deliver_palace_ruler_demand(self, slot_id)
+	_sync_campaign_state_from_current_runtime()
+	_mirror_palace_state_from_campaign_state_to_legacy()
+	return result
 
 func get_palace_ruler_demand_delivery_records() -> Array[Dictionary]:
 	return _get_palace_system().get_palace_ruler_demand_delivery_records(self)
@@ -3118,7 +3271,7 @@ func get_palace_summary() -> Dictionary:
 		"staff_capacity": get_palace_staff_capacity(),
 		"staff_summary": get_palace_staff_summary(),
 		"palace_operation_preview": get_palace_structure_operation_preview(),
-		"last_palace_maintenance_report": last_palace_maintenance_report.duplicate(),
+		"last_palace_maintenance_report": _get_campaign_state().get_last_palace_maintenance_report_copy(),
 		"authority_summary": get_palace_authority_summary(),
 		"tlaloc_forecast": get_tlaloc_natural_calendar_forecast(),
 		"tezcatlipoca_pressure": get_tezcatlipoca_pressure_overview(),
@@ -3226,14 +3379,13 @@ func launch_flower_war(option_id: String = "minor", doctrine_id: String = "unspe
 	return launch_flower_war_with_all_warbands(option_id, provisioning_id)
 
 func get_last_flower_war_report() -> Dictionary:
-	return last_flower_war_report.duplicate(true)
+	var runtime_state: CampaignState = _ensure_campaign_state_warband_flower_war_bridge()
+	return runtime_state.get_last_flower_war_report_copy()
 
 func get_flower_war_report_archive(limit_count: int = 12) -> Array[Dictionary]:
 	var output: Array[Dictionary] = []
-	var copied: Array[Dictionary] = []
-	for report_variant: Variant in flower_war_report_archive:
-		if report_variant is Dictionary:
-			copied.append((report_variant as Dictionary).duplicate(true))
+	var runtime_state: CampaignState = _ensure_campaign_state_warband_flower_war_bridge()
+	var copied: Array[Dictionary] = runtime_state.get_flower_war_report_archive_copy()
 	copied.reverse()
 	var limit_value: int = max(0, limit_count)
 	for report: Dictionary in copied:
@@ -3245,13 +3397,13 @@ func get_flower_war_report_archive(limit_count: int = 12) -> Array[Dictionary]:
 func _archive_flower_war_report(report: Dictionary) -> void:
 	if report.is_empty() or not bool(report.get("ok", false)):
 		return
+	var runtime_state: CampaignState = _ensure_campaign_state_warband_flower_war_bridge()
 	var stored: Dictionary = report.duplicate(true)
-	stored["archive_index"] = flower_war_report_archive.size() + 1
-	stored["archive_veintena"] = current_veintena
+	stored["archive_index"] = runtime_state.get_flower_war_report_archive_count() + 1
+	stored["archive_veintena"] = get_current_veintena()
 	stored["archive_title"] = _flower_war_archive_title(stored)
-	flower_war_report_archive.append(stored)
-	while flower_war_report_archive.size() > 20:
-		flower_war_report_archive.pop_front()
+	runtime_state.append_flower_war_report_archive(stored, 20)
+	_mirror_warband_flower_war_compatibility_from_campaign_state()
 
 func _flower_war_archive_title(report: Dictionary) -> String:
 	var direction: String = String(report.get("war_direction", "attack"))
@@ -3483,7 +3635,7 @@ func launch_flower_war_with_warband(warband_id: String, option_id: String = "min
 	if dead > 0:
 		population["yaotequihuaqueh"] = max(0, get_warrior_count() - dead)
 	if captives > 0:
-		estate_stockpiles["captives"] = float(estate_stockpiles.get("captives", 0.0)) + float(captives)
+		_add_stock("captives", float(captives))
 	add_looted_goods_bundle(preview.get("loot", {}) as Dictionary)
 
 	last_flower_war_report = preview.duplicate(true)
@@ -3547,8 +3699,11 @@ func _ensure_warband_state() -> void:
 	var second: int = int(floor(float(total_warriors) / 3.0))
 	var third: int = max(0, total_warriors - first - second)
 	warbands["first_warband"] = _make_starting_warband("first_warband", "First Warband", "Household Captain", first)
-	warbands["second_warband"] = _make_starting_warband("second_warband", "Second Warband", "Senior Warrior", second)
+	warbands["second_warband"] = _make_starting_warband("second_warband", "Second Warband", "War Captain", first)
 	warbands["third_warband"] = _make_starting_warband("third_warband", "Third Warband", "Young Captain", third)
+	var runtime_state: CampaignState = _get_campaign_state()
+	runtime_state.set_warbands_values(warbands)
+	_mirror_warband_flower_war_compatibility_from_campaign_state()
 
 func _make_starting_warband(warband_id: String, name: String, commander: String, ready_warriors: int) -> Dictionary:
 	return {
