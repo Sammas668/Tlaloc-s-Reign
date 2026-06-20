@@ -543,6 +543,342 @@ func launch_combined_attack(state: Node, warband_ids: Array, option_id: String =
 		state.emit_signal("state_changed")
 	return report.duplicate(true)
 
+# -----------------------------------------------------------------------------
+# Event hooks / participant helpers / legacy single-warband launch path
+# -----------------------------------------------------------------------------
+
+func start_attack_event(state: Node, option_id: String = "standard", source_id: String = "player", context: Dictionary = {}) -> Dictionary:
+	# Event-hook infrastructure only. This does not resolve a Flower War. It returns
+	# a standard payload that UI, rivals, calendar, palace or religion systems can
+	# use to open the attacking Flower War muster later.
+	_ensure_warband_state(state)
+	if state != null and state.has_method("flower_war_palace_gate_passed") and not bool(state.call("flower_war_palace_gate_passed")):
+		var gate_text: String = String(state.call("flower_war_palace_gate_status_text")) if state.has_method("flower_war_palace_gate_status_text") else "Flower War palace gate blocks this attack."
+		return {
+			"ok": false,
+			"event_type": "flower_war_attack_muster",
+			"war_direction": "attack",
+			"source_id": source_id,
+			"context": context.duplicate(true),
+			"option_id": option_id,
+			"reason": gate_text,
+			"message": gate_text
+		}
+	if not FLOWER_WAR_OPTIONS.has(option_id):
+		option_id = "standard"
+	var selected_ids: Array[String] = selected_warband_ids_or_all_ready(state, [])
+	var preview: Dictionary = {}
+	if state != null and state.has_method("get_flower_war_preview_with_selected_warbands"):
+		var preview_variant: Variant = state.call("get_flower_war_preview_with_selected_warbands", selected_ids, option_id, "standard")
+		if preview_variant is Dictionary:
+			preview = preview_variant as Dictionary
+	return {
+		"ok": true,
+		"event_type": "flower_war_attack_muster",
+		"war_direction": "attack",
+		"source_id": source_id,
+		"context": context.duplicate(true),
+		"option_id": option_id,
+		"default_provisioning_id": "standard",
+		"default_selected_warbands": selected_ids,
+		"preview": preview,
+		"message": "Flower War attack event ready. Open the full-screen muster to choose warbands and provisions."
+	}
+
+func start_defence_event(state: Node, option_id: String = "standard", source_id: String = "rival", context: Dictionary = {}) -> Dictionary:
+	# Event-hook infrastructure only. This does not resolve a Flower War. It returns
+	# a standard payload that UI, rivals, calendar, palace or religion systems can
+	# use to open the defensive Flower War strategy event later.
+	_ensure_warband_state(state)
+	if not FLOWER_WAR_OPTIONS.has(option_id):
+		option_id = "standard"
+	var preview: Dictionary = {}
+	if state != null and state.has_method("get_flower_war_defence_preview"):
+		var preview_variant: Variant = state.call("get_flower_war_defence_preview", option_id, "balanced")
+		if preview_variant is Dictionary:
+			preview = preview_variant as Dictionary
+	return {
+		"ok": true,
+		"event_type": "flower_war_defence",
+		"war_direction": "defence",
+		"source_id": source_id,
+		"context": context.duplicate(true),
+		"option_id": option_id,
+		"default_strategy_id": "balanced",
+		"preview": preview,
+		"message": "Flower War defence event ready. Open the full-screen defence event to choose a strategy."
+	}
+
+func get_event_hook_summary() -> Dictionary:
+	return {
+		"ok": true,
+		"attack_hook": "start_flower_war_attack_event(option_id, source_id, context)",
+		"defence_hook": "start_flower_war_defence_event(option_id, source_id, context)",
+		"possible_sources": ["player", "rival", "calendar", "palace", "religion"],
+		"note": "Hooks prepare event payloads only; they do not add rival AI or new combat rules."
+	}
+
+func flower_war_participant_rows_for_ids(state: Node, selected_ids: Array[String]) -> Array[Dictionary]:
+	_ensure_warband_state(state)
+	var participants: Array[Dictionary] = []
+	var warbands: Dictionary = _state_dictionary(state, "warbands")
+	for warband_id: String in selected_ids:
+		if not warbands.has(warband_id):
+			continue
+		var warband: Dictionary = warbands[warband_id] as Dictionary
+		var ready: int = max(0, int(warband.get("ready_warriors", 0)))
+		if ready <= 0:
+			continue
+		var doctrine_id: String = String(warband.get("doctrine", "unspecialised"))
+		if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
+			doctrine_id = "unspecialised"
+		var synced: Dictionary = _sync_warband_progress(state, warband.duplicate(true))
+		warbands[warband_id] = synced
+		var stats: Dictionary = _warband_combat_stats_from_warband(state, synced)
+		participants.append({
+			"id": warband_id,
+			"name": String(stats.get("name", "Warband")),
+			"committed": ready,
+			"ready": ready,
+			"injured": int(stats.get("injured", 0)),
+			"level": int(synced.get("level", 1)),
+			"doctrine_id": doctrine_id,
+			"doctrine": doctrine_id,
+			"doctrine_name": String(stats.get("doctrine_name", doctrine_id.capitalize())),
+			"offence": float(stats.get("offence_modifier", 1.0)),
+			"defence": float(stats.get("defence_modifier", 1.0)),
+			"effective_offence": float(stats.get("effective_offence", 0.0)),
+			"effective_defence": float(stats.get("effective_defence", 0.0)),
+			"combat_stats": stats
+		})
+	_set_state_dictionary(state, "warbands", warbands)
+	_mirror_warband_state(state)
+	return participants
+
+func selected_warband_ids_or_all_ready(state: Node, warband_ids: Array) -> Array[String]:
+	_ensure_warband_state(state)
+	var output: Array[String] = []
+	var warbands: Dictionary = _state_dictionary(state, "warbands")
+	if warband_ids.is_empty():
+		for id_variant: Variant in warbands.keys():
+			var id_value: String = String(id_variant)
+			var warband: Dictionary = warbands[id_value] as Dictionary
+			if int(warband.get("ready_warriors", 0)) > 0:
+				output.append(id_value)
+		return output
+	for id_variant: Variant in warband_ids:
+		var id_value: String = String(id_variant)
+		if id_value == "" or output.has(id_value):
+			continue
+		if warbands.has(id_value):
+			output.append(id_value)
+	return output
+
+func distribute_integer_by_weights(total: int, participants: Array, weight_key: String = "committed", cap_by_weight: bool = false) -> Dictionary:
+	var result: Dictionary = {}
+	if total <= 0:
+		return result
+	var total_weight: int = 0
+	for participant_variant: Variant in participants:
+		var participant: Dictionary = participant_variant as Dictionary
+		total_weight += max(0, int(participant.get(weight_key, 0)))
+	if total_weight <= 0:
+		return result
+	var remaining: int = total
+	var remainders: Array[Dictionary] = []
+	for participant_variant: Variant in participants:
+		var participant: Dictionary = participant_variant as Dictionary
+		var participant_id: String = String(participant.get("id", ""))
+		var weight: int = max(0, int(participant.get(weight_key, 0)))
+		if participant_id == "" or weight <= 0:
+			continue
+		var raw: float = float(total) * float(weight) / float(total_weight)
+		var base: int = int(floor(raw))
+		var cap_value: int = total
+		if cap_by_weight:
+			cap_value = weight
+		base = mini(base, cap_value)
+		result[participant_id] = base
+		remaining -= base
+		remainders.append({"id": participant_id, "fraction": raw - float(base), "cap": cap_value})
+	remainders.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return float(a.get("fraction", 0.0)) > float(b.get("fraction", 0.0))
+	)
+	var guard: int = 0
+	while remaining > 0 and guard < 1000:
+		var allocated: bool = false
+		for item: Dictionary in remainders:
+			if remaining <= 0:
+				break
+			var participant_id: String = String(item.get("id", ""))
+			var cap_value: int = int(item.get("cap", total))
+			if int(result.get(participant_id, 0)) < cap_value:
+				result[participant_id] = int(result.get(participant_id, 0)) + 1
+				remaining -= 1
+				allocated = true
+		if not allocated:
+			break
+		guard += 1
+	return result
+
+func get_single_warband_attack_preview(state: Node, warband_id: String, option_id: String = "minor", doctrine_id: String = "", provisioning_id: String = "standard") -> Dictionary:
+	_ensure_warband_state(state)
+	var warbands: Dictionary = _state_dictionary(state, "warbands")
+	if not warbands.has(warband_id):
+		return {"ok": false, "reason": "Unknown warband."}
+	var warband: Dictionary = warbands[warband_id] as Dictionary
+	var resolved_doctrine: String = doctrine_id
+	if resolved_doctrine == "" or resolved_doctrine == "warband":
+		resolved_doctrine = String(warband.get("doctrine", "unspecialised"))
+	var preview: Dictionary = get_single_doctrine_attack_preview(state, option_id, resolved_doctrine, provisioning_id)
+	if not bool(preview.get("ok", false)):
+		return preview
+	preview["warband_id"] = warband_id
+	preview["warband_name"] = String(warband.get("name", "Warband"))
+	preview["warband_ready"] = int(warband.get("ready_warriors", 0))
+	preview["warband_injured"] = int(warband.get("injured_warriors", 0))
+	preview["warband_level"] = int(_sync_warband_progress(state, warband.duplicate(true)).get("level", 1))
+	preview["xp_gained"] = flower_war_xp_gain(String(preview.get("result", "Stalemate")), int(preview.get("warriors_committed", 0)), int(preview.get("defender_casualties", 0)), int(preview.get("captives", 0)))
+	return preview
+
+func can_launch_single_warband_attack(state: Node, warband_id: String, option_id: String = "minor", doctrine_id: String = "", provisioning_id: String = "standard") -> Dictionary:
+	_ensure_warband_state(state)
+	if state != null and state.has_method("flower_war_palace_gate_passed") and not bool(state.call("flower_war_palace_gate_passed")):
+		var gate_text: String = String(state.call("flower_war_palace_gate_status_text")) if state.has_method("flower_war_palace_gate_status_text") else "Flower War palace gate blocks this attack."
+		return {"ok": false, "reason": gate_text}
+	var warbands: Dictionary = _state_dictionary(state, "warbands")
+	if not warbands.has(warband_id):
+		return {"ok": false, "reason": "Unknown warband."}
+	var preview: Dictionary = get_single_warband_attack_preview(state, warband_id, option_id, doctrine_id, provisioning_id)
+	if not bool(preview.get("ok", false)):
+		return preview
+	var needed_warriors: int = int(preview.get("warriors_committed", 0))
+	var warband: Dictionary = warbands[warband_id] as Dictionary
+	var ready: int = int(warband.get("ready_warriors", 0))
+	if ready < needed_warriors:
+		return {"ok": false, "reason": String(warband.get("name", "Warband")) + " needs " + str(needed_warriors) + " ready warriors; only " + str(ready) + " ready."}
+	var cost_status: Dictionary = {"ok": true, "reason": "Ready."}
+	if state != null and state.has_method("_can_pay_free_stock"):
+		var cost_variant: Variant = state.call("_can_pay_free_stock", preview.get("provisioning_cost", {}) as Dictionary)
+		if cost_variant is Dictionary:
+			cost_status = cost_variant as Dictionary
+	if not bool(cost_status.get("ok", false)):
+		return cost_status
+	return {"ok": true, "reason": "Ready.", "preview": preview}
+
+func launch_single_warband_attack(state: Node, warband_id: String, option_id: String = "minor", doctrine_id: String = "", provisioning_id: String = "standard") -> Dictionary:
+	var status: Dictionary = can_launch_single_warband_attack(state, warband_id, option_id, doctrine_id, provisioning_id)
+	if not bool(status.get("ok", false)):
+		var blocked_report: Dictionary = {"ok": false, "reason": String(status.get("reason", "Flower War cannot launch.")), "warband_id": warband_id}
+		_set_state_dictionary(state, "last_flower_war_report", blocked_report)
+		_append_state_report(state, "Flower War not launched: " + String(blocked_report.get("reason", "blocked")) + ".")
+		_emit_state_changed(state)
+		return blocked_report.duplicate(true)
+	var preview: Dictionary = status.get("preview", {}) as Dictionary
+	if preview.is_empty():
+		preview = get_single_warband_attack_preview(state, warband_id, option_id, doctrine_id, provisioning_id)
+	if state != null and state.has_method("_pay_free_stock"):
+		state.call("_pay_free_stock", preview.get("provisioning_cost", {}) as Dictionary)
+	var warbands: Dictionary = _state_dictionary(state, "warbands")
+	var warband: Dictionary = warbands[warband_id] as Dictionary
+	var level_before: int = int(_sync_warband_progress(state, warband.duplicate(true)).get("level", 1))
+	var committed: int = int(preview.get("warriors_committed", 0))
+	var casualties: int = int(preview.get("attacker_casualties", 0))
+	var injured: int = int(preview.get("attacker_injured", 0))
+	var dead: int = int(preview.get("attacker_dead", 0))
+	var captives: int = int(preview.get("captives", 0))
+	var xp_gain: int = int(preview.get("xp_gained", 0))
+
+	warband["ready_warriors"] = max(0, int(warband.get("ready_warriors", 0)) - casualties)
+	warband["injured_warriors"] = max(0, int(warband.get("injured_warriors", 0)) + injured)
+	warband["dead_total"] = max(0, int(warband.get("dead_total", 0)) + dead)
+	warband["xp"] = max(0, int(warband.get("xp", 0)) + xp_gain)
+	var history: Array = warband.get("battle_history", []) as Array
+	history.append({
+		"veintena": _current_veintena(state),
+		"option_id": option_id,
+		"result": String(preview.get("result", "Unknown")),
+		"committed": committed,
+		"casualties": casualties,
+		"injured": injured,
+		"dead": dead,
+		"captives": captives,
+		"xp_gained": xp_gain
+	})
+	warband["battle_history"] = history
+	warbands[warband_id] = _sync_warband_progress(state, warband)
+	var level_after: int = int((warbands[warband_id] as Dictionary).get("level", level_before))
+	_set_state_dictionary(state, "warbands", warbands)
+	_mirror_warband_state(state)
+
+	if dead > 0:
+		var population: Dictionary = _state_dictionary(state, "population")
+		var warrior_count: int = int(state.call("get_warrior_count")) if state != null and state.has_method("get_warrior_count") else int(population.get("yaotequihuaqueh", 0))
+		population["yaotequihuaqueh"] = max(0, warrior_count - dead)
+		_set_state_dictionary(state, "population", population)
+	if captives > 0 and state != null and state.has_method("_add_stock"):
+		state.call("_add_stock", "captives", float(captives))
+	if state != null and state.has_method("add_looted_goods_bundle"):
+		state.call("add_looted_goods_bundle", preview.get("loot", {}) as Dictionary)
+
+	var final_report: Dictionary = preview.duplicate(true)
+	final_report["ok"] = true
+	final_report["warband_id"] = warband_id
+	final_report["warband_name"] = String(warband.get("name", "Warband"))
+	final_report["warriors_returned"] = max(0, committed - casualties)
+	final_report["xp_gained"] = xp_gain
+	final_report["level_before"] = level_before
+	final_report["level_after"] = level_after
+	if state != null and state.has_method("_apply_flower_war_prestige_to_report"):
+		var prestige_variant: Variant = state.call("_apply_flower_war_prestige_to_report", final_report)
+		if prestige_variant is Dictionary:
+			final_report = prestige_variant as Dictionary
+	_set_state_dictionary(state, "last_flower_war_report", final_report)
+	_mirror_warband_state(state)
+
+	var line: String = String(warband.get("name", "Warband")) + " fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + "; casualties " + str(casualties) + " (injured " + str(injured) + ", dead " + str(dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_gain) + ". " + String(final_report.get("prestige_text", "Prestige +0")) + "."
+	if level_after > level_before:
+		line += " " + String(warband.get("name", "Warband")) + " reached Level " + str(level_after) + " and gained " + str(max(0, level_after - level_before)) + " skill point(s)."
+	_append_state_report(state, line)
+	_emit_state_changed(state)
+	return final_report.duplicate(true)
+
+func _ensure_warband_state(state: Node) -> void:
+	if state != null and state.has_method("_ensure_warband_state"):
+		state.call("_ensure_warband_state")
+
+func _sync_warband_progress(state: Node, warband: Dictionary) -> Dictionary:
+	if state != null and state.has_method("_sync_warband_progress"):
+		var result: Variant = state.call("_sync_warband_progress", warband)
+		if result is Dictionary:
+			return result as Dictionary
+	return warband.duplicate(true)
+
+func _warband_combat_stats_from_warband(state: Node, warband: Dictionary) -> Dictionary:
+	if state != null and state.has_method("_warband_combat_stats_from_warband"):
+		var result: Variant = state.call("_warband_combat_stats_from_warband", warband)
+		if result is Dictionary:
+			return result as Dictionary
+	return _fallback_warband_combat_stats(warband)
+
+func _set_state_dictionary(state: Node, property_name: String, value: Dictionary) -> void:
+	if state != null:
+		state.set(property_name, value.duplicate(true))
+
+func _mirror_warband_state(state: Node) -> void:
+	if state != null and state.has_method("_mirror_warband_flower_war_compatibility_from_campaign_state"):
+		# Capture first when available so CampaignState sees any mutation made through the legacy dictionary.
+		if state.has_method("_ensure_campaign_state_warband_flower_war_bridge"):
+			state.call("_ensure_campaign_state_warband_flower_war_bridge")
+		state.call("_mirror_warband_flower_war_compatibility_from_campaign_state")
+
+func _current_veintena(state: Node) -> int:
+	if state != null and state.has_method("get_current_veintena"):
+		return int(state.call("get_current_veintena"))
+	if state != null:
+		return int(state.get("current_veintena"))
+	return 1
+
 func _state_dictionary(state: Node, property_name: String) -> Dictionary:
 	if state == null:
 		return {}
@@ -883,3 +1219,8 @@ func _fmt(value: float) -> String:
 	if is_equal_approx(value, roundf(value)):
 		return str(int(roundf(value)))
 	return str(snappedf(value, 0.01))
+
+
+func _emit_state_changed(state: Node) -> void:
+	if state != null and state.has_signal("state_changed"):
+		state.emit_signal("state_changed")

@@ -2,10 +2,10 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/PalaceSystem.gd
 #
-# First Palace extraction slice for the TRGameState -> CampaignState split.
-# Owns palace dedication, palace route labels, Flower War palace gate checks,
-# and route leaderboard/dedication-row construction. TRGameState remains the
-# live state owner and public API during the migration.
+# Palace system for the TRGameState -> CampaignState split.
+# Owns palace dedication, palace route labels, palace structure rules,
+# palace static structure-tree data, and route authority presentation.
+# TRGameState remains the public API during the migration.
 class_name PalaceSystem
 extends RefCounted
 
@@ -186,6 +186,140 @@ func get_palace_dedication_routes(state: Node) -> Array[Dictionary]:
 	return rows
 
 
+
+# -----------------------------------------------------------------------------
+# Palace structure tree static data
+# -----------------------------------------------------------------------------
+
+func palace_structure_node(
+	state: Node,
+	id: String,
+	god_id: String,
+	tier: int,
+	name: String,
+	description: String,
+	build_cost: Dictionary,
+	maintenance_cost: Dictionary,
+	staff_requirement: Dictionary,
+	prerequisites: Array[String],
+	effect_summary: String
+) -> Dictionary:
+	var prerequisite_text: String = "None"
+	if not prerequisites.is_empty():
+		prerequisite_text = ", ".join(prerequisites)
+	var built: bool = is_palace_structure_built(state, id)
+	var status_text: String = "Not built"
+	if built:
+		status_text = "Built — operation check pending"
+	return {
+		"id": id,
+		"name": name,
+		"god_id": god_id,
+		"route": get_palace_route_name(god_id),
+		"tier": tier,
+		"level": tier,
+		"description": description,
+		"summary": effect_summary,
+		"build_cost": build_cost,
+		"maintenance_cost": maintenance_cost,
+		"staff_requirement": staff_requirement,
+		"prerequisites": prerequisites,
+		"prerequisite_text": prerequisite_text,
+		"effect_summary": effect_summary,
+		"status": status_text,
+		"built": built,
+		"active": false,
+		"inactive_reason": "Not built.",
+		"prototype_note": "Construction, maintenance payment and staff checks are implemented. Authority effects are not active yet."
+	}
+
+
+func palace_structure_tree_tiers(state: Node, god_id: String) -> Array[Dictionary]:
+	match god_id:
+		"tlaloc":
+			return [
+				{"tier": 1, "title": "Level 1 — Household Water Court", "structures": [
+					palace_structure_node(state, "tlaloc_rain_reading_basin", god_id, 1, "Rain-Reading Basin", "A polished basin set in the palace court for reading rain, reflected sky, canal levels and field signs.", {"wood": 18.0, "cloth": 4.0, "ritual_goods": 1.0}, {"cacao": 0.5, "ritual_goods": 0.25}, {"tlamacazqueh": 1, "pipiltin": 1}, [], "Reveals basic nearby natural pressure once the Tlaloc authority system is active."),
+					palace_structure_node(state, "tlaloc_canal_listening_court", god_id, 1, "Canal Listening Court", "A quiet court where priests and estate nobles listen for canal, flood and lake warnings.", {"wood": 22.0, "cloth": 5.0, "ritual_goods": 1.0}, {"cacao": 0.5, "cloth": 0.5}, {"tlamacazqueh": 1, "pipiltin": 1}, [], "Future hook for canal, flood and water-management warnings."),
+					palace_structure_node(state, "tlaloc_field_omen_chamber", god_id, 1, "Field Omen Chamber", "A chamber for crop samples, pest signs and soil offerings brought in from the estate lands.", {"wood": 16.0, "cloth": 4.0, "cacao": 1.0}, {"cacao": 0.5, "ritual_goods": 0.25}, {"tlamacazqueh": 1}, [], "Future hook for crop, pest and harvest-risk signs.")
+				]},
+				{"tier": 2, "title": "Level 2 — Storm Calendar Wing", "structures": [
+					palace_structure_node(state, "tlaloc_storm_calendar_archive", god_id, 2, "Storm Calendar Archive", "Painted bark records and priestly tallies compare present weather signs against previous ritual years.", {"wood": 40.0, "cloth": 10.0, "ritual_goods": 3.0, "cacao": 2.0}, {"cacao": 1.0, "cloth": 0.5, "ritual_goods": 0.5}, {"tlamacazqueh": 2, "pipiltin": 1}, ["One Level 1 Tlaloc structure"], "Extends natural-event forecast range."),
+					palace_structure_node(state, "tlaloc_drought_vessel_court", god_id, 2, "Drought Vessel Court", "Rows of sealed vessels hold water, dust and field offerings to read dry-season severity.", {"wood": 34.0, "cloth": 8.0, "ritual_goods": 3.0}, {"cacao": 1.0, "ritual_goods": 0.5}, {"tlamacazqueh": 2}, ["Rain-Reading Basin"], "Future hook for drought severity and preparation."),
+					palace_structure_node(state, "tlaloc_flood_marker_terrace", god_id, 2, "Flood Marker Terrace", "A raised terrace marked with carved flood levels and canal measures.", {"wood": 44.0, "cloth": 8.0, "tools": 2.0}, {"cacao": 0.75, "tools": 0.25}, {"tlamacazqueh": 1, "pipiltin": 1}, ["Canal Listening Court"], "Future hook for flood severity and likely affected goods.")
+				]},
+				{"tier": 3, "title": "Level 3 — Deep Omen Court", "structures": [
+					palace_structure_node(state, "tlaloc_deep_calendar_observatory", god_id, 3, "Deep Calendar Observatory", "A high palace platform for aligning rain, mountain, canal and crop records into long-range forecast patterns.", {"wood": 80.0, "cloth": 18.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, {"cacao": 1.5, "ritual_goods": 1.0, "fine_textiles": 0.25}, {"tlamacazqueh": 3, "pipiltin": 2}, ["Storm Calendar Archive"], "Reveals event duration and affected goods once forecast mechanics are active."),
+					palace_structure_node(state, "tlaloc_lake_mirror_priests", god_id, 3, "Lake-Mirror Priests", "A staffed priestly office that compares mirrored water signs against tribute and field records.", {"wood": 70.0, "cloth": 16.0, "ritual_goods": 6.0, "cacao": 4.0}, {"cacao": 2.0, "ritual_goods": 0.75}, {"tlamacazqueh": 4, "pipiltin": 1}, ["Drought Vessel Court or Flood Marker Terrace"], "Future hook for better forecast accuracy and fewer unknowns.")
+				]},
+				{"tier": 4, "title": "Level 4 — Great Court of Tlaloc", "structures": [
+					palace_structure_node(state, "tlaloc_great_court", god_id, 4, "Great Court of Tlaloc", "A full palace court dedicated to rain, waters, fields and the hidden calendar of natural pressure.", {"wood": 140.0, "cloth": 35.0, "ritual_goods": 10.0, "fine_textiles": 2.0}, {"cacao": 3.0, "ritual_goods": 1.5, "fine_textiles": 0.5}, {"tlamacazqueh": 6, "pipiltin": 3}, ["Deep Calendar Observatory", "Lake-Mirror Priests"], "Long-range natural calendar foresight and full Tlaloc palace authority.")
+				]}
+			]
+		"huitzilopochtli":
+			return [
+				{"tier": 1, "title": "Level 1 — War Banner Court", "structures": [
+					palace_structure_node(state, "huitz_war_banner_court", god_id, 1, "War Banner Court", "A court for public war standards, muster rites and the formal authority of the war route.", {"wood": 20.0, "cloth": 5.0, "weapons": 1.0}, {"cacao": 0.5, "cloth": 0.5}, {"pipiltin": 1}, [], "Supports formal Flower War authority under a Huitzilopochtli Palace."),
+					palace_structure_node(state, "huitz_captive_procession_steps", god_id, 1, "Captive Procession Steps", "Ceremonial steps for bringing captives, witnesses and war spoils into palace view.", {"wood": 18.0, "cloth": 4.0, "ritual_goods": 1.0}, {"cacao": 0.5, "ritual_goods": 0.25}, {"tlamacazqueh": 1, "pipiltin": 1}, [], "Future hook for captives, sacrifice and war-route visibility."),
+					palace_structure_node(state, "huitz_weapon_oath_hall", god_id, 1, "Weapon Oath Hall", "A hall where warriors and nobles bind weapons, discipline and palace service to the war god.", {"wood": 24.0, "cloth": 4.0, "weapons": 2.0}, {"cacao": 0.5, "weapons": 0.25}, {"pipiltin": 1}, [], "Future hook for military organisation and warrior preparation.")
+				]},
+				{"tier": 2, "title": "Level 2 — Martial Review Wing", "structures": [
+					palace_structure_node(state, "huitz_eagle_jaguar_review_court", god_id, 2, "Eagle-Jaguar Review Court", "A review court for warbands, captains and noble witnesses before a Flower War muster.", {"wood": 45.0, "cloth": 10.0, "weapons": 3.0, "cacao": 2.0}, {"cacao": 1.0, "cloth": 0.5}, {"pipiltin": 2}, ["War Banner Court"], "Future hook for warband management authority."),
+					palace_structure_node(state, "huitz_sacrifice_ledger_chamber", god_id, 2, "Sacrifice Ledger Chamber", "A palace office recording captives, ritual use, witnesses and obligation fulfilment.", {"wood": 36.0, "cloth": 8.0, "ritual_goods": 3.0}, {"cacao": 1.0, "ritual_goods": 0.5}, {"tlamacazqueh": 2, "pipiltin": 1}, ["Captive Procession Steps"], "Future hook for captive-to-ritual administration."),
+					palace_structure_node(state, "huitz_martial_tribute_office", god_id, 2, "Martial Tribute Office", "An office that separates war spoils, weapon obligations and ruler-facing martial goods.", {"wood": 38.0, "cloth": 8.0, "tools": 2.0, "weapons": 2.0}, {"cacao": 1.0, "tools": 0.25}, {"pipiltin": 2}, ["Weapon Oath Hall"], "Future hook for war spoils and obligations.")
+				]},
+				{"tier": 3, "title": "Level 3 — Sun-War Tribunal", "structures": [
+					palace_structure_node(state, "huitz_sun_war_tribunal", god_id, 3, "Sun-War Tribunal", "A high tribunal where war success, captives and noble martial claims are judged.", {"wood": 85.0, "cloth": 18.0, "ritual_goods": 6.0, "weapons": 5.0, "fine_textiles": 1.0}, {"cacao": 1.5, "ritual_goods": 0.75, "weapons": 0.5}, {"tlamacazqueh": 2, "pipiltin": 3}, ["Eagle-Jaguar Review Court"], "Stronger war-route legitimacy and martial recognition hooks."),
+					palace_structure_node(state, "huitz_captive_witness_court", god_id, 3, "Captive Witness Court", "A public court where captives, witnesses and palace representatives make war results visible.", {"wood": 74.0, "cloth": 16.0, "ritual_goods": 6.0, "cacao": 4.0}, {"cacao": 2.0, "ritual_goods": 0.75}, {"tlamacazqueh": 3, "pipiltin": 2}, ["Sacrifice Ledger Chamber or Martial Tribute Office"], "Future hook for public war legitimacy and captive display.")
+				]},
+				{"tier": 4, "title": "Level 4 — Great Court of Huitzilopochtli", "structures": [
+					palace_structure_node(state, "huitz_great_court", god_id, 4, "Great Court of Huitzilopochtli", "A full palace court for war, captives, martial claims and the authority to pursue the war route.", {"wood": 150.0, "cloth": 35.0, "weapons": 10.0, "ritual_goods": 10.0, "fine_textiles": 2.0}, {"cacao": 3.0, "ritual_goods": 1.5, "weapons": 0.75}, {"tlamacazqueh": 4, "pipiltin": 5}, ["Sun-War Tribunal", "Captive Witness Court"], "Full war palace authority and late war-route support.")
+				]}
+			]
+		"tezcatlipoca":
+			return [
+				{"tier": 1, "title": "Level 1 — Mirror Court", "structures": [
+					palace_structure_node(state, "tez_obsidian_mirror_chamber", god_id, 1, "Obsidian Mirror Chamber", "A dark palace room for reading rivals, scarcity and hidden pressure through polished obsidian.", {"wood": 18.0, "cloth": 4.0, "obsidian": 2.0}, {"cacao": 0.75, "obsidian": 0.25}, {"pipiltin": 1}, [], "Future hook for rival and market-pressure hints."),
+					palace_structure_node(state, "tez_smoke_messenger_room", god_id, 1, "Smoke Messenger Room", "A chamber for controlled smoke rites, secret messages and dangerous promises.", {"wood": 20.0, "cloth": 5.0, "ritual_goods": 1.0}, {"cacao": 0.75, "ritual_goods": 0.25}, {"tlamacazqueh": 1, "pipiltin": 1}, [], "Future hook for manipulation and hidden communication."),
+					palace_structure_node(state, "tez_night_ledger_office", god_id, 1, "Night Ledger Office", "A concealed ledger office for recording shortages, debts, rival needs and pressure points.", {"wood": 18.0, "cloth": 5.0, "cacao": 1.0}, {"cacao": 1.0, "cloth": 0.25}, {"pipiltin": 1}, [], "Future hook for shortage and pressure-point tracking.")
+				]},
+				{"tier": 2, "title": "Level 2 — Shadow Administration", "structures": [
+					palace_structure_node(state, "tez_rival_shadow_court", god_id, 2, "Rival Shadow Court", "A hidden court for measuring rival weakness, pride, debts and dangerous opportunities.", {"wood": 42.0, "cloth": 10.0, "obsidian": 3.0, "cacao": 3.0}, {"cacao": 1.5, "fine_textiles": 0.25}, {"pipiltin": 2}, ["Obsidian Mirror Chamber"], "Future hook for rival disruption."),
+					palace_structure_node(state, "tez_scarcity_granary_office", god_id, 2, "Scarcity Granary Office", "An office that tracks shortages, market bottlenecks and which goods can be pressured.", {"wood": 40.0, "cloth": 8.0, "tools": 2.0, "cacao": 2.0}, {"cacao": 1.25, "tools": 0.25}, {"pipiltin": 2}, ["Night Ledger Office"], "Future hook for market pressure leverage."),
+					palace_structure_node(state, "tez_whispering_servant_network", god_id, 2, "Whispering Servant Network", "A staff network of servants, messengers and obligated listeners around rival households.", {"wood": 34.0, "cloth": 10.0, "cacao": 4.0}, {"cacao": 1.5, "cloth": 0.5}, {"pipiltin": 1, "tlacotin": 5}, ["Smoke Messenger Room"], "Future hook for intrigue and hidden pressure.")
+				]},
+				{"tier": 3, "title": "Level 3 — Black Mirror Council", "structures": [
+					palace_structure_node(state, "tez_black_mirror_council", god_id, 3, "Black Mirror Council", "A dangerous council for coordinating hidden pressure, scarcity plays and rival manipulation.", {"wood": 82.0, "cloth": 20.0, "obsidian": 6.0, "fine_textiles": 1.0}, {"cacao": 2.5, "obsidian": 0.5, "fine_textiles": 0.25}, {"tlamacazqueh": 2, "pipiltin": 3}, ["Rival Shadow Court or Scarcity Granary Office"], "Stronger hidden pressure and manipulation hooks."),
+					palace_structure_node(state, "tez_broken_oath_chamber", god_id, 3, "Broken Oath Chamber", "A private chamber for dangerous bargains, threats and promises that should never be spoken publicly.", {"wood": 70.0, "cloth": 16.0, "ritual_goods": 5.0, "obsidian": 4.0}, {"cacao": 2.0, "ritual_goods": 0.75}, {"tlamacazqueh": 2, "pipiltin": 2}, ["Whispering Servant Network"], "Future hook for dangerous rival-pressure tools.")
+				]},
+				{"tier": 4, "title": "Level 4 — Great Court of Tezcatlipoca", "structures": [
+					palace_structure_node(state, "tez_great_court", god_id, 4, "Great Court of Tezcatlipoca", "A hidden-palace court where scarcity, fear, ambition and rival weakness are treated as instruments of power.", {"wood": 145.0, "cloth": 35.0, "obsidian": 10.0, "ritual_goods": 8.0, "fine_textiles": 2.0}, {"cacao": 4.0, "obsidian": 1.0, "fine_textiles": 0.5}, {"tlamacazqueh": 3, "pipiltin": 6}, ["Black Mirror Council", "Broken Oath Chamber"], "High-level scarcity, intrigue and rival-pressure authority.")
+				]}
+			]
+		"quetzalcoatl":
+			return [
+				{"tier": 1, "title": "Level 1 — Feathered Audience Hall", "structures": [
+					palace_structure_node(state, "quetz_feathered_audience_hall", god_id, 1, "Feathered Audience Hall", "An elegant audience hall where the palace presents orderly, legitimate authority to guests and retainers.", {"wood": 20.0, "cloth": 6.0, "cacao": 1.0}, {"cacao": 0.75, "cloth": 0.25}, {"pipiltin": 1}, [], "Future hook for ruler-facing legitimacy."),
+					palace_structure_node(state, "quetz_tribute_record_office", god_id, 1, "Tribute Record Office", "A record office for tribute promises, deliveries, stored goods and ruler-facing reliability.", {"wood": 18.0, "cloth": 5.0, "tools": 1.0}, {"cacao": 0.5, "cloth": 0.25}, {"pipiltin": 1}, [], "Future hook for court-need donation clarity."),
+					palace_structure_node(state, "quetz_scribe_mat_court", god_id, 1, "Scribe Mat Court", "A court of mats, painted records and formal speech for orderly palace administration.", {"wood": 18.0, "cloth": 5.0, "cacao": 1.0}, {"cacao": 0.75, "cloth": 0.25}, {"pipiltin": 1}, [], "Future hook for order and palace administration.")
+				]},
+				{"tier": 2, "title": "Level 2 — Diplomatic Reception Wing", "structures": [
+					palace_structure_node(state, "quetz_diplomatic_reception_court", god_id, 2, "Diplomatic Reception Court", "A reception court for rival houses, messengers, ruler agents and formal negotiation.", {"wood": 42.0, "cloth": 12.0, "cacao": 3.0, "fine_textiles": 1.0}, {"cacao": 1.5, "fine_textiles": 0.25}, {"pipiltin": 2}, ["Feathered Audience Hall"], "Future negotiation and recognition hooks."),
+					palace_structure_node(state, "quetz_law_speech_chamber", god_id, 2, "Law-Speech Chamber", "A chamber where obligations, promises and public judgements are spoken before witnesses.", {"wood": 38.0, "cloth": 10.0, "ritual_goods": 2.0}, {"cacao": 1.0, "ritual_goods": 0.25}, {"tlamacazqueh": 1, "pipiltin": 2}, ["Scribe Mat Court"], "Future hook for trust and formal legitimacy."),
+					palace_structure_node(state, "quetz_market_wind_gallery", god_id, 2, "Market-Wind Gallery", "A palace gallery where trade information, tribute expectation and visible order are brought together.", {"wood": 40.0, "cloth": 10.0, "tools": 2.0, "cacao": 2.0}, {"cacao": 1.0, "cloth": 0.5}, {"pipiltin": 2}, ["Tribute Record Office"], "Future hook for palace performance and credibility.")
+				]},
+				{"tier": 3, "title": "Level 3 — Feathered Legitimacy Court", "structures": [
+					palace_structure_node(state, "quetz_feathered_legitimacy_court", god_id, 3, "Feathered Legitimacy Court", "A major court of record, ceremony and noble reception for proving the house deserves recognition.", {"wood": 82.0, "cloth": 22.0, "cacao": 5.0, "fine_textiles": 2.0}, {"cacao": 2.0, "fine_textiles": 0.5}, {"pipiltin": 4}, ["Diplomatic Reception Court or Law-Speech Chamber"], "Stronger recognition-route and tribute credibility hooks."),
+					palace_structure_node(state, "quetz_ruler_witness_hall", god_id, 3, "Ruler Witness Hall", "A formal hall designed to make obligation, success and legitimacy visible to agents of higher authority.", {"wood": 74.0, "cloth": 18.0, "ritual_goods": 4.0, "fine_textiles": 1.0}, {"cacao": 2.0, "ritual_goods": 0.5, "fine_textiles": 0.25}, {"tlamacazqueh": 1, "pipiltin": 3}, ["Market-Wind Gallery"], "Future hook for high-trust ruler-facing display.")
+				]},
+				{"tier": 4, "title": "Level 4 — Great Court of Quetzalcoatl", "structures": [
+					palace_structure_node(state, "quetz_great_court", god_id, 4, "Great Court of Quetzalcoatl", "A full legitimacy court for tribute reliability, palace order, recognition and ruler-facing trust.", {"wood": 150.0, "cloth": 40.0, "cacao": 8.0, "ritual_goods": 8.0, "fine_textiles": 3.0}, {"cacao": 3.5, "fine_textiles": 0.75}, {"tlamacazqueh": 2, "pipiltin": 6}, ["Feathered Legitimacy Court", "Ruler Witness Hall"], "Full legitimacy palace authority and late recognition-route support.")
+				]}
+			]
+	return []
+
+
+
 func get_built_palace_structure_ids(state: Node) -> Array[String]:
 	var output: Array[String] = []
 	if state == null:
@@ -259,7 +393,7 @@ func palace_structure_by_id(state: Node, structure_id: String, route_id: String 
 			for palace_god_id: String in PALACE_GOD_IDS:
 				search_routes.append(palace_god_id)
 	for god_id: String in search_routes:
-		var tiers_variant: Variant = state.call("_palace_structure_tree_tiers", god_id)
+		var tiers_variant: Variant = palace_structure_tree_tiers(state, god_id)
 		if not (tiers_variant is Array):
 			continue
 		var tiers: Array = tiers_variant as Array
@@ -282,7 +416,7 @@ func palace_structure_id_by_name(state: Node, god_id: String, structure_name: St
 	var needle: String = structure_name.strip_edges().to_lower()
 	if needle == "":
 		return ""
-	var tiers_variant: Variant = state.call("_palace_structure_tree_tiers", god_id)
+	var tiers_variant: Variant = palace_structure_tree_tiers(state, god_id)
 	if not (tiers_variant is Array):
 		return ""
 	var tiers: Array = tiers_variant as Array
@@ -302,7 +436,7 @@ func palace_structure_id_by_name(state: Node, god_id: String, structure_name: St
 func palace_any_built_in_tier(state: Node, god_id: String, tier_number: int) -> bool:
 	if state == null:
 		return false
-	var tiers_variant: Variant = state.call("_palace_structure_tree_tiers", god_id)
+	var tiers_variant: Variant = palace_structure_tree_tiers(state, god_id)
 	if not (tiers_variant is Array):
 		return false
 	var tiers: Array = tiers_variant as Array
@@ -408,7 +542,7 @@ func palace_built_structure_ids_in_tree_order(state: Node, god_id: String) -> Ar
 	var output: Array[String] = []
 	if state == null or god_id == "":
 		return output
-	var tiers_variant: Variant = state.call("_palace_structure_tree_tiers", god_id)
+	var tiers_variant: Variant = palace_structure_tree_tiers(state, god_id)
 	if not (tiers_variant is Array):
 		return output
 	var tiers: Array = tiers_variant as Array
@@ -562,7 +696,7 @@ func resolve_palace_structure_operation(state: Node, pay_costs: bool) -> Diction
 	var stock_variant: Variant = state.get("estate_stockpiles")
 	var temp_stockpile: Dictionary = {}
 	if stock_variant is Dictionary:
-		temp_stockpile = state.call("_copy_stockpile_dictionary", stock_variant as Dictionary) as Dictionary
+		temp_stockpile = _copy_stockpile_dictionary(stock_variant as Dictionary)
 	var available_staff: Dictionary = get_palace_staff_capacity(state)
 	var structure_ids: Array[String] = palace_built_structure_ids_in_tree_order(state, dedicated_god)
 	for structure_id: String in structure_ids:
@@ -571,7 +705,7 @@ func resolve_palace_structure_operation(state: Node, pay_costs: bool) -> Diction
 			continue
 		var maintenance: Dictionary = structure.get("maintenance_cost", {}) as Dictionary
 		var staff: Dictionary = structure.get("staff_requirement", {}) as Dictionary
-		state.call("_add_dictionary_amounts", result["maintenance_needed"] as Dictionary, maintenance)
+		_add_dictionary_amounts(result["maintenance_needed"] as Dictionary, maintenance)
 		var missing_parts: Array[String] = []
 		for resource_variant: Variant in maintenance.keys():
 			var resource_id: String = String(resource_variant)
@@ -728,7 +862,7 @@ func palace_next_locked_authority_rows(state: Node, god_id: String, limit: int =
 	var rows: Array[Dictionary] = []
 	if state == null or god_id == "":
 		return rows
-	var tiers_variant: Variant = state.call("_palace_structure_tree_tiers", god_id)
+	var tiers_variant: Variant = palace_structure_tree_tiers(state, god_id)
 	if not (tiers_variant is Array):
 		return rows
 	var tiers: Array = tiers_variant as Array
@@ -1231,6 +1365,75 @@ func get_palace_ruler_demands_summary(state: Node) -> Dictionary:
 		"player_prestige": float(state.get("player_prestige")),
 		"mechanics_note": "Court needs are donation opportunities. Donating a needed good grants Prestige equal to donated amount × that good's base value. Prestige is score only and is never spent. No royal favour, local stability or palace-route credit is created."
 	}
+
+
+func get_palace_summary(state: Node) -> Dictionary:
+	if state == null:
+		return {
+			"schema_version": "palace_court_needs_v0_36",
+			"dedicated": false,
+			"dedicated_god": "",
+			"dedicated_god_name": "None",
+			"route_name": "No dedication"
+		}
+	var dedicated_god: String = String(state.call("get_palace_dedicated_god")) if state.has_method("get_palace_dedicated_god") else get_palace_dedicated_god(state)
+	var dedicated: bool = dedicated_god != ""
+	var route_name: String = "No dedication"
+	var god_name: String = "None"
+	if dedicated:
+		route_name = String(state.call("get_palace_route_name", dedicated_god)) if state.has_method("get_palace_route_name") else get_palace_route_name(dedicated_god)
+		god_name = String(state.call("_god_display_name", dedicated_god)) if state.has_method("_god_display_name") else god_display_name(dedicated_god)
+	var campaign_state: Variant = state.call("_get_campaign_state") if state.has_method("_get_campaign_state") else null
+	var last_maintenance_report: Array[String] = []
+	if campaign_state != null and campaign_state.has_method("get_last_palace_maintenance_report_copy"):
+		last_maintenance_report = campaign_state.call("get_last_palace_maintenance_report_copy") as Array[String]
+	return {
+		"schema_version": "palace_court_needs_v0_36",
+		"palace_level": int(state.call("get_palace_level")) if state.has_method("get_palace_level") else get_palace_level(state),
+		"dedicated": dedicated,
+		"dedicated_god": dedicated_god,
+		"dedicated_god_name": god_name,
+		"route_name": route_name,
+		"power_summary": String(state.call("get_palace_route_power_summary", dedicated_god)) if state.has_method("get_palace_route_power_summary") else get_palace_route_power_summary(dedicated_god),
+		"dedication_routes": state.call("get_palace_dedication_routes") if state.has_method("get_palace_dedication_routes") else get_palace_dedication_routes(state),
+		"structure_tree_shell": state.call("get_palace_structure_tree_shell", dedicated_god) if state.has_method("get_palace_structure_tree_shell") else {},
+		"built_structures": state.call("get_built_palace_structure_ids") if state.has_method("get_built_palace_structure_ids") else get_built_palace_structure_ids(state),
+		"active_structures": state.call("get_active_palace_structure_ids") if state.has_method("get_active_palace_structure_ids") else [],
+		"inactive_structures": state.call("get_inactive_palace_structure_ids") if state.has_method("get_inactive_palace_structure_ids") else [],
+		"built_structure_count": int((state.call("get_built_palace_structure_ids") as Array).size()) if state.has_method("get_built_palace_structure_ids") else get_built_palace_structure_ids(state).size(),
+		"active_structure_count": int((state.call("get_active_palace_structure_ids") as Array).size()) if state.has_method("get_active_palace_structure_ids") else 0,
+		"inactive_structure_count": int((state.call("get_inactive_palace_structure_ids") as Array).size()) if state.has_method("get_inactive_palace_structure_ids") else 0,
+		"total_maintenance": state.call("get_palace_total_maintenance") if state.has_method("get_palace_total_maintenance") else get_palace_total_maintenance(state),
+		"required_staff": state.call("get_palace_required_staff") if state.has_method("get_palace_required_staff") else get_palace_required_staff(state),
+		"staff_capacity": state.call("get_palace_staff_capacity") if state.has_method("get_palace_staff_capacity") else get_palace_staff_capacity(state),
+		"staff_summary": state.call("get_palace_staff_summary") if state.has_method("get_palace_staff_summary") else get_palace_staff_summary(state),
+		"palace_operation_preview": state.call("get_palace_structure_operation_preview") if state.has_method("get_palace_structure_operation_preview") else get_palace_structure_operation_preview(state),
+		"last_palace_maintenance_report": last_maintenance_report,
+		"authority_summary": state.call("get_palace_authority_summary") if state.has_method("get_palace_authority_summary") else get_palace_authority_summary(state),
+		"tlaloc_forecast": state.call("get_tlaloc_natural_calendar_forecast") if state.has_method("get_tlaloc_natural_calendar_forecast") else {},
+		"tezcatlipoca_pressure": state.call("get_tezcatlipoca_pressure_overview") if state.has_method("get_tezcatlipoca_pressure_overview") else {},
+		"quetzalcoatl_legitimacy": state.call("get_quetzalcoatl_legitimacy_overview") if state.has_method("get_quetzalcoatl_legitimacy_overview") else {},
+		"ruler_demands": state.call("get_palace_ruler_demands_summary") if state.has_method("get_palace_ruler_demands_summary") else {},
+		"authority_status": String((state.call("get_palace_authority_summary") as Dictionary).get("headline", "Palace authority not connected.")) if state.has_method("get_palace_authority_summary") else "Palace authority not connected.",
+		"ruler_demand_status": String((state.call("get_palace_ruler_demands_summary") as Dictionary).get("headline", "Court needs donation prototype active.")) if state.has_method("get_palace_ruler_demands_summary") else "Court needs donation prototype active.",
+		"prestige_summary": state.call("get_prestige_summary") if state.has_method("get_prestige_summary") else {},
+		"flower_war_gate_enabled": bool(state.call("is_flower_war_palace_gate_enabled")) if state.has_method("is_flower_war_palace_gate_enabled") else is_flower_war_palace_gate_enabled(state),
+		"flower_war_gate_passed": bool(state.call("flower_war_palace_gate_passed")) if state.has_method("flower_war_palace_gate_passed") else flower_war_palace_gate_passed(state),
+		"flower_war_gate_status": String(state.call("flower_war_palace_gate_status_text")) if state.has_method("flower_war_palace_gate_status_text") else flower_war_palace_gate_status_text(state),
+		"implementation_note": "v0.36 reframes court needs as court needs. Donating needed goods grants Prestige based on donated amount × resource base value. Prestige is score only and is never spent."
+	}
+
+func _copy_stockpile_dictionary(source: Dictionary) -> Dictionary:
+	var output: Dictionary = {}
+	for key_variant: Variant in source.keys():
+		var key: String = String(key_variant)
+		output[key] = float(source[key_variant])
+	return output
+
+func _add_dictionary_amounts(target: Dictionary, amounts: Dictionary) -> void:
+	for key_variant: Variant in amounts.keys():
+		var key: String = String(key_variant)
+		target[key] = float(target.get(key, 0.0)) + float(amounts[key_variant])
 
 func _resource_base_value(state: Node, resource_id: String) -> float:
 	if state != null and state.has_method("_resource_base_value"):

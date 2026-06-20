@@ -2,7 +2,7 @@
 # Godot 4.x
 # Project path: res://Scripts/state/CampaignState.gd
 #
-# v0.44.8 stockpile authority pass.
+# v0.45.3 Palace duplicate-state cleanup pass.
 #
 # CampaignState is the future owner of live campaign/save data.
 # It intentionally contains data-shaping helpers, including start-state loading, but not gameplay rules.
@@ -12,7 +12,7 @@
 class_name CampaignState
 extends RefCounted
 
-const SCHEMA_VERSION: String = "campaign_state_v0_44_12"
+const SCHEMA_VERSION: String = "campaign_state_v0_45_3"
 
 # -----------------------------------------------------------------------------
 # Calendar / report state
@@ -309,6 +309,33 @@ func apply_to_game_state(game_state: Node) -> void:
 # Stockpile access helpers
 # -----------------------------------------------------------------------------
 
+func get_estate_stockpiles_copy() -> Dictionary:
+	return _duplicate_dictionary(estate_stockpiles)
+
+func set_estate_stockpiles_values(values: Dictionary) -> void:
+	estate_stockpiles = _float_dictionary(values)
+	ensure_all_resource_keys()
+
+func get_market_stockpiles_copy() -> Dictionary:
+	return _duplicate_dictionary(market_stockpiles)
+
+func set_market_stockpiles_values(values: Dictionary) -> void:
+	market_stockpiles = _float_dictionary(values)
+	ensure_all_resource_keys()
+
+func seed_stockpiles_from_game_state_if_empty(game_state: Node) -> void:
+	if game_state == null:
+		return
+	if estate_stockpiles.is_empty():
+		var estate_variant: Variant = game_state.get("estate_stockpiles")
+		if estate_variant is Dictionary:
+			estate_stockpiles = _float_dictionary(estate_variant as Dictionary)
+	if market_stockpiles.is_empty():
+		var market_variant: Variant = game_state.get("market_stockpiles")
+		if market_variant is Dictionary:
+			market_stockpiles = _float_dictionary(market_variant as Dictionary)
+	ensure_all_resource_keys()
+
 func get_estate_stock(resource_id: String) -> float:
 	return float(estate_stockpiles.get(resource_id, 0.0))
 
@@ -407,6 +434,12 @@ func add_player_prestige_record(amount: float, source_id: String, detail: String
 func get_prestige_history_copy() -> Array[Dictionary]:
 	return _duplicate_dictionary_array(prestige_history)
 
+func set_prestige_history_records(records: Array) -> void:
+	prestige_history = _duplicate_dictionary_array(records)
+
+func clear_prestige_history() -> void:
+	prestige_history.clear()
+
 func set_rival_prestige_values(values: Dictionary) -> Dictionary:
 	rival_prestige = _duplicate_dictionary(values)
 	return rival_prestige.duplicate(true)
@@ -423,6 +456,12 @@ func get_sacrifice_prestige_records_copy() -> Array[Dictionary]:
 
 func set_sacrifice_prestige_records(records: Array) -> void:
 	sacrifice_prestige_records = _duplicate_dictionary_array(records)
+
+func append_sacrifice_prestige_record(record: Dictionary) -> void:
+	sacrifice_prestige_records.append(record.duplicate(true))
+
+func clear_sacrifice_prestige_records() -> void:
+	sacrifice_prestige_records.clear()
 
 func mirror_prestige_to_game_state(game_state: Node) -> void:
 	if game_state == null:
@@ -478,6 +517,15 @@ func set_palace_structure_runtime_statuses(value: Dictionary) -> void:
 func clear_palace_structure_runtime_statuses() -> void:
 	palace_structure_runtime_statuses.clear()
 
+func get_palace_delivered_ruler_demands_copy() -> Dictionary:
+	return _duplicate_dictionary(palace_delivered_ruler_demands)
+
+func set_palace_delivered_ruler_demands(value: Dictionary) -> void:
+	palace_delivered_ruler_demands = _duplicate_dictionary(value)
+
+func clear_palace_delivered_ruler_demands() -> void:
+	palace_delivered_ruler_demands.clear()
+
 func get_palace_ruler_demand_donations_copy() -> Array[Dictionary]:
 	return _duplicate_dictionary_array(palace_ruler_demand_donations)
 
@@ -498,6 +546,17 @@ func get_flower_war_palace_gate_enabled_value() -> bool:
 
 func set_flower_war_palace_gate_enabled_value(enabled: bool) -> void:
 	flower_war_palace_gate_enabled = enabled
+
+func capture_palace_state_from_game_state(game_state: Node) -> void:
+	if game_state == null:
+		return
+	player_palace_dedicated_god = String(game_state.get("player_palace_dedicated_god"))
+	palace_built_structures = _get_dictionary(game_state, "palace_built_structures")
+	palace_structure_runtime_statuses = _get_dictionary(game_state, "palace_structure_runtime_statuses")
+	palace_delivered_ruler_demands = _get_dictionary(game_state, "palace_delivered_ruler_demands")
+	palace_ruler_demand_donations = _get_dictionary_array(game_state, "palace_ruler_demand_donations")
+	last_palace_maintenance_report = _get_string_array(game_state, "last_palace_maintenance_report")
+	flower_war_palace_gate_enabled = bool(game_state.get("flower_war_palace_gate_enabled"))
 
 func mirror_palace_state_to_game_state(game_state: Node) -> void:
 	if game_state == null:
