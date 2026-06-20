@@ -6,9 +6,9 @@
 class_name MarketSystem
 extends RefCounted
 
-const MIN_SCARCITY_MULTIPLIER: float = 0.75
-const MAX_SCARCITY_MULTIPLIER: float = 3.0
-const TARGET_COVERAGE_TURNS: float = 3.0
+const MIN_SCARCITY_MULTIPLIER: float = MarketPricingRules.MIN_SCARCITY_MULTIPLIER
+const MAX_SCARCITY_MULTIPLIER: float = MarketPricingRules.MAX_SCARCITY_MULTIPLIER
+const TARGET_COVERAGE_TURNS: float = MarketPricingRules.TARGET_COVERAGE_TURNS
 
 func get_market_rows(market_stockpiles: Dictionary, market_static: Dictionary, static_data: StaticData) -> Array[Dictionary]:
 	var rows: Array[Dictionary] = []
@@ -25,7 +25,7 @@ func get_market_rows(market_stockpiles: Dictionary, market_static: Dictionary, s
 		var demand: float = float(market_data.get("outgoing", 0.0))
 		var incoming: float = float(market_data.get("incoming", 0.0))
 		var coverage: float = coverage_for(stockpile.stored, demand)
-		var multiplier: float = scarcity_multiplier_for(coverage)
+		var multiplier: float = scarcity_multiplier_for(coverage, demand)
 		var base_value: float = float(market_data.get("base_value", row.get("base_value", 0.0)))
 
 		row["market_stock"] = stockpile.stored
@@ -62,10 +62,8 @@ func coverage_for(stock: float, demand: float) -> float:
 		return 999.0
 	return stock / demand
 
-func scarcity_multiplier_for(coverage: float) -> float:
-	if coverage <= 0.0:
-		return MAX_SCARCITY_MULTIPLIER
-	return clampf(TARGET_COVERAGE_TURNS / coverage, MIN_SCARCITY_MULTIPLIER, MAX_SCARCITY_MULTIPLIER)
+func scarcity_multiplier_for(coverage: float, demand: float) -> float:
+	return MarketPricingRules.scarcity_multiplier(coverage, demand)
 
 func market_label_for(coverage: float) -> String:
 	if coverage <= 0.0:

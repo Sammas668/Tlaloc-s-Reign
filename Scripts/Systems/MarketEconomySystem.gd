@@ -201,11 +201,7 @@ func market_resource_value(source: Dictionary, resource_id: String) -> float:
 	return float(source.get(resource_id, 0.0))
 
 func scarcity_multiplier(coverage: float, demand_value: float) -> float:
-	if demand_value <= 0.0:
-		return 0.75
-	if coverage <= 0.0:
-		return 3.0
-	return maxf(0.75, minf(3.0, 3.0 / coverage))
+	return MarketPricingRules.scarcity_multiplier(coverage, demand_value)
 
 func market_label(coverage: float, demand_value: float) -> String:
 	if demand_value <= 0.0:
@@ -232,11 +228,7 @@ func market_trend(coverage: float, demand_value: float) -> String:
 	return "Critical"
 
 func market_scarcity_multiplier(coverage: float, demand: float) -> float:
-	if demand <= 0.001:
-		return 1.0
-	if coverage <= 0.001:
-		return 3.0
-	return clampf(3.0 / coverage, 0.50, 3.0)
+	return MarketPricingRules.scarcity_multiplier(coverage, demand)
 
 func market_pressure_label(coverage: float, demand: float) -> String:
 	if demand <= 0.001:

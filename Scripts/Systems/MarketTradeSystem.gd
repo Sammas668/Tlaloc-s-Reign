@@ -280,11 +280,7 @@ func market_demand_for_pricing(market_good: Dictionary) -> float:
 	return demand_value
 
 func local_scarcity_multiplier(coverage: float, demand: float) -> float:
-	if demand <= 0.001:
-		return 1.0
-	if coverage <= 0.001:
-		return 3.0
-	return clampf(3.0 / coverage, 0.50, 3.0)
+	return MarketPricingRules.scarcity_multiplier(coverage, demand)
 
 func market_goods_by_id(state: Node) -> Dictionary:
 	var output: Dictionary = {}
