@@ -42,41 +42,12 @@ const GOD_TEZCATLIPOCA: String = "tezcatlipoca"
 const GOD_QUETZALCOATL: String = "quetzalcoatl"
 const PALACE_GOD_IDS: Array[String] = [GOD_TLALOC, GOD_HUITZILOPOCHTLI, GOD_TEZCATLIPOCA, GOD_QUETZALCOATL]
 
-var resources: Dictionary = {}
-var resource_order: Array[String] = []
-var buildings: Dictionary = {}
-var building_order: Array[String] = []
 
-var estate_stockpiles: Dictionary = {}
-var market_stockpiles: Dictionary = {}
-var market_demand: Dictionary = {}
-var estate_buildings: Dictionary = {}
-var active_housing_counts: Dictionary = {}
-var population: Dictionary = {}
-var base_housing_capacity: Dictionary = {}
-var labour_assignments: Dictionary = {}
-var market_economy: Dictionary = {}
-
-var current_veintena: int = 1
-var last_report: Array[String] = []
-var initialized: bool = false
-var player_palace_dedicated_god: String = ""
-var palace_built_structures: Dictionary = {}
-var palace_structure_runtime_statuses: Dictionary = {}
-var palace_delivered_ruler_demands: Dictionary = {} # Legacy compatibility only; v0.36 uses donation records.
-var palace_ruler_demand_donations: Array[Dictionary] = []
-var player_prestige: float = 0.0
-var rival_prestige: Dictionary = {}
-var prestige_history: Array[Dictionary] = []
-var sacrifice_prestige_records: Array[Dictionary] = []
-var last_palace_maintenance_report: Array[String] = []
-# Palace gate is now reconnected: player-started attacking Flower Wars require
-# a Palace dedicated to Huitzilopochtli. Defensive Flower Wars can still happen
-# regardless of dedication because the player is responding to an attack.
-var flower_war_palace_gate_enabled: bool = true
-
-# CampaignState is the live/save-state authority. The matching TRGameState
-# variables remain temporary compatibility mirrors for older UI paths.
+# CampaignState is the live/save-state authority. Historical TRGameState
+# compatibility mirrors have been removed in the 8O3 series: calendar/report
+# in 8O3A, prestige in 8O3B, palace in 8O3C, stockpiles in 8O3D,
+# estate/population/labour in 8O3E, warband/Flower War reports in 8O3F,
+# and static resource/building plus market-demand/economy mirrors in 8O3G.
 var campaign_state: CampaignState = null
 var _campaign_bridge_system_instance: RefCounted = null
 
@@ -134,58 +105,60 @@ func _apply_campaign_state_to_current_runtime() -> void:
 	_get_campaign_bridge_system().call("apply_campaign_state_to_current_runtime", self)
 
 func _ensure_campaign_state_palace_bridge() -> CampaignState:
-	return _get_campaign_bridge_system().call("ensure_campaign_state_palace_bridge", self) as CampaignState
+	return _get_campaign_state()
 
 func _capture_legacy_palace_state_to_campaign_state() -> void:
-	_get_campaign_bridge_system().call("capture_legacy_palace_state_to_campaign_state", self)
+	# 8O3C: palace state is CampaignState-direct. Legacy TRGameState palace
+	# mirrors are no longer captured back into CampaignState.
+	pass
 
 func _mirror_palace_state_from_campaign_state_to_legacy() -> void:
-	_get_campaign_bridge_system().call("mirror_palace_state_from_campaign_state_to_legacy", self)
+	# 8O3C: compatibility hook retained for older systems, but it no longer
+	# writes palace mirrors back onto TRGameState.
+	pass
 
 func _ensure_campaign_state_estate_structure_bridge() -> CampaignState:
-	return _get_campaign_bridge_system().call("ensure_campaign_state_estate_structure_bridge", self) as CampaignState
+	# 8O3E: estate buildings, housing, population and labour assignment state are
+	# CampaignState-direct. Legacy TRGameState mirrors are no longer seeded.
+	return _get_campaign_state()
 
 func _mirror_estate_structure_compatibility_from_campaign_state() -> void:
-	_get_campaign_bridge_system().call("mirror_estate_structure_compatibility_from_campaign_state", self)
+	# 8O3E: compatibility hook retained for older callers, but it no longer writes
+	# estate/population/labour mirrors back onto TRGameState.
+	pass
 
 func _ensure_campaign_state_warband_flower_war_bridge() -> CampaignState:
-	return _get_campaign_bridge_system().call("ensure_campaign_state_warband_flower_war_bridge", self) as CampaignState
+	# 8O3F: warband and Flower War report state are CampaignState-direct.
+	# Legacy TRGameState mirrors are no longer seeded.
+	return _get_campaign_state()
 
 func _mirror_warband_flower_war_compatibility_from_campaign_state() -> void:
-	_get_campaign_bridge_system().call("mirror_warband_flower_war_compatibility_from_campaign_state", self)
+	# 8O3F: compatibility hook retained for older callers, but it no longer writes
+	# warband / Flower War report mirrors back onto TRGameState.
+	pass
 
 func _ensure_campaign_state_stockpile_bridge() -> CampaignState:
-	return _get_campaign_bridge_system().call("ensure_campaign_state_stockpile_bridge", self) as CampaignState
+	# 8O3D: stockpile state is CampaignState-direct. Legacy TRGameState
+	# stockpile mirrors are no longer seeded or written back.
+	return _get_campaign_state()
 
 func _mirror_stockpile_compatibility_from_campaign_state() -> void:
-	_get_campaign_bridge_system().call("mirror_stockpile_compatibility_from_campaign_state", self)
-
-func _mirror_calendar_report_compatibility_from_campaign_state() -> void:
-	_get_campaign_bridge_system().call("mirror_calendar_report_compatibility_from_campaign_state", self)
-
-func _ensure_campaign_state_calendar_report_bridge() -> CampaignState:
-	return _get_campaign_bridge_system().call("ensure_campaign_state_calendar_report_bridge", self) as CampaignState
-
-func _capture_legacy_calendar_report_to_campaign_state() -> void:
-	_get_campaign_bridge_system().call("capture_legacy_calendar_report_to_campaign_state", self)
+	# 8O3D: compatibility hook retained for older callers, but it no longer
+	# writes estate/market stockpile mirrors back onto TRGameState.
+	pass
 
 func _set_current_veintena_value(value: int) -> int:
-	return int(_get_campaign_bridge_system().call("set_current_veintena_value", self, value))
+	return int(_get_campaign_state().set_current_veintena(value))
 
 func _clear_report_lines() -> void:
-	_get_campaign_bridge_system().call("clear_report_lines", self)
+	_get_campaign_state().clear_last_report()
 
 func _set_report_lines(lines: Array) -> void:
-	_get_campaign_bridge_system().call("set_report_lines", self, lines)
+	_get_campaign_state().set_last_report(lines)
 
 func _append_report_line(line: String) -> void:
-	_get_campaign_bridge_system().call("append_report_line", self, line)
+	_get_campaign_state().append_report_line(line)
 
-func _ensure_campaign_state_prestige_bridge() -> CampaignState:
-	return _get_campaign_bridge_system().call("ensure_campaign_state_prestige_bridge", self) as CampaignState
-
-func _mirror_prestige_compatibility_from_campaign_state() -> void:
-	_get_campaign_bridge_system().call("mirror_prestige_compatibility_from_campaign_state", self)
 
 func _emit_state_changed_and_sync() -> void:
 	_get_campaign_bridge_system().call("emit_state_changed_and_sync", self)
@@ -296,20 +269,16 @@ func new_game() -> void:
 	var runtime_state: CampaignState = _get_campaign_state()
 	runtime_state.clear_palace_state()
 	runtime_state.set_flower_war_palace_gate_enabled_value(true)
-	_mirror_palace_state_from_campaign_state_to_legacy()
 	runtime_state.set_player_prestige_value(0.0)
 	runtime_state.set_rival_prestige_values(_default_rival_prestige_values())
 	runtime_state.clear_prestige_history()
 	runtime_state.clear_sacrifice_prestige_records()
-	_mirror_prestige_compatibility_from_campaign_state()
 	_ensure_warband_state()
 	runtime_state.clear_last_flower_war_report()
 	runtime_state.clear_flower_war_report_archive()
-	_mirror_warband_flower_war_compatibility_from_campaign_state()
 	runtime_state.set_initialized(true)
 	runtime_state.clear_last_report()
 	runtime_state.append_report_line("New estate simulation started.")
-	_mirror_calendar_report_compatibility_from_campaign_state()
 	_emit_state_changed_and_sync()
 
 func _load_project_data_into_campaign_state() -> void:
@@ -423,11 +392,9 @@ func validate_market_trade_plan(trade_plan: Dictionary) -> Dictionary:
 	return _get_market_trade_system().validate_trade_plan(self, trade_plan)
 
 func apply_market_trade_plan(trade_plan: Dictionary) -> Dictionary:
-	# MarketTradeSystem applies stockpile changes through CampaignState. Mirrors
-	# are refreshed only for old UI/system readers; no broad mirror capture here.
-	var result: Dictionary = _get_market_trade_system().apply_trade_plan(self, trade_plan)
-	_mirror_stockpile_compatibility_from_campaign_state()
-	return result
+	# MarketTradeSystem applies stockpile changes through CampaignState. No
+	# TRGameState stockpile mirror is refreshed after 8O3D.
+	return _get_market_trade_system().apply_trade_plan(self, trade_plan)
 
 func get_market_trade_prestige_lines(trade_plan: Dictionary) -> Array[Dictionary]:
 	var preview: Dictionary = get_market_trade_preview(trade_plan)
@@ -635,13 +602,9 @@ func destroy_building(building_id: String) -> bool:
 
 func advance_veintena() -> void:
 	_get_turn_resolution_system().advance_veintena(self)
-	# TurnResolutionSystem writes through CampaignState-facing runtime helpers.
-	# Refresh only the old compatibility mirrors for UI paths that still expect them.
-	_mirror_calendar_report_compatibility_from_campaign_state()
-	_mirror_stockpile_compatibility_from_campaign_state()
-	_mirror_prestige_compatibility_from_campaign_state()
-	_mirror_palace_state_from_campaign_state_to_legacy()
-	_mirror_warband_flower_war_compatibility_from_campaign_state()
+	# TurnResolutionSystem writes turn, stockpile, prestige, palace, estate and
+	# warband/Flower War state through CampaignState-facing helpers. No deleted
+	# compatibility mirrors are refreshed here.
 
 func estimate_population_upkeep() -> Dictionary:
 	return _get_population_upkeep_system().calculate_population_upkeep(active_population_by_group(), population_upkeep_rates)
@@ -676,11 +639,9 @@ func _is_productive_building_id(building_id: String) -> bool:
 
 func _auto_staff_all_productive_buildings() -> void:
 	_get_labour_system().call("auto_staff_all_productive_buildings", self)
-	_mirror_estate_structure_compatibility_from_campaign_state()
 
 func _auto_staff_single_building_to_max(building_id: String) -> void:
 	_get_labour_system().call("auto_staff_single_building_to_max", self, building_id)
-	_mirror_estate_structure_compatibility_from_campaign_state()
 
 func _production_auto_staff_order() -> Array[String]:
 	return _get_labour_system().call("production_auto_staff_order", self) as Array[String]
@@ -690,7 +651,6 @@ func _is_maize_production_building(building_id: String) -> bool:
 
 func _ensure_labour_assignments() -> void:
 	_get_labour_system().call("ensure_labour_assignments", self)
-	_mirror_estate_structure_compatibility_from_campaign_state()
 
 func _default_assignment_for_building(building_id: String, count: int, running_by_group: Dictionary) -> Dictionary:
 	return _get_labour_system().call("default_assignment_for_building", self, building_id, count, running_by_group) as Dictionary
@@ -807,10 +767,9 @@ func _stock(resource_id: String) -> float:
 	return _get_campaign_state().get_estate_stock(resource_id)
 
 func _add_stock(resource_id: String, amount: float) -> void:
-	# Estate stockpile writes update CampaignState first, then mirror back only for
-	# old UI/system compatibility paths.
+	# Estate stockpile writes update CampaignState directly. TRGameState stockpile
+	# mirrors were removed in 8O3D.
 	_get_campaign_state().add_estate_stock(resource_id, amount)
-	_mirror_stockpile_compatibility_from_campaign_state()
 
 func _reserve_breakdown(resource_id: String, upkeep_value: float, input_value: float, housing_value: float = 0.0) -> Array[String]:
 	return _get_storehouse_system().call("reserve_breakdown", self, resource_id, upkeep_value, input_value, housing_value) as Array[String]
@@ -857,9 +816,6 @@ func _format_amount(value: float) -> String:
 # Barracks / Flower Wars v0.15 — injured recovery + reinforcement clarity
 # -----------------------------------------------------------------------------
 
-var last_flower_war_report: Dictionary = {}
-var flower_war_report_archive: Array[Dictionary] = []
-var warbands: Dictionary = {}
 
 func get_warrior_count() -> int:
 	return int(_campaign_population().get("yaotequihuaqueh", 0))
@@ -893,14 +849,12 @@ func set_player_palace_dedicated_god(god_id: String) -> Dictionary:
 	var cleaned: String = god_id.strip_edges().to_lower()
 	if cleaned == "":
 		_get_campaign_state().set_palace_dedicated_god_value("")
-		_mirror_palace_state_from_campaign_state_to_legacy()
 		_append_report_line("Palace dedication cleared. Flower Wars are locked until the palace is dedicated to Huitzilopochtli.")
 		_emit_state_changed_and_sync()
 		return {"ok": true, "reason": "Palace dedication cleared."}
 	if not PALACE_GOD_IDS.has(cleaned):
 		return {"ok": false, "reason": "Unknown palace god: " + god_id + "."}
 	_get_campaign_state().set_palace_dedicated_god_value(cleaned)
-	_mirror_palace_state_from_campaign_state_to_legacy()
 	_append_report_line("Palace dedicated to " + _god_display_name(cleaned) + ".")
 	_emit_state_changed_and_sync()
 	return {"ok": true, "reason": "Palace dedicated to " + _god_display_name(cleaned) + ".", "god_id": cleaned}
@@ -913,8 +867,6 @@ func is_flower_war_palace_gate_enabled() -> bool:
 
 func set_flower_war_palace_gate_enabled(enabled: bool) -> Dictionary:
 	var result: Dictionary = _get_palace_system().set_flower_war_palace_gate_enabled(self, enabled)
-	_capture_legacy_palace_state_to_campaign_state()
-	_capture_legacy_calendar_report_to_campaign_state()
 	_emit_state_changed_and_sync()
 	return result
 
@@ -959,7 +911,6 @@ func dedicate_palace_to_god(god_id: String) -> Dictionary:
 		return status
 	var cleaned: String = god_id.strip_edges().to_lower()
 	_get_campaign_state().set_palace_dedicated_god_value(cleaned)
-	_mirror_palace_state_from_campaign_state_to_legacy()
 	_append_report_line("Palace dedicated to " + _god_display_name(cleaned) + ". The Divine Seat now displays the " + get_palace_route_name(cleaned) + " structure node data.")
 	_emit_state_changed_and_sync()
 	return {"ok": true, "reason": "Palace dedicated to " + _god_display_name(cleaned) + ".", "god_id": cleaned}
@@ -1033,8 +984,6 @@ func can_build_palace_structure(structure_id: String) -> Dictionary:
 
 func build_palace_structure(structure_id: String) -> Dictionary:
 	var result: Dictionary = _get_palace_system().build_palace_structure(self, structure_id)
-	_capture_legacy_palace_state_to_campaign_state()
-	_capture_legacy_calendar_report_to_campaign_state()
 	_emit_state_changed_and_sync()
 	return result
 
@@ -1063,15 +1012,10 @@ func get_inactive_palace_structure_ids() -> Array[String]:
 	return _get_palace_system().get_inactive_palace_structure_ids(self)
 
 func _resolve_palace_structure_operation(pay_costs: bool) -> Dictionary:
-	var result: Dictionary = _get_palace_system().resolve_palace_structure_operation(self, pay_costs)
-	_mirror_palace_state_from_campaign_state_to_legacy()
-	_mirror_stockpile_compatibility_from_campaign_state()
-	return result
+	return _get_palace_system().resolve_palace_structure_operation(self, pay_costs)
 
 func _pay_palace_maintenance() -> void:
 	_get_palace_system().pay_palace_maintenance(self)
-	_mirror_palace_state_from_campaign_state_to_legacy()
-	_mirror_stockpile_compatibility_from_campaign_state()
 
 func get_palace_total_maintenance() -> Dictionary:
 	return _get_palace_system().get_palace_total_maintenance(self)
@@ -1213,7 +1157,6 @@ func get_player_prestige() -> float:
 func add_player_prestige(amount: float, source_id: String, detail: String, context: Dictionary = {}) -> Dictionary:
 	var runtime_state: CampaignState = _get_campaign_state()
 	var result: Dictionary = runtime_state.add_player_prestige_record(amount, source_id, detail, context, get_current_veintena())
-	_mirror_prestige_compatibility_from_campaign_state()
 	return result
 
 func get_savvy_trade_prestige_scale() -> float:
@@ -1277,13 +1220,11 @@ func get_rival_prestige() -> Dictionary:
 	var runtime_state: CampaignState = _get_campaign_state()
 	if runtime_state.rival_prestige.is_empty():
 		runtime_state.set_rival_prestige_values(_default_rival_prestige_values())
-		_mirror_prestige_compatibility_from_campaign_state()
 	return runtime_state.get_rival_prestige_copy()
 
 func set_rival_prestige(house_id: String, value: float) -> Dictionary:
 	var runtime_state: CampaignState = _get_campaign_state()
 	var result: Dictionary = runtime_state.set_rival_prestige_value(house_id, value)
-	_mirror_prestige_compatibility_from_campaign_state()
 	_emit_state_changed_and_sync()
 	return result
 
@@ -1316,7 +1257,6 @@ func sacrifice_for_prestige(sacrifice_id: String, amount: int = 1, god_id: Strin
 	if bool(result.get("ok", false)) and result.has("record") and result["record"] is Dictionary:
 		var runtime_state: CampaignState = _get_campaign_state()
 		runtime_state.append_sacrifice_prestige_record(result["record"] as Dictionary)
-		_mirror_prestige_compatibility_from_campaign_state()
 	return result
 
 func get_sacrifice_prestige_records() -> Array[Dictionary]:
@@ -1339,8 +1279,6 @@ func can_donate_palace_need(slot_id: String, amount: float) -> Dictionary:
 
 func donate_palace_need(slot_id: String, amount: float) -> Dictionary:
 	var result: Dictionary = _get_palace_system().donate_palace_need(self, slot_id, amount)
-	_capture_legacy_palace_state_to_campaign_state()
-	_capture_legacy_calendar_report_to_campaign_state()
 	_emit_state_changed_and_sync()
 	return result
 
@@ -1352,8 +1290,6 @@ func can_deliver_palace_ruler_demand(slot_id: String) -> Dictionary:
 
 func deliver_palace_ruler_demand(slot_id: String) -> Dictionary:
 	var result: Dictionary = _get_palace_system().deliver_palace_ruler_demand(self, slot_id)
-	_capture_legacy_palace_state_to_campaign_state()
-	_capture_legacy_calendar_report_to_campaign_state()
 	_emit_state_changed_and_sync()
 	return result
 
@@ -1441,7 +1377,6 @@ func _archive_flower_war_report(report: Dictionary) -> void:
 	stored["archive_veintena"] = get_current_veintena()
 	stored["archive_title"] = _flower_war_archive_title(stored)
 	runtime_state.append_flower_war_report_archive(stored, 20)
-	_mirror_warband_flower_war_compatibility_from_campaign_state()
 
 func _flower_war_archive_title(report: Dictionary) -> String:
 	var direction: String = String(report.get("war_direction", "attack"))
