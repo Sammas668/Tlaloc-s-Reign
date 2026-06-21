@@ -2,7 +2,7 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/CampaignBridgeSystem.gd
 #
-# Patch 8K2 — CampaignState bridge cleanup.
+# CampaignState bridge.
 #
 # Owns TRGameState <-> CampaignState bridging while CampaignState becomes the
 # authoritative live/save-state owner. TRGameState remains the public runtime

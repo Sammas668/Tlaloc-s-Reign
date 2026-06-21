@@ -5,8 +5,8 @@
 # Shared lightweight context object for extracted screen controllers.
 # It replaces long parameter lists and makes controller dependencies explicit.
 # This object is UI-facing only: it should not own gameplay rules or live
-# campaign state. Patch 8H routes religion through CampaignState rather than
-# storing religion state on the UI controller.
+# campaign state. Religion state is routed through CampaignState rather than
+# stored on UI controllers.
 class_name UIScreenContext
 extends RefCounted
 
@@ -36,7 +36,7 @@ func state() -> Node:
 	return null
 
 func religion_state_system() -> RefCounted:
-	# Patch 8H: prefer a runtime/CampaignState-backed religion system. Runtime
+	# Prefer a runtime/CampaignState-backed religion system. Runtime
 	# metadata is kept only as a last-resort fallback for older local files.
 	var runtime_state: Node = state()
 	if runtime_state != null:

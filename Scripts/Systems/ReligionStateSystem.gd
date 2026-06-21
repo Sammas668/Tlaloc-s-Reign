@@ -2,7 +2,7 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/ReligionStateSystem.gd
 #
-# Patch 8H — CampaignState-backed religion state.
+# CampaignState-backed religion state.
 #
 # Owns mutable Prototype 0 religion state while persisting that state through
 # CampaignState.religion_state. Shrine UI reads and mutates this system through

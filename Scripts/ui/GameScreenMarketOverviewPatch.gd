@@ -6,9 +6,9 @@
 # Keeps the current GameScreen implementation intact while routing major screen
 # responsibilities to extracted controllers/widgets.
 #
-# Patch 8K2: this file should contain routing/compatibility bridges only.
+# This file should contain routing and compatibility bridges only.
 # Market, Palace, Barracks, Shrine, Flower War widgets, doctrine rules,
-# religion state and turn resolution all live outside this wrapper.
+# religion state and turn resolution live outside this wrapper.
 #
 # -----------------------------------------------------------------------------
 # ACTIVE WRAPPER BOUNDARY

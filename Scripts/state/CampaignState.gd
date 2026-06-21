@@ -2,15 +2,13 @@
 # Godot 4.x
 # Project path: res://Scripts/state/CampaignState.gd
 #
-# Patch 8E — CampaignState scaffold.
-#
-# CampaignState is the future owner of live campaign/save data.
+# CampaignState is the live campaign/save-data owner.
 # It intentionally contains state containers, data-shaping helpers, start-state
 # loading and save/load helpers, but not gameplay rules.
 #
-# TRGameState remains the public runtime facade during the migration. Systems
-# should increasingly read/write through this object while UI continues to call
-# TRGameState public methods.
+# TRGameState remains the public runtime facade. Systems should read/write live
+# campaign data through this object or through explicit CampaignState bridges,
+# while UI continues to call TRGameState public methods.
 
 class_name CampaignState
 extends RefCounted
@@ -68,7 +66,7 @@ var rival_prestige: Dictionary = {}
 var prestige_history: Array[Dictionary] = []
 var sacrifice_prestige_records: Array[Dictionary] = []
 
-# Patch 8H: serialisable religion-state container.
+# Serialisable religion-state container.
 # ReligionStateSystem instances bind to this dictionary and write back after
 # mutation. This is now the save/load-facing home for shrine levels, divine
 # favour, ritual capacity and recent offering reports.
@@ -83,7 +81,7 @@ var last_flower_war_report: Dictionary = {}
 var flower_war_report_archive: Array[Dictionary] = []
 var warbands: Dictionary = {}
 
-# Patch 8E scaffold: future Rival Prototype 1 containers.
+# Rival Prototype 1 scaffold containers.
 var rival_houses: Dictionary = {}
 var rival_stockpiles: Dictionary = {}
 var rival_build_progress: Dictionary = {}

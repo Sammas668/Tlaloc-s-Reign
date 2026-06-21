@@ -2,7 +2,7 @@
 # Godot 4.x
 # Project path: res://Scripts/ui/GameScreenStateDriven.gd
 #
-# PATCH 8K2 — LEGACY / INACTIVE SCREEN WRAPPER.
+# LEGACY / INACTIVE SCREEN WRAPPER.
 #
 # This file is not the active gameplay screen for Prototype 0.
 # The active screen path is:

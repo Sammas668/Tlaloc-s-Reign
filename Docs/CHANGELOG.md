@@ -1,263 +1,256 @@
 # Tlaloc's Reign — Changelog
 
-This changelog records implementation milestones for the playable Godot prototype.
+This changelog records implementation milestones for the Godot Prototype 0 project.
 
-The project is still in Prototype 0. Version numbers and patch numbers here are development checkpoints, not public release versions.
+---
 
-## Patch 8A / v0.47.5 — Architecture Truth Pass
+## Patch 8L / v0.48.0 — Documentation Refresh / Clean Architecture Baseline
 
 Status: current baseline.
 
 ### Added
 
-- Added `Docs/Architecture/Clean_Architecture_Baseline.md`.
-- Recorded the current extracted UI architecture:
-  - `Scripts/ui/screens/PalaceScreenController.gd`
-  - `Scripts/ui/screens/BarracksScreenController.gd`
-  - `Scripts/ui/screens/ShrineScreenController.gd`
-  - `Scripts/ui/widgets/FlowerWarEventOverlay.gd`
-  - `Scripts/ui/widgets/WarbandSkillWebCanvas.gd`
-  - `Scripts/ui/widgets/CalendarPacingController.gd`
-- Recorded extracted rule/presentation/state helpers:
-  - `Scripts/Systems/MarketPricingRules.gd`
-  - `Scripts/Systems/ShrineRitualRules.gd`
-  - `Scripts/Systems/ReligionStateSystem.gd`
-  - `Scripts/Systems/PalacePresentationRules.gd`
-- Recorded the next architecture-cleanup sequence:
-  - shared doctrine rules
-  - UI screen context
-  - religion runtime ownership
-  - CampaignState scaffold
-  - turn/calendar ownership cleanup
-  - controller/dead-code audit
+- Updated final clean architecture baseline documentation after the full Patch 8A–8K2 cleanup sequence.
+- Recorded the final current architecture:
+  - `TRGameState` = public runtime facade
+  - `CampaignState` = live/save-state owner
+  - `GameState` = legacy shim, not active autoload
+  - `GameScreenMarketOverviewPatch` = UI coordinator
+  - `TurnResolutionSystem` = turn owner
+  - `ReligionStateSystem` = CampaignState-backed religion state
+  - `WarDoctrineRules` = doctrine source of truth
+  - `MarketScreenController`, `PalaceScreenController`, `BarracksScreenController`, `ShrineScreenController` = extracted screen controllers
 
 ### Changed
 
-- Updated `CURRENT_BASELINE.md` so the project is no longer described as v0.42.
-- Updated `ROADMAP.md` so the next work is architecture stabilisation before more gameplay.
-- Reframed `GameScreenMarketOverviewPatch.gd` as an active coordinator/wrapper, not a place for new gameplay rules.
-- Clarified that `TRGameState.gd` is the active runtime facade.
-- Clarified that `GameState.gd` is the legacy / older state path.
-- Clarified that religion live state has been extracted from the wrapper but still needs runtime ownership cleanup.
-- Confirmed Otomi doctrine baseline as 0.8 offence / 1.5 defence.
-- Confirmed market scarcity floor baseline as 0.50.
+- Updated `Docs/CURRENT_BASELINE.md`.
+- Updated `Docs/ROADMAP.md`.
+- Updated `Docs/Architecture/Clean_Architecture_Baseline.md`.
+- Updated this changelog to reflect the full architecture stabilisation sequence.
+- Reframed next development as Patch 9: Structured Veintena Results Summary.
 
 ### Notes
 
-- This is a documentation / source-of-truth patch only.
-- No gameplay balance or runtime behaviour should change from this patch.
-- The next code patch should be Patch 8B: shared `WarDoctrineRules.gd`.
+- Documentation-only patch.
+- No runtime behaviour changes.
+- Architecture is now considered clean enough to resume gameplay development.
 
-## Patch 7E — Shrine UI Extraction
+---
 
-Status: implemented locally / architecture baseline recorded.
+## Patch 8K2 — Architecture Cleanup Completion
 
-### Added
-
-- Added `Scripts/ui/screens/ShrineScreenController.gd`.
+Status: completed.
 
 ### Changed
 
-- Moved Shrine / Religion UI composition out of `GameScreenMarketOverviewPatch.gd`.
-- Kept shrine art routing in the wrapper because it is tied to the main screen background system.
-- Kept `ShrineRitualRules.gd` as the static rule/balance source.
-- Kept `ReligionStateSystem.gd` as the mutable Prototype 0 religion state holder.
+- Cleaned leftover wrapper references to extracted systems/widgets.
+- Cleaned stale wrapper header comments.
+- Marked Shrine UI favour-decay methods as legacy compatibility only.
+- Confirmed authoritative divine favour decay belongs in `TurnResolutionSystem`.
+- Updated stale `CampaignBridgeSystem` comments.
+- Stopped `MarketScreenController.gd` from calling the private `TradeBasketView._trade_pricing()` method.
+- Marked `GameScreenStateDriven.gd` as legacy / inactive.
 
-## Patch 7D — Religion State Extraction
+### Notes
 
-Status: implemented locally / architecture baseline recorded.
+- This patch completed the architecture cleanup started in Patch 8K.
 
-### Added
+---
 
-- Added `Scripts/Systems/ReligionStateSystem.gd`.
+## Patch 8K — Architecture Dead-Code and Duplicate-Constant Audit
 
-### Changed
-
-- Moved mutable religion state out of `GameScreenMarketOverviewPatch.gd`, including:
-  - divine favour
-  - shrine levels
-  - shrine upgrades
-  - ritual capacity used this Veintena
-  - recent ritual/offering report lines
-
-### Remaining
-
-- Runtime ownership still needs cleanup. The religion-state instance should be owned by `TRGameState` / future `CampaignState`, not by a UI screen controller.
-
-## Patch 7C — Barracks UI Extraction
-
-Status: implemented locally / architecture baseline recorded.
-
-### Added
-
-- Added `Scripts/ui/screens/BarracksScreenController.gd`.
+Status: completed / superseded by 8K2 completion.
 
 ### Changed
 
-- Moved Barracks / Warbands / Flower War bridge UI out of `GameScreenMarketOverviewPatch.gd`.
-- Kept Flower War event modal in `FlowerWarEventOverlay.gd`.
-- Kept Warband Skill Web canvas in `WarbandSkillWebCanvas.gd`.
+- Began cleanup of stale wrapper constants, preloads and comments.
+- Identified remaining cleanup targets completed in Patch 8K2.
+
+---
+
+## Patch 8J — Market Screen Controller Extraction
+
+Status: completed.
+
+### Added
+
+- Added `Scripts/ui/screens/MarketScreenController.gd`.
+
+### Changed
+
+- Moved market main-view routing into `MarketScreenController.gd`.
+- Moved Trade Basket wiring into `MarketScreenController.gd`.
+- Moved Savvy Trade Prestige preview UI into `MarketScreenController.gd`.
+- Kept `TradeBasketView.tscn` as the view component.
+- Kept market pricing, trade validation, trade application and Prestige rules in backend state/systems.
+
+---
+
+## Patch 8I — GameState Legacy Decision
+
+Status: completed.
+
+### Changed
+
+- Removed `GameState` from active autoloads.
+- Left `TRGameState` as the active runtime facade autoload.
+- Converted `Scripts/state/GameState.gd` into a legacy shim.
+- Updated main menu routing to prefer `TRGameState`.
+
+---
+
+## Patch 8H Hotfix — Religion Decay Turn Runtime
+
+Status: completed.
 
 ### Fixed
 
-- Hotfixed `FlowerWarEventOverlay.gd` so the Flower War event host can be an extracted controller object.
-- Confirmed Flower War event flow still works after extraction.
+- Restored divine favour decay after turn ownership moved out of the UI wrapper.
+- Ordinary Veintenas apply normal divine favour decay.
+- Nemontemi applies stronger end-year decay.
+- Ritual capacity resets after turn resolution.
+- Decay uses the CampaignState-backed religion state.
 
-## Patch 7B — Palace UI Extraction
+---
 
-Status: implemented locally / architecture baseline recorded.
+## Patch 8H — Religion State into CampaignState
+
+Status: completed.
+
+### Changed
+
+- Made `CampaignState.religion_state` the save/load-facing home for religion state.
+- Updated `ReligionStateSystem.gd` to bind to CampaignState.
+- Updated `UIScreenContext.gd` to prefer CampaignState-backed religion state.
+- Updated `ShrineScreenController.gd` so Shrine UI does not own live religion state.
+
+---
+
+## Patch 8G — CampaignState Authority Pass
+
+Status: completed.
+
+### Changed
+
+- Made CampaignState the authority for:
+  - `current_veintena`
+  - `calendar_period`
+  - `ritual_year`
+  - `last_report`
+  - `last_turn_summary`
+- Updated `CampaignBridgeSystem.gd` so calendar/report state is preserved from CampaignState rather than overwritten by TRGameState compatibility mirrors.
+- Updated turn/calendar UI reads to prefer CampaignState snapshots.
+
+---
+
+## Patch 8F — Turn / Calendar Ownership Cleanup
+
+Status: completed.
+
+### Changed
+
+- Removed wrapper-owned turn/calendar resolution.
+- Moved ordinary Veintena and Nemontemi resolution to `TurnResolutionSystem.gd`.
+- Advance button now delegates to runtime state.
+- Calendar widgets and Shrine festival focus read from runtime/CampaignState rather than wrapper-owned variables.
+
+---
+
+## Patch 8E — CampaignState Scaffold
+
+Status: completed.
 
 ### Added
 
-- Added `Scripts/ui/screens/PalaceScreenController.gd`.
+- Strengthened `Scripts/state/CampaignState.gd`.
 
 ### Changed
 
-- Moved Palace / Prestige / Divine Seat / Authority / Court Needs UI out of `GameScreenMarketOverviewPatch.gd`.
-- Kept `PalacePresentationRules.gd` as the stable presentation rule helper.
+- Added scaffold containers for:
+  - calendar period
+  - ritual year
+  - last turn summary
+  - religion state
+  - rival houses
+  - rival stockpiles
+  - rival build progress
+  - rival action history
 
-## Patch 7A — Otomi Doctrine Revert
+---
 
-Status: implemented locally / architecture baseline recorded.
+## Patch 8D — Religion Runtime Ownership
+
+Status: completed.
 
 ### Changed
 
-- Reverted Otomi to:
-  - offence 0.8
-  - defence 1.5
-- Confirmed Otomi is a defensive veteran doctrine that trades offence for survival.
+- Stopped Shrine UI from owning its own mutable religion-state instance.
+- Added runtime-owned religion-state access through `UIScreenContext`.
+- Kept metadata only as a temporary fallback.
 
-## Patch 6D — Palace Presentation Rules Extraction
+---
 
-Status: implemented locally / architecture baseline recorded.
+## Patch 8C — UI Screen Context
+
+Status: completed.
 
 ### Added
 
-- Added `Scripts/Systems/PalacePresentationRules.gd`.
+- Added `Scripts/ui/UIScreenContext.gd`.
 
 ### Changed
 
-- Moved stable palace / prestige presentation text, colours, glyphs and formatting helpers out of the active wrapper.
+- Updated Palace, Barracks and Shrine controllers to use shared context.
+- Reduced ad-hoc dependency passing.
 
-### Fixed
+---
 
-- Added explicit preload usage so `PalacePresentationRules` resolves at parse time.
+## Patch 8B — Shared War Doctrine Rules
 
-## Patch 6C — Shrine Ritual Rules Extraction
-
-Status: implemented locally / architecture baseline recorded.
+Status: completed.
 
 ### Added
 
-- Added `Scripts/Systems/ShrineRitualRules.gd`.
+- Added `Scripts/Systems/WarDoctrineRules.gd`.
 
 ### Changed
 
-- Moved shrine and ritual static data out of the wrapper.
+- Centralised doctrine values.
+- Confirmed Otomi as offence 0.8 / defence 1.5.
 
-## Patch 6B — Calendar Pacing Controller Extraction
+---
 
-Status: implemented locally / architecture baseline recorded.
+## Patch 8A — Architecture Truth Pass
+
+Status: completed.
 
 ### Added
 
-- Added `Scripts/ui/widgets/CalendarPacingController.gd`.
+- Added `Docs/Architecture/Clean_Architecture_Baseline.md`.
 
 ### Changed
 
-- Moved calendar strip / Veintena card helper logic out of the wrapper.
+- Updated baseline and roadmap so the repo no longer described itself as v0.42.
+- Recorded extracted controllers and the new architecture cleanup path.
 
-## Patch 6A — Flower War Event Extraction
+---
 
-Status: implemented locally / architecture baseline recorded.
+## Earlier architecture and gameplay patches
 
-### Added
+The earlier patch sequence established:
 
-- Added `Scripts/ui/widgets/FlowerWarEventOverlay.gd`.
+- Market scarcity floor at 0.50.
+- `TRGameState` runtime autoload stabilisation.
+- wrapper containment rules.
+- Warband Skill Web extraction.
+- Flower War event overlay extraction.
+- Calendar pacing controller extraction.
+- Shrine ritual rules extraction.
+- Palace presentation rules extraction.
+- Otomi doctrine correction/revert.
+- Palace UI extraction.
+- Barracks UI extraction.
+- Religion state extraction.
+- Shrine UI extraction.
 
-### Changed
-
-- Moved the Flower War event flow out of the wrapper.
-- Restored full-screen modal behaviour after layout hotfixes.
-
-## Patch 5 — Warband Skill Web Canvas Extraction
-
-Status: implemented locally / architecture baseline recorded.
-
-### Added
-
-- Added `Scripts/ui/widgets/WarbandSkillWebCanvas.gd`.
-
-### Changed
-
-- Moved Warband Skill Web canvas out of the wrapper.
-
-## Patch 4 — Wrapper Containment
-
-Status: implemented locally / architecture baseline recorded.
-
-### Changed
-
-- Added active wrapper boundary comments to `GameScreenMarketOverviewPatch.gd`.
-- Defined the rule that new gameplay logic belongs in `Scripts/Systems/`.
-- Defined the rule that new screen/widget UI belongs in `Scripts/ui/screens/` or `Scripts/ui/widgets/`.
-
-## Patch 3 — TRGameState Runtime Autoload Stabilisation
-
-Status: implemented locally / architecture baseline recorded.
-
-### Changed
-
-- Added `TRGameState` as an explicit autoload alongside legacy `GameState`.
-- Updated main-menu lookup so new-game reset prefers `TRGameState`.
-
-## Patch 2 — Otomi Doctrine Correction
-
-Status: superseded by Patch 7A.
-
-### Changed
-
-- Temporarily changed Otomi to 1.0 / 1.5 based on older baseline text.
-
-### Superseded
-
-- Patch 7A restores the intended doctrine identity: Otomi 0.8 / 1.5.
-
-## Patch 1 — Market Scarcity Floor Unification
-
-Status: implemented locally / architecture baseline recorded.
-
-### Added
-
-- Added `Scripts/Systems/MarketPricingRules.gd`.
-
-### Changed
-
-- Unified scarcity multiplier floor at 0.50.
-- Removed old 0.75 scarcity-floor behaviour from market-pricing paths.
-
-## v0.42 — Repository Baseline & Cleanup
-
-Status: historical baseline.
-
-### Added
-
-- Added `CURRENT_BASELINE.md`.
-- Added `ROADMAP.md`.
-- Recorded the current active gameplay scene path:
-  - `Scenes/Main/GameScreen.tscn`
-- Recorded the active gameplay wrapper at the time:
-  - `Scripts/ui/GameScreenMarketOverviewPatch.gd`
-- Recorded the practical runtime state source:
-  - `Scripts/Autoload/TRGameState.gd`
-- Recorded design guardrails:
-  - no abstract Wealth resource in MVP
-  - Prestige is score / public recognition only and is never spent
-  - Flower Wars should be capitalised as `Flower Wars`
-  - rival houses are War Rival, Cunning Rival and Diplomatic Rival
-  - the market does not replace estate stockpiles
-
-### Removed
-
-- Removed temporary Godot scene duplicate:
-  - `Scenes/Main/GameScreen.tscn2577238696.tmp`
+These are now absorbed into the Patch 8L clean architecture baseline.

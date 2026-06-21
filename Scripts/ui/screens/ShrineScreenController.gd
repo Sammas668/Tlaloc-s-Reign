@@ -6,7 +6,7 @@
 # GameScreenMarketOverviewPatch.gd remains the active screen coordinator.
 # This controller owns shrine main-view and shrine report-card composition, but
 # mutable religion state is now obtained from runtime/CampaignState via
-# UIScreenContext. Runtime metadata remains only as an old-file fallback.
+# UIScreenContext. Runtime metadata remains only as an compatibility fallback.
 extends RefCounted
 
 const SHRINE_RITUAL_RULES_SCRIPT: Script = preload("res://Scripts/Systems/ShrineRitualRules.gd")

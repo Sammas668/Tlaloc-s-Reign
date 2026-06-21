@@ -1,448 +1,348 @@
 # Tlaloc's Reign — Development Roadmap
 
 Last updated: 2026-06-21  
-Current milestone: Patch 8A / v0.47.5 — Architecture Stabilisation Baseline
+Current milestone: Patch 8L / v0.48.0 — Clean Architecture Baseline
 
-This roadmap defines the development order from the current Godot systems prototype toward Prototype 0 Vertical Slice. It is intended to keep future coding work focused, prevent scope drift, and stop old or removed mechanics from being accidentally reintroduced.
+This roadmap starts from the post-architecture-cleanup project state. The architecture stabilisation sequence from Patch 8A through Patch 8L is now considered complete enough to resume gameplay development.
 
-## 1. Current strategic read
+---
 
-Tlaloc's Reign is no longer just a screen mock-up. It is a systems prototype with:
+## 1. Completed architecture stabilisation
 
-- a live market and barter trade interface
-- estate and market stockpiles
-- building and production data
-- housing and labour systems
-- palace tabs and dedication-route hooks
-- prestige ledger and Palace -> Prestige tab
-- Flower Wars reports and prestige logic
-- warband roster / skill-web UI
-- shrine/religion UI and extracted religion state holder
-- rival identities and procurement design
-- a smaller active gameplay coordinator over the base game screen
-- extracted Palace, Barracks and Shrine screen controllers
+### Patch 8A — Architecture Truth Pass
 
-The main risk is no longer the old giant wrapper alone. The main risk is now state ownership, turn ownership, duplicated rules and documentation drift.
+Updated repo truth and created the clean architecture baseline documentation.
 
-## 2. Roadmap principles
+### Patch 8B — Shared War Doctrine Rules
 
-### Resolve architecture debt before adding more gameplay
+Created `WarDoctrineRules.gd` as the single source of truth for Flower War / Warband doctrine values.
 
-The project has enough systems that more features would now increase risk unless the structure is stabilised first.
+### Patch 8C — UI Screen Context
 
-### Build readability before more complexity
+Created `UIScreenContext.gd` so extracted screen controllers use a shared context rather than long ad-hoc parameter lists.
 
-The player must understand what changed, why it changed and what pressure is coming next.
+### Patch 8D — Religion Runtime Ownership
 
-### Keep systems connected
+Moved active religion-state access out of Shrine UI ownership and into runtime-backed access.
 
-Market, prestige, palace, Flower Wars, religion, rivals, population and estate development should not become separate test panels.
+### Patch 8E — CampaignState Scaffold
 
-### Avoid reviving removed mechanics
+Strengthened `CampaignState.gd` as the future live/save-state owner.
 
-Do not reintroduce:
+### Patch 8F — Turn / Calendar Ownership Cleanup
 
-- abstract Wealth as a normal MVP currency
-- generic local stability as an unfocused meter
-- old artisan/ritual rival identities
-- tactical battlefield combat
-- new gods beyond the four-god model
+Moved ordinary Veintena and Nemontemi resolution out of `GameScreenMarketOverviewPatch.gd` and into `TurnResolutionSystem.gd`.
 
-### Extract architecture gradually
+### Patch 8G — CampaignState Authority Pass
 
-Do not attempt a huge rewrite. Move ownership in narrow, testable patches.
+Made CampaignState authoritative for calendar/report state:
 
-## 3. Current structure after UI extraction
+- `current_veintena`
+- `calendar_period`
+- `ritual_year`
+- `last_report`
+- `last_turn_summary`
+
+### Patch 8H — Religion State into CampaignState
+
+Made `CampaignState.religion_state` the save/load-facing religion-state container.
+
+### Patch 8H Hotfix — Religion Decay Turn Runtime
+
+Restored divine favour decay from the new turn runtime path after turn ownership moved out of the UI.
+
+### Patch 8I — GameState Legacy Decision
+
+Removed `GameState` from active autoloads and marked `GameState.gd` as a legacy shim.
+
+### Patch 8J — Market Screen Controller Extraction
+
+Moved market UI, Trade Basket wiring and Savvy Trade Prestige preview into `MarketScreenController.gd`.
+
+### Patch 8K — Architecture Dead-Code Audit
+
+Started cleanup of stale wrapper code and duplicate references.
+
+### Patch 8K2 — Architecture Cleanup Completion
+
+Completed the cleanup:
+
+- wrapper preloads/constants cleaned
+- stale comments cleaned
+- Shrine UI decay methods marked legacy compatibility only
+- `CampaignBridgeSystem` comments updated
+- `MarketScreenController` stopped calling private Trade Basket methods
+- `GameScreenStateDriven.gd` marked legacy / inactive
+
+### Patch 8L — Documentation Refresh
+
+Current patch. Records the final clean baseline.
+
+---
+
+## 2. Current architecture summary
 
 ```text
-Scripts/ui/
-  GameScreen.gd
-  GameScreenMarketOverviewPatch.gd
-
-Scripts/ui/screens/
-  PalaceScreenController.gd
-  BarracksScreenController.gd
-  ShrineScreenController.gd
-
-Scripts/ui/widgets/
-  FlowerWarEventOverlay.gd
-  WarbandSkillWebCanvas.gd
-  CalendarPacingController.gd
-
-Scripts/Systems/
-  MarketPricingRules.gd
-  MarketTradeSystem.gd
-  MarketEconomySystem.gd
-  TurnResolutionSystem.gd
-  PrestigeSystem.gd
-  PalaceSystem.gd
-  PalacePresentationRules.gd
-  FlowerWarSystem.gd
-  WarbandSystem.gd
-  ReligionStateSystem.gd
-  ShrineRitualRules.gd
-  RivalSystem.gd
+UI screens/widgets
+  -> TRGameState public runtime facade
+    -> Systems
+      -> CampaignState live/save data
 ```
 
-`GameScreenMarketOverviewPatch.gd` should remain as a coordinator only. New screen-sized UI belongs in `Scripts/ui/screens/`. Reusable UI pieces belong in `Scripts/ui/widgets/`. Gameplay rules belong in `Scripts/Systems/`.
+Current ownership:
 
-## 4. Version roadmap overview
+| Area | Owner |
+|---|---|
+| Runtime facade | `TRGameState.gd` |
+| Live/save state | `CampaignState.gd` |
+| Legacy state shim | `GameState.gd` |
+| Active UI coordinator | `GameScreenMarketOverviewPatch.gd` |
+| Turn resolution | `TurnResolutionSystem.gd` |
+| Religion state | `ReligionStateSystem.gd`, backed by `CampaignState.religion_state` |
+| Doctrine values | `WarDoctrineRules.gd` |
+| Market UI | `MarketScreenController.gd` |
+| Palace UI | `PalaceScreenController.gd` |
+| Barracks / Warband UI | `BarracksScreenController.gd` |
+| Shrine UI | `ShrineScreenController.gd` |
 
-| Version / Patch | Milestone | Main goal |
+---
+
+## 3. Roadmap principles from here
+
+### Build on the clean structure
+
+New systems should follow the current dependency direction:
+
+```text
+UI -> TRGameState -> Systems -> CampaignState
+```
+
+### Do not add gameplay rules to the wrapper
+
+`GameScreenMarketOverviewPatch.gd` is a coordinator only.
+
+### Make turn outcomes readable
+
+The next gameplay objective is not more systems depth. It is showing clearly what happened each Veintena.
+
+### Keep Prototype 0 narrow
+
+Do not attempt full game AI, full event libraries or deep save/load polish until the first Ritual Year loop is readable and playable.
+
+---
+
+## 4. Next development sequence
+
+| Patch | Milestone | Main goal |
 |---|---|---|
-| v0.42 | Repository Baseline & Cleanup | Historical baseline; superseded by current architecture patches. |
-| v0.43 | Early extraction / Turn Summary target | Historical/partial; Structured Veintena Summary still remains a future target. |
-| v0.44 | Rival Prototype target | Still future gameplay target. |
-| v0.45 | Palace / Flower War / Warband extraction period | Partially implemented across later patches. |
-| v0.46 | Screen extraction / UI stabilisation period | Partially implemented. |
-| v0.47.5 / Patch 8A | Architecture Stabilisation Baseline | Current truth pass and cleanup plan. |
-| Patch 8B | Shared Doctrine Rules | Create one doctrine source of truth. |
-| Patch 8C | UI Screen Context | Reduce host-coupled controller bridges. |
-| Patch 8D | Religion Runtime Ownership | Move religion state ownership out of UI controller territory. |
-| Patch 8E | CampaignState Scaffold | Begin proper live campaign state ownership. |
-| Patch 8F | Turn / Calendar Ownership | Move turn and calendar resolution out of UI wrapper. |
-| Patch 8G | Controller Audit / Dead-Code Cleanup | Clean leftovers after architecture migration. |
-| Patch 9 | Structured Veintena Results Summary | Explain end-turn changes clearly. |
-| Patch 10 | Rival Prototype 1 | Make rivals visible economic competitors. |
-| Patch 11 | Warband Progression Connection | Connect XP, injuries and skill web effects to outcomes. |
-| Patch 12 | Religion Loop Consolidation | Make offerings, favour and shrine upkeep a real loop. |
-| Patch 13 | One Full Ritual Year Playable | Play 18 Veintenas + Nemontemi coherently. |
-| Patch 14 | Balance and Readability Pass | Tune economy, prestige, rivals and UI feedback. |
-| Patch 15 | Prototype 0 Vertical Slice | Deliver a coherent playable prototype year. |
+| Patch 9 | Structured Veintena Results Summary | Display turn summary sections clearly after each Veintena. |
+| Patch 10 | Rival Prototype 1 | Make rivals visible economic actors with stockpiles, procurement caps and simple reports. |
+| Patch 11 | Warband Progression Connection | Connect XP, injuries and skill web effects more fully to Flower War outcomes. |
+| Patch 12 | Religion Loop Consolidation | Make offerings, favour decay, shrine upgrades and festival pressure feel like a real recurring loop. |
+| Patch 13 | Palace / Recognition Loop Pass | Make palace route, ruler demands and recognition pressure clearer across the year. |
+| Patch 14 | First Full Ritual Year Playtest | Ensure 18 Veintenas + Nemontemi can be played coherently. |
+| Patch 15 | Balance and Readability Pass | Tune economy, Prestige, war, religion and rivals after the year loop is visible. |
+| Patch 16 | Prototype 0 Vertical Slice | Package a coherent one-year playable prototype. |
 
-## 5. Patch 8A — Architecture Truth Pass
+---
+
+## 5. Patch 9 — Structured Veintena Results Summary
 
 ### Goal
 
-Update the repo truth before more code is added.
+Turn resolution already creates `last_turn_summary`. Patch 9 should make that summary visible and useful.
 
-### Status
+### Required UI
 
-Current patch.
-
-### Deliverables
-
-- Update `Docs/CURRENT_BASELINE.md`.
-- Update `Docs/ROADMAP.md`.
-- Update `Docs/CHANGELOG.md`.
-- Add `Docs/Architecture/Clean_Architecture_Baseline.md`.
-
-### Records
-
-- Current milestone is no longer v0.42.
-- Wrapper is now coordinator-only in intent.
-- Palace/Barracks/Shrine controllers exist.
-- Religion live state has been extracted but still needs runtime ownership cleanup.
-- `TRGameState` is the current runtime facade.
-- `GameState` is the legacy/older path.
-- Next architecture targets are CampaignState, turn ownership, shared doctrine rules and controller context.
-
-## 6. Patch 8B — Shared Doctrine Rules
-
-### Goal
-
-Stop Flower War doctrine stats from drifting between systems.
-
-### Required work
-
-Create:
+Create a reusable panel or modal such as:
 
 ```text
-Scripts/Systems/WarDoctrineRules.gd
+Scripts/ui/widgets/VeintenaResultsSummaryPanel.gd
 ```
 
-Move doctrine definitions there:
-
-| Doctrine | Offence | Defence | Main identity |
-|---|---:|---:|---|
-| Unspecialised | 1.0 | 1.0 | Baseline |
-| Eagle | 1.0 | 1.2 | Captives / capture reliability |
-| Jaguar | 1.3 | 1.0 | Prestige / shock power |
-| Otomi | 0.8 | 1.5 | Survival / defensive veterans |
-| Coyote | 1.4 | 0.5 | Loot / risky aggression |
-
-Then `FlowerWarSystem.gd`, `WarbandSystem.gd`, and any UI fallback should read from the same rules file.
-
-### Success criteria
-
-- There is one source of truth for doctrine values.
-- Search for duplicate doctrine dictionaries does not reveal separate combat values.
-- Otomi remains 0.8 / 1.5.
-
-## 7. Patch 8C — UI Screen Context
-
-### Goal
-
-Reduce host-coupled controller bridges.
-
-### Required work
-
-Create:
-
-```text
-Scripts/ui/UIScreenContext.gd
-```
-
-It should carry common screen dependencies:
-
-- host
-- state access
-- content root
-- content text
-- dynamic view host
-- notification list
-- refresh callbacks
-- shared formatting access where needed
-
-Then gradually update `PalaceScreenController.gd`, `BarracksScreenController.gd` and `ShrineScreenController.gd` to accept a context object.
-
-### Success criteria
-
-- Controllers no longer need long parameter lists.
-- Controllers are still lightweight and testable.
-- No gameplay rule logic moves into UI context.
-
-## 8. Patch 8D — Religion Runtime Ownership
-
-### Goal
-
-Move religion state ownership out of UI controller territory.
-
-### Required work
-
-`ReligionStateSystem.gd` should be owned by runtime state through `TRGameState` for now, and later by `CampaignState`.
-
-The Shrine screen should call public runtime methods such as:
-
-- get religion summary
-- perform ritual
-- upgrade shrine
-- sacrifice for prestige
-- apply favour decay
-- reset ritual capacity
-
-### Success criteria
-
-- `ShrineScreenController.gd` does not own the religion-state instance.
-- Religion state survives screen changes reliably.
-- Religion is ready for save/load inclusion later.
-
-## 9. Patch 8E — CampaignState Scaffold
-
-### Goal
-
-Begin separating live campaign data from `TRGameState`.
-
-### Required work
-
-Create or strengthen:
-
-```text
-Scripts/State/CampaignState.gd
-```
-
-Initial containers:
-
-- calendar
-- stockpiles
-- population
-- buildings
-- housing
-- market
-- palace
-- prestige
-- religion
-- warbands
-- rivals
-- last_report
-- last_turn_summary
-
-### Success criteria
-
-- `TRGameState` can keep acting as public facade.
-- Campaign data has a clear destination.
-- No massive data migration is attempted in one patch.
-
-## 10. Patch 8F — Turn / Calendar Ownership
-
-### Goal
-
-Move calendar and turn resolution out of `GameScreenMarketOverviewPatch.gd`.
-
-### Required direction
-
-```text
-Advance button
-  -> TRGameState.advance_turn()
-    -> TurnResolutionSystem
-      -> CampaignState / systems
-```
-
-The UI should display results, not own the turn.
-
-### Success criteria
-
-- `_calendar_period`, `_ritual_year`, `_resolve_veintena` and `_resolve_nemontemi` no longer live as wrapper-owned gameplay state.
-- `last_report` still works.
-- Structured `last_turn_summary` is now possible cleanly.
-
-## 11. Patch 8G — Controller Audit and Dead-Code Cleanup
-
-### Goal
-
-Finish the architecture-stabilisation pass.
-
-### Required work
-
-- Remove stale comments.
-- Remove unused wrapper methods.
-- Remove duplicate constants.
-- Check all extracted controllers compile.
-- Check no screen controller owns gameplay state.
-- Check no system depends on UI nodes.
-- Check wrapper is only a coordinator.
-
-### Success criteria
-
-The project has a clean enough architecture baseline to continue gameplay implementation.
-
-## 12. Patch 9 — Structured Veintena Results Summary
-
-### Goal
-
-After the player advances a Veintena, show a readable report explaining what changed and why.
+It should appear after advancing a Veintena and show clear sections.
 
 ### Required sections
 
-- Production
-- Upkeep
-- Buildings
-- Market
+- Calendar
+- Population Upkeep
+- Housing Maintenance
+- Palace Maintenance
+- Building Operations
+- Warband Recovery
 - Religion
-- Palace
-- Prestige
-- Rivals
+- Stockpile Changes
+- Court Needs
 - Warnings
+- Next Veintena / Nemontemi
 
 ### Success criteria
 
-- The player sees a summary after advancing a Veintena.
-- Prestige gains/losses are explained.
-- Major stockpile changes are explained.
-- Blocked buildings or failed upkeep are visible.
-- Rival movement can be added without rebuilding the UI.
+- The player knows what changed.
+- The player knows why it changed.
+- Divine favour decay is visible.
+- Stockpile changes are readable.
+- Upkeep and production are understandable.
+- The summary can accept rival reports later without redesign.
 
-## 13. Patch 10 — Rival Prototype 1
+---
+
+## 6. Patch 10 — Rival Prototype 1
 
 ### Goal
 
-Make the three rival houses visible economic actors.
+Make rivals visible economic competitors rather than decorative score entries.
 
 ### Required mechanics
 
 - Rival stockpiles.
-- Fixed build orders.
+- Fixed first-year build orders.
 - Procurement caps.
 - Personality hoards.
 - True-surplus selling.
-- Minor support steps when blocked.
-- Rival prestige changes with readable reasons.
-- Rival reports in Veintena Summary.
+- Simple blocked-build fallback behaviour.
+- Rival Prestige movement.
+- Rival action lines in Veintena Results Summary.
 
-## 14. Patch 11 — Warband Progression Connection
+### Rival identities
+
+| Rival | Build direction |
+|---|---|
+| War Rival | Weapon Yard -> Warrior House -> Captive Holding Pen -> Huitzilopochtli support |
+| Cunning Rival | Storehouse / Market Storage -> Tool Workshop -> Cloth Workshop -> Cacao access |
+| Diplomatic Rival | Fine Textile House -> Noble Residence -> Cacao expansion -> Quetzalcoatl support |
+
+---
+
+## 7. Patch 11 — Warband Progression Connection
 
 ### Goal
 
-Make persistent warbands matter mechanically and emotionally.
+Make persistent warbands matter.
 
 ### Required work
 
-- Warband XP gain after Flower Wars.
+- XP gain after Flower Wars.
 - Rank thresholds.
-- Injury and recovery logic.
-- Skill web node effects applied to combat/rewards.
-- Veteran value.
-- Loss reports that make warrior death/injury meaningful.
-- Replacement warriors and recovery pressure.
+- Injury and recovery pressure.
+- Skill web node effects affecting combat or rewards.
+- Better loss reports.
+- Clear veteran value.
 
-## 15. Patch 12 — Religion / Shrine Loop Consolidation
+### Success criteria
+
+- The Warband Skill Web is not just UI.
+- Injuries and deaths matter emotionally and strategically.
+- Doctrine identity remains clear.
+- Effects still use `WarDoctrineRules.gd` for baseline values.
+
+---
+
+## 8. Patch 12 — Religion Loop Consolidation
 
 ### Goal
 
-Make offerings, favour and shrine upkeep into a real recurring loop.
+Make religion a recurring strategic loop rather than a static shrine panel.
 
 ### Required work
 
-- Clear favour display per god.
-- Predictable favour decay.
-- Shrine upgrades modifying favour decay/output.
-- Major ritual choice per relevant Veintena.
-- Sacrifice UI polish.
-- Ritual prestige/favour reporting.
-- Religion entries in Veintena Summary.
+- Clear favour decay reporting.
+- Ritual capacity reporting.
+- Shrine upgrade effects visible.
+- Festival relevance by Veintena.
+- Offering trade-offs.
+- Sacrifice consequences.
+- Religion entries in Veintena Results Summary.
 
-## 16. Patch 13 — One Full Ritual Year Playable
+### Success criteria
+
+- The player understands which god is being neglected.
+- Upgrades visibly reduce pressure or improve capacity.
+- Ritual choices compete with economy, palace and war needs.
+
+---
+
+## 9. Patch 13 — Palace / Recognition Loop Pass
 
 ### Goal
 
-Make 18 Veintenas and Nemontemi playable from start to finish.
+Make the palace path and recognition race more legible.
 
 ### Required work
 
-- Turn loop runs reliably for a full year.
-- At least one palace demand cycle.
-- At least one Flower War opportunity.
-- Rival movement across the year.
-- Prestige race updates.
-- Nemontemi annual review.
-- Carry-forward pressure into next year.
+- Improve ruler/court-need reporting.
+- Show delivery value and Prestige consequences clearly.
+- Show Palace route authority effects more concretely.
+- Improve route-power feedback for the four gods.
+- Prepare for Level 4 palace victory requirement later.
 
-## 17. Patch 14 — Balance and Readability Pass
+---
+
+## 10. Patch 14 — First Full Ritual Year Playtest
 
 ### Goal
 
-Tune the first-year economy, prestige and pressure after the main loop is visible.
+Make one full Ritual Year playable from Veintena 1 through Nemontemi.
 
-### Required tests
+### Required checks
 
-- Can the player pursue a war route in Year 1?
-- Can the player pursue a palace/diplomatic route in Year 1?
-- Can the player pursue a religion/shrine route in Year 1?
+- Turn loop remains stable for 18 Veintenas.
+- Nemontemi transitions correctly to next Ritual Year.
+- Divine favour decays every turn.
+- Stockpiles move logically.
+- Buildings operate or fail for readable reasons.
+- Palace demand pressure appears.
+- Rivals move enough to feel present.
+- Flower Wars remain optional but meaningful.
+
+---
+
+## 11. Patch 15 — Balance and Readability Pass
+
+### Goal
+
+Tune the first-year experience after the loop is visible.
+
+### Test questions
+
+- Can the player pursue a war route?
+- Can the player pursue a palace/diplomatic route?
+- Can the player pursue a shrine/religion route?
+- Does the economy punish bad planning without becoming opaque?
+- Do rivals pressure the market without overwhelming the player?
 - Is Savvy Trade useful but not dominant?
-- Do rivals pressure the market without making it unreadable?
-- Do shortages feel meaningful rather than random?
-- Are goods values and scarcity multipliers readable?
+- Are shortages visible before they become failures?
 
-## 18. Patch 15 — Prototype 0 Vertical Slice
+---
+
+## 12. Patch 16 — Prototype 0 Vertical Slice
 
 ### Goal
 
-Deliver a coherent playable prototype year.
+Package a coherent one-year playable prototype.
 
-### Prototype 0 should prove
+Prototype 0 should prove:
 
-- Estate production works.
-- Market trade matters.
-- Prestige is readable.
-- Palace route matters.
-- Rivals visibly compete.
-- Flower Wars are usable.
-- Religion creates real pressure.
-- Veintena results explain what happened.
-- The game feels like one connected noble-house strategy game, not separate test systems.
+- estate production works
+- stockpiles matter
+- market trade matters
+- Prestige is readable
+- Palace route matters
+- Flower Wars are usable
+- religion pressure matters
+- rivals visibly compete
+- Veintena summaries explain the game
 
-## 19. Post-vertical-slice direction
+---
 
-Only after the vertical slice should the project consider larger expansions such as:
+## 13. Later, not now
 
-- richer event libraries
-- deeper rival plots
-- fuller Tezcatlipoca sabotage
-- more palace demand variety
-- expanded shrine trees
-- deeper warband traits
-- richer art/audio polish
-- save/load hardening
+Do not prioritise these until after the vertical slice:
+
+- full save/load polish
+- large event libraries
+- deep AI rival decision trees
+- Tezcatlipoca sabotage system
+- major art/audio polish
 - tutorial/onboarding
-
-The priority before then is not more content. It is making the existing loop coherent, readable and playable.
+- multiple-year victory balance

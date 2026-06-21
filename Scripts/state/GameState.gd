@@ -2,7 +2,7 @@
 # Godot 4.x
 # Project path: res://Scripts/state/GameState.gd
 #
-# PATCH 8I — LEGACY ONLY.
+# LEGACY ONLY.
 #
 # This file is no longer an active autoload.
 # TRGameState is the Prototype 0 runtime facade.
@@ -11,9 +11,9 @@
 # Do not add new gameplay rules here.
 # Do not target this file in future Prototype 0 patches.
 #
-# The small forwarding helpers below exist only so any old scene/script that
-# accidentally instantiates this legacy node fails softly and redirects to
-# /root/TRGameState when possible.
+# The small forwarding helpers below exist only so legacy scenes/scripts that
+# accidentally instantiate this node fail softly and redirect to /root/TRGameState
+# when possible.
 
 extends Node
 

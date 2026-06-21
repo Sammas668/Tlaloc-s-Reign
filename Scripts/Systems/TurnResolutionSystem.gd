@@ -2,8 +2,8 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/TurnResolutionSystem.gd
 #
-# Patch 8G — CampaignState-authoritative turn/calendar runtime.
-# Patch 8H hotfix — divine favour decay now runs from turn runtime, not UI.
+# CampaignState-authoritative turn/calendar runtime.
+# Divine favour decay runs from turn runtime, not UI.
 # Owns the live Veintena / Nemontemi resolution order while CampaignState owns
 # current_veintena, calendar_period, ritual_year, last_report and
 # last_turn_summary. TRGameState remains the public facade and compatibility API.

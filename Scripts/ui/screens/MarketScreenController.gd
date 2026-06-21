@@ -2,7 +2,7 @@
 # Godot 4.x
 # Project path: res://Scripts/ui/screens/MarketScreenController.gd
 #
-# Patch 8J — extracted Market / Trade Basket screen controller.
+# Extracted Market / Trade Basket screen controller.
 #
 # Owns market main-view routing, Trade Basket wiring, Savvy Trade Prestige
 # preview UI, and market report-card composition that previously lived in
@@ -138,7 +138,7 @@ func _capture_trade_basket_savvy_preview() -> void:
 		var amount: float = float(plan[key_variant])
 		if absf(amount) <= 0.001:
 			continue
-		# Patch 8K2: do not call TradeBasketView private methods from this controller.
+		# Do not call TradeBasketView private methods from this controller.
 		# The preview only needs the public market-facing value for the selected good.
 		var average_value: float = _average_market_value_for_good(resource_id)
 		_last_trade_basket_savvy_lines.append({"resource_id": resource_id, "amount": amount, "average_unit_value": average_value})
