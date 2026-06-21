@@ -2,12 +2,13 @@
 # Godot 4.x
 # Project path: res://Scripts/ui/GameScreenMarketOverviewPatch.gd
 #
-# Thin drop-in wrapper over GameScreen.gd.
-# Keeps the current GameScreen implementation intact, while adding:
-# - Market screen routing through MarketScreenController.gd.
-# - Safe gameplay-led Ritual Calendar strip and Nemontemi pacing.
-# - Turn Resolution Pipeline v1 hooks.
-# - Religion / Shrine Upgrades v2 with tiered rituals, random favour rolls, no separate Offerings tab, and overview-only global favour/priest cards.
+# Active coordinator over GameScreen.gd.
+# Keeps the current GameScreen implementation intact while routing major screen
+# responsibilities to extracted controllers/widgets.
+#
+# Patch 8K2: this file should contain routing/compatibility bridges only.
+# Market, Palace, Barracks, Shrine, Flower War widgets, doctrine rules,
+# religion state and turn resolution all live outside this wrapper.
 #
 # -----------------------------------------------------------------------------
 # ACTIVE WRAPPER BOUNDARY
@@ -26,13 +27,9 @@
 # -----------------------------------------------------------------------------
 extends "res://Scripts/ui/GameScreen.gd"
 
-const WARBAND_SKILL_WEB_CANVAS_SCRIPT: Script = preload("res://Scripts/ui/widgets/WarbandSkillWebCanvas.gd")
-const FLOWER_WAR_EVENT_OVERLAY_SCRIPT: Script = preload("res://Scripts/ui/widgets/FlowerWarEventOverlay.gd")
 const CALENDAR_PACING_CONTROLLER_SCRIPT: Script = preload("res://Scripts/ui/widgets/CalendarPacingController.gd")
 const UI_SCREEN_CONTEXT_SCRIPT: Script = preload("res://Scripts/ui/UIScreenContext.gd")
 const MARKET_SCREEN_CONTROLLER_SCRIPT: Script = preload("res://Scripts/ui/screens/MarketScreenController.gd")
-const SHRINE_RITUAL_RULES_SCRIPT: Script = preload("res://Scripts/Systems/ShrineRitualRules.gd")
-const RELIGION_STATE_SYSTEM_SCRIPT: Script = preload("res://Scripts/Systems/ReligionStateSystem.gd")
 const SHRINE_SCREEN_CONTROLLER_SCRIPT: Script = preload("res://Scripts/ui/screens/ShrineScreenController.gd")
 const PalacePresentationRules: Script = preload("res://Scripts/Systems/PalacePresentationRules.gd")
 const BARRACKS_SCREEN_CONTROLLER_SCRIPT: Script = preload("res://Scripts/ui/screens/BarracksScreenController.gd")
@@ -47,19 +44,6 @@ const PALACE_SCREEN_CONTROLLER_SCRIPT: Script = preload("res://Scripts/ui/screen
 @export var shrine_offerings_art: Texture2D
 
 
-# Local UI colours for the religion/offering panels.
-# These are declared here instead of relying on inherited theme constants so the
-# wrapper compiles cleanly as a direct replacement patch.
-const COLOR_TEXT: Color = Color(0.92, 0.88, 0.78, 1.0)
-const COLOR_MUTED: Color = Color(0.70, 0.78, 0.74, 1.0)
-const COLOR_TEAL: Color = Color(0.50, 0.92, 0.84, 1.0)
-
-const RELIGION_STARTING_FAVOUR: float = 40.0
-const RELIGION_NORMAL_DECAY: float = 2.0
-const RELIGION_NEMONTEMI_DECAY: float = 4.0
-
-const GOD_IDS: Array[String] = ["tlaloc", "huitzilopochtli", "tezcatlipoca", "quetzalcoatl"]
-const OFFERING_RESOURCE_IDS: Array[String] = ["maize", "cacao", "ritual_goods", "fine_textiles", "captives"]
 
 var _optional_shrine_art_cache: Dictionary = {}
 
@@ -71,10 +55,6 @@ var _shrine_screen_controller: RefCounted = null
 var _barracks_screen_controller: RefCounted = null
 var _palace_screen_controller: RefCounted = null
 
-
-# Warband Skill Web canvas is now a standalone widget.
-# Gameplay rules still live in backend systems; this wrapper only instantiates
-# and wires the widget into the current Barracks screen.
 
 func _make_ui_screen_context() -> RefCounted:
 	var context: RefCounted = UI_SCREEN_CONTEXT_SCRIPT.new() as RefCounted
@@ -90,8 +70,8 @@ func _ready() -> void:
 	super._ready()
 
 func _add_barracks_warbands_focus() -> void:
-	# Warbands belong inside the Barracks bottom/focus row. This is display-only:
-	# it exposes the persistent roster backend without changing Flower War launch yet.
+	# Ensure the base screen profile exposes the extracted Barracks/Warbands screen.
+	# Warband behaviour itself lives in BarracksScreenController and WarbandSystem.
 	if not _screen_profiles.has("warriors"):
 		return
 	var profile: Dictionary = _screen_profiles["warriors"] as Dictionary
@@ -112,10 +92,8 @@ func _add_barracks_warbands_focus() -> void:
 	_screen_profiles["warriors"] = profile
 
 func _setup_palace_navigation_probe() -> void:
-	# Palace v0.22: Divine Seat visual + structure node data.
-	# Uses the existing base Palace button/profile, but the Divine Seat choice now
-	# lives in the big middle-left DynamicViewHost instead of being buried in the
-	# right-hand report list.
+	# Ensure the base screen profile exposes the extracted Palace controller tabs.
+	# Palace behaviour itself lives in PalaceScreenController / PalaceSystem.
 	var profile: Dictionary = {}
 	if _screen_profiles.has("palace"):
 		profile = (_screen_profiles["palace"] as Dictionary).duplicate(true)
@@ -284,7 +262,7 @@ func _refresh_main_content() -> void:
 	super._refresh_main_content()
 
 func _refresh_house_claim() -> void:
-	# v0.37.3: The persistent corner/claim panel belongs in the Palace area,
+	# The persistent corner/claim panel belongs in the Palace area,
 	# not on every screen. Estate Overview has its own compact Prestige summary
 	# in the normal report list.
 	if current_location_id != "palace":
@@ -423,9 +401,7 @@ func _report_title_for_current_focus(profile: Dictionary) -> String:
 
 
 # -----------------------------------------------------------------------------
-# Palace main-view content v0.24
-# -----------------------------------------------------------------------------
-# Palace main-view content v0.24
+# Palace UI bridge — extracted controller
 # -----------------------------------------------------------------------------
 
 func _palace_controller() -> RefCounted:
@@ -437,11 +413,12 @@ func _show_palace_content() -> void:
 	_palace_controller().call("show_palace_content_with_context", _make_ui_screen_context())
 
 # -----------------------------------------------------------------------------
-# Palace navigation probe v0.20.3
+# Palace report bridge
 # -----------------------------------------------------------------------------
 
 func _build_palace_navigation_probe_reports() -> void:
 	_palace_controller().call("build_palace_navigation_probe_reports_with_context", _make_ui_screen_context())
+
 # -----------------------------------------------------------------------------
 # Market / Trade Basket UI bridge — extracted controller
 # -----------------------------------------------------------------------------
@@ -481,12 +458,6 @@ func _show_shrine_content() -> void:
 func _build_shrine_reports() -> void:
 	_shrine_controller().call("build_reports_with_context", _make_ui_screen_context())
 
-func _apply_divine_favour_decay(report: Array, decay_amount: float = RELIGION_NORMAL_DECAY) -> void:
-	_shrine_controller().call("apply_divine_favour_decay_with_context", _make_ui_screen_context(), report, decay_amount)
-
-func _reset_religion_veintena_capacity() -> void:
-	_shrine_controller().call("reset_religion_veintena_capacity_with_context", _make_ui_screen_context())
-
 func _current_festival_god_id() -> String:
 	return String(_shrine_controller().call("current_festival_god_id_with_context", _make_ui_screen_context()))
 
@@ -497,21 +468,6 @@ func _format_religion_amount(value: float) -> String:
 	if is_equal_approx(value, roundf(value)):
 		return str(int(roundf(value)))
 	return "%.2f" % value
-
-func _resource_display_name(resource_id: String) -> String:
-	var state: Node = _state()
-	if state != null and state.has_method("get_resource_name"):
-		return String(state.call("get_resource_name", resource_id))
-	return resource_id.replace("_", " ").capitalize()
-
-func _format_cost(cost: Dictionary) -> String:
-	if cost.is_empty():
-		return "none"
-	var parts: Array[String] = []
-	for resource_variant: Variant in cost.keys():
-		var resource_id: String = String(resource_variant)
-		parts.append(_resource_display_name(resource_id) + " " + _format_religion_amount(float(cost[resource_variant])))
-	return ", ".join(parts)
 
 # -----------------------------------------------------------------------------
 # Barracks / Flower Wars UI bridge — extracted controller
@@ -589,7 +545,7 @@ func _on_calendar_card_pressed(report_id: String) -> void:
 	show_location("estate")
 
 func _build_estate_reports() -> void:
-	# v0.37.6: Estate report bar keeps clickable report cards, while Prestige
+	# Estate report bar keeps clickable report cards, while Prestige
 	# is shown as a fixed summary card at the bottom rather than a pop-out report.
 	super._build_estate_reports()
 	_add_estate_prestige_bottom_card()
@@ -869,7 +825,7 @@ func _build_nemontemi_report_text(year_value: int) -> String:
 
 # Turn Runtime Bridge
 # -----------------------------------------------------------------------------
-# Patch 8F: the UI no longer owns Veintena/Nemontemi resolution. The advance
+# The UI no longer owns Veintena/Nemontemi resolution. The advance
 # button delegates to the runtime state, which delegates to TurnResolutionSystem.
 
 func _on_advance_turn_pressed() -> void:

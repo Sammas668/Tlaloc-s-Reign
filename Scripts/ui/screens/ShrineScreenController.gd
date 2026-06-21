@@ -17,9 +17,10 @@ const COLOR_TEXT: Color = Color(0.92, 0.88, 0.78, 1.0)
 const COLOR_MUTED: Color = Color(0.70, 0.78, 0.74, 1.0)
 const COLOR_TEAL: Color = Color(0.50, 0.92, 0.84, 1.0)
 
-const RELIGION_STARTING_FAVOUR: float = 40.0
-const RELIGION_NORMAL_DECAY: float = 2.0
-const RELIGION_NEMONTEMI_DECAY: float = 4.0
+# Display defaults only. Authoritative turn decay values live in TurnResolutionSystem.
+const RELIGION_DISPLAY_STARTING_FAVOUR: float = 40.0
+const RELIGION_DISPLAY_NORMAL_DECAY: float = 2.0
+const RELIGION_DISPLAY_NEMONTEMI_DECAY: float = 4.0
 const GOD_IDS: Array[String] = ["tlaloc", "huitzilopochtli", "tezcatlipoca", "quetzalcoatl"]
 
 var host: Node = null
@@ -48,11 +49,13 @@ func build_reports(host_node: Node) -> void:
 func reset_panel_selection() -> void:
 	_selected_shrine_panel_id = ""
 
-func apply_divine_favour_decay(host_node: Node, report: Array, decay_amount: float = RELIGION_NORMAL_DECAY) -> void:
+# Legacy compatibility bridge only. Normal turn decay now belongs to TurnResolutionSystem.
+func apply_divine_favour_decay(host_node: Node, report: Array, decay_amount: float = RELIGION_DISPLAY_NORMAL_DECAY) -> void:
 	host = host_node
 	_sync_calendar_from_host()
 	_apply_divine_favour_decay(report, decay_amount)
 
+# Legacy compatibility bridge only. TurnResolutionSystem resets ritual capacity after decay.
 func reset_religion_veintena_capacity(host_node: Node) -> void:
 	host = host_node
 	_reset_religion_veintena_capacity()
@@ -77,11 +80,13 @@ func build_reports_with_context(context: RefCounted) -> void:
 	_sync_calendar_from_host()
 	_build_shrine_reports()
 
-func apply_divine_favour_decay_with_context(context: RefCounted, report: Array, decay_amount: float = RELIGION_NORMAL_DECAY) -> void:
+# Legacy compatibility bridge only. Kept so older wrappers fail softly.
+func apply_divine_favour_decay_with_context(context: RefCounted, report: Array, decay_amount: float = RELIGION_DISPLAY_NORMAL_DECAY) -> void:
 	_apply_screen_context(context)
 	_sync_calendar_from_host()
 	_apply_divine_favour_decay(report, decay_amount)
 
+# Legacy compatibility bridge only. Kept so older wrappers fail softly.
 func reset_religion_veintena_capacity_with_context(context: RefCounted) -> void:
 	_apply_screen_context(context)
 	_reset_religion_veintena_capacity()
@@ -251,8 +256,8 @@ func _religion_favour(god_id: String) -> float:
 	_ensure_religion_state()
 	var system: RefCounted = _religion_state()
 	if system != null and system.has_method("favour"):
-		return float(system.call("favour", god_id, RELIGION_STARTING_FAVOUR))
-	return RELIGION_STARTING_FAVOUR
+		return float(system.call("favour", god_id, RELIGION_DISPLAY_STARTING_FAVOUR))
+	return RELIGION_DISPLAY_STARTING_FAVOUR
 
 func _set_religion_favour(god_id: String, value: float) -> void:
 	_ensure_religion_state()
@@ -1145,7 +1150,7 @@ func _build_single_god_favour_panel(parent: VBoxContainer, god_id: String) -> vo
 	parent.add_child(_religion_wrapped_label(_god_short_role(god_id), 19, _god_colour(god_id)))
 	_add_favour_bar(parent, god_id)
 	parent.add_child(_religion_wrapped_label("Current favour: " + _format_religion_amount(favour) + "/100 — " + _favour_band(favour) + ".", 20, COLOR_TEXT))
-	parent.add_child(_religion_wrapped_label("Normal decay next Veintena: -" + _format_religion_amount(_religion_decay_for_god(god_id, RELIGION_NORMAL_DECAY)) + ". Nemontemi decay: -" + _format_religion_amount(_religion_decay_for_god(god_id, RELIGION_NEMONTEMI_DECAY)) + ".", 18, COLOR_MUTED))
+	parent.add_child(_religion_wrapped_label("Normal decay next Veintena: -" + _format_religion_amount(_religion_decay_for_god(god_id, RELIGION_DISPLAY_NORMAL_DECAY)) + ". Nemontemi decay: -" + _format_religion_amount(_religion_decay_for_god(god_id, RELIGION_DISPLAY_NEMONTEMI_DECAY)) + ".", 18, COLOR_MUTED))
 	parent.add_child(_religion_wrapped_label("Active upgrades reduce decay and improve ritual rolls while enough priests are supported.", 18, COLOR_MUTED))
 
 func _build_priest_capacity_panel(parent: VBoxContainer) -> void:
@@ -1195,7 +1200,9 @@ func _build_god_boons_placeholder(parent: VBoxContainer, god_id: String) -> void
 	else:
 		parent.add_child(_religion_wrapped_label("Shrine Level 4 reached. This shrine is ready for future boon implementation.", 18, COLOR_TEAL))
 
-func _apply_divine_favour_decay(report: Array, decay_amount: float = RELIGION_NORMAL_DECAY) -> void:
+# Legacy decay implementation used only by the compatibility bridge above.
+# Authoritative turn decay lives in TurnResolutionSystem.
+func _apply_divine_favour_decay(report: Array, decay_amount: float = RELIGION_DISPLAY_NORMAL_DECAY) -> void:
 	_ensure_religion_state()
 	var parts: Array[String] = []
 	for god_id: String in GOD_IDS:
@@ -1214,6 +1221,7 @@ func _religion_decay_for_god(god_id: String, base_decay: float) -> float:
 			reduction += float(upgrade.get("decay_reduction", 0.0))
 	return maxf(0.0, base_decay - reduction)
 
+# Legacy reset implementation used only by the compatibility bridge above.
 func _reset_religion_veintena_capacity() -> void:
 	_ensure_religion_state()
 	var system: RefCounted = _religion_state()

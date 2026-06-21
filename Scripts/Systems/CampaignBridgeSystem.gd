@@ -2,11 +2,12 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/CampaignBridgeSystem.gd
 #
-# Patch 8H — CampaignState-backed religion bridge.
+# Patch 8K2 — CampaignState bridge cleanup.
 #
 # Owns TRGameState <-> CampaignState bridging while CampaignState becomes the
 # authoritative live/save-state owner. TRGameState remains the public runtime
-# facade for UI and systems; its legacy variables are compatibility mirrors. Religion state is now preserved as CampaignState-authoritative data.
+# facade for UI and systems; its legacy variables are compatibility mirrors.
+# Calendar/report state and religion state are CampaignState-authoritative.
 class_name CampaignBridgeSystem
 extends RefCounted
 
@@ -154,7 +155,7 @@ func mirror_calendar_report_compatibility_from_campaign_state(state: Node) -> vo
 	state.set("initialized", bool(runtime_state.get("initialized")))
 	# calendar_period / ritual_year / last_turn_summary may not exist as declared
 	# TRGameState properties in older local files, so metadata is the safe legacy
-	# mirror until Patch 8G/8H finalises direct public accessors.
+	# mirror as a compatibility mirror for older UI paths.
 	state.set_meta("calendar_period", period_value)
 	state.set_meta("ritual_year", ritual_year_value)
 	state.set_meta("last_turn_summary", summary_copy)

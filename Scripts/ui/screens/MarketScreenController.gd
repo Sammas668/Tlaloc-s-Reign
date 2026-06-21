@@ -138,25 +138,26 @@ func _capture_trade_basket_savvy_preview() -> void:
 		var amount: float = float(plan[key_variant])
 		if absf(amount) <= 0.001:
 			continue
-		var average_value: float = 0.0
-		if _active_trade_basket_view.has_method("_trade_pricing"):
-			var pricing_variant: Variant = _active_trade_basket_view.call("_trade_pricing", resource_id, amount)
-			if pricing_variant is Dictionary:
-				var pricing: Dictionary = pricing_variant as Dictionary
-				average_value = float(pricing.get("average_value", 0.0))
-		if average_value <= 0.001:
-			var state_for_base: Node = _state(_last_context)
-			if state_for_base != null and state_for_base.has_method("get_market_goods"):
-				for good_variant: Variant in (state_for_base.call("get_market_goods") as Array):
-					if good_variant is Dictionary and String((good_variant as Dictionary).get("id", "")) == resource_id:
-						average_value = float((good_variant as Dictionary).get("current_value", (good_variant as Dictionary).get("base_value", 1.0)))
-						break
+		# Patch 8K2: do not call TradeBasketView private methods from this controller.
+		# The preview only needs the public market-facing value for the selected good.
+		var average_value: float = _average_market_value_for_good(resource_id)
 		_last_trade_basket_savvy_lines.append({"resource_id": resource_id, "amount": amount, "average_unit_value": average_value})
 	var state: Node = _state(_last_context)
 	if state != null and state.has_method("get_savvy_trade_prestige_preview"):
 		var preview_variant: Variant = state.call("get_savvy_trade_prestige_preview", _last_trade_basket_savvy_lines)
 		if preview_variant is Dictionary:
 			_last_trade_basket_savvy_preview = preview_variant as Dictionary
+
+func _average_market_value_for_good(resource_id: String) -> float:
+	var state_for_base: Node = _state(_last_context)
+	if state_for_base != null and state_for_base.has_method("get_market_goods"):
+		var goods_raw: Variant = state_for_base.call("get_market_goods")
+		if goods_raw is Array:
+			for good_variant: Variant in goods_raw as Array:
+				if good_variant is Dictionary and String((good_variant as Dictionary).get("id", "")) == resource_id:
+					var good: Dictionary = good_variant as Dictionary
+					return maxf(0.0, float(good.get("current_value", good.get("base_value", 1.0))))
+	return 0.0
 
 func _trade_basket_summary_label() -> RichTextLabel:
 	if _active_trade_basket_view == null:
