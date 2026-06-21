@@ -128,22 +128,20 @@ func _apply_screen_context(context: RefCounted) -> void:
 func _sync_calendar_from_host() -> void:
 	var state: Node = _state()
 	if state != null:
-		# Patch 8G: CampaignState is the calendar authority. Prefer the
-		# TRGameState facade snapshot before temporary metadata mirrors.
+		# CampaignState is the calendar authority. Prefer the public facade,
+		# then CampaignState snapshot/runtime access. Do not fall back to
+		# TRGameState compatibility mirror fields.
+		if state.has_method("get_calendar_period"):
+			_calendar_period = String(state.call("get_calendar_period"))
+			return
 		if state.has_method("get_campaign_state_snapshot"):
 			var snapshot_raw: Variant = state.call("get_campaign_state_snapshot")
 			if snapshot_raw is RefCounted and (snapshot_raw as RefCounted).has_method("get_calendar_period_value"):
 				_calendar_period = String((snapshot_raw as RefCounted).call("get_calendar_period_value"))
 				return
-		if state.has_method("get_calendar_period"):
-			_calendar_period = String(state.call("get_calendar_period"))
-			return
-		if state.has_meta("calendar_period"):
-			_calendar_period = String(state.get_meta("calendar_period"))
-			return
-		var state_period: Variant = state.get("calendar_period")
-		if state_period != null:
-			_calendar_period = String(state_period)
+		var runtime_state: RefCounted = _campaign_state()
+		if runtime_state != null and runtime_state.has_method("get_calendar_period_value"):
+			_calendar_period = String(runtime_state.call("get_calendar_period_value"))
 			return
 	# Wrapper-owned _calendar_period was removed in Patch 8F. Keep no host fallback
 	# here so Shrine festival focus does not silently depend on UI-owned state.
@@ -154,6 +152,59 @@ func _state() -> Node:
 		if raw is Node:
 			return raw as Node
 	return null
+
+func _campaign_state() -> RefCounted:
+	var runtime_state: Node = _state()
+	if runtime_state != null:
+		if runtime_state.has_method("_get_campaign_state"):
+			var raw: Variant = runtime_state.call("_get_campaign_state")
+			if raw is RefCounted:
+				return raw as RefCounted
+		if runtime_state.has_method("get_campaign_state_snapshot"):
+			var snapshot_raw: Variant = runtime_state.call("get_campaign_state_snapshot")
+			if snapshot_raw is RefCounted:
+				return snapshot_raw as RefCounted
+	return null
+
+func _stock(resource_id: String) -> float:
+	var runtime_state: Node = _state()
+	if runtime_state != null and runtime_state.has_method("_stock"):
+		return maxf(0.0, float(runtime_state.call("_stock", resource_id)))
+	var campaign: RefCounted = _campaign_state()
+	if campaign != null and campaign.has_method("get_estate_stock"):
+		return maxf(0.0, float(campaign.call("get_estate_stock", resource_id)))
+	return 0.0
+
+func _add_stock(resource_id: String, amount: float) -> void:
+	var runtime_state: Node = _state()
+	if runtime_state != null and runtime_state.has_method("_add_stock"):
+		runtime_state.call("_add_stock", resource_id, amount)
+		return
+	var campaign: RefCounted = _campaign_state()
+	if campaign != null and campaign.has_method("add_estate_stock"):
+		campaign.call("add_estate_stock", resource_id, amount)
+		if runtime_state != null and runtime_state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
+			runtime_state.call("_mirror_stockpile_compatibility_from_campaign_state")
+
+func _active_population_for_group(group_id: String) -> int:
+	var runtime_state: Node = _state()
+	if runtime_state != null and runtime_state.has_method("_active_population_for_group"):
+		return int(runtime_state.call("_active_population_for_group", group_id))
+	var campaign: RefCounted = _campaign_state()
+	if campaign != null and campaign.has_method("get_population_count"):
+		return int(campaign.call("get_population_count", group_id))
+	return 0
+
+func _append_report_line(line: String) -> void:
+	var runtime_state: Node = _state()
+	if runtime_state != null and runtime_state.has_method("_append_report_line"):
+		runtime_state.call("_append_report_line", line)
+		return
+	var campaign: RefCounted = _campaign_state()
+	if campaign != null and campaign.has_method("append_report_line"):
+		campaign.call("append_report_line", line)
+		if runtime_state != null and runtime_state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
+			runtime_state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 
 func _current_focus_id() -> String:
 	if host != null and host.has_method("_current_focus_id"):
@@ -791,13 +842,7 @@ func _upgrade_shrine_level(god_id: String) -> void:
 		report_line += " Prestige +" + _format_religion_amount(prestige_gain) + "."
 	_clear_religion_offering_report()
 	_append_religion_offering_report(report_line)
-	var state: Node = _state()
-	if state != null:
-		var report_variant: Variant = state.get("last_report")
-		if report_variant is Array:
-			var report: Array = report_variant as Array
-			report.append(report_line)
-			state.set("last_report", report)
+	_append_report_line(report_line)
 	_emit_religion_state_changed()
 	_refresh_all()
 
@@ -921,13 +966,7 @@ func _perform_ritual(god_id: String, tier_id: String) -> void:
 		report_line += " Prestige +" + _format_religion_amount(prestige_gain) + "."
 	_clear_religion_offering_report()
 	_append_religion_offering_report(report_line)
-	var state: Node = _state()
-	if state != null:
-		var report_variant: Variant = state.get("last_report")
-		if report_variant is Array:
-			var report: Array = report_variant as Array
-			report.append(report_line)
-			state.set("last_report", report)
+	_append_report_line(report_line)
 	_emit_religion_state_changed()
 	_refresh_all()
 
@@ -940,17 +979,9 @@ func _can_pay_religion_cost(cost: Dictionary) -> Dictionary:
 	return {"ok": true, "reason": "Ready."}
 
 func _pay_religion_cost(cost: Dictionary) -> void:
-	var state: Node = _state()
-	if state == null:
-		return
-	var stock_variant: Variant = state.get("estate_stockpiles")
-	if not (stock_variant is Dictionary):
-		return
-	var stockpiles: Dictionary = stock_variant as Dictionary
 	for resource_variant: Variant in cost.keys():
 		var resource_id: String = String(resource_variant)
-		stockpiles[resource_id] = maxf(0.0, float(stockpiles.get(resource_id, 0.0)) - float(cost[resource_variant]))
-	state.set("estate_stockpiles", stockpiles)
+		_add_stock(resource_id, -float(cost[resource_variant]))
 
 func _format_cost(cost: Dictionary) -> String:
 	if cost.is_empty():
@@ -1230,15 +1261,9 @@ func _reset_religion_veintena_capacity() -> void:
 
 func _free_stock_for_offering(resource_id: String) -> float:
 	var state: Node = _state()
-	if state == null:
-		return 0.0
-	if state.has_method("free_stock_after_reserves"):
+	if state != null and state.has_method("free_stock_after_reserves"):
 		return maxf(0.0, float(state.call("free_stock_after_reserves", resource_id)))
-	var stock_variant: Variant = state.get("estate_stockpiles")
-	if stock_variant is Dictionary:
-		var stockpiles: Dictionary = stock_variant as Dictionary
-		return maxf(0.0, float(stockpiles.get(resource_id, 0.0)))
-	return 0.0
+	return _stock(resource_id)
 
 func _religion_priest_conversion_cap() -> float:
 	var priests: int = _religion_active_priest_count()
@@ -1248,14 +1273,7 @@ func _religion_remaining_ritual_capacity() -> float:
 	return maxf(0.0, _religion_priest_conversion_cap() - _religion_ritual_capacity_used())
 
 func _religion_active_priest_count() -> int:
-	var state: Node = _state()
-	if state == null:
-		return 0
-	var population_variant: Variant = state.get("population")
-	if population_variant is Dictionary:
-		var population_data: Dictionary = population_variant as Dictionary
-		return int(population_data.get("tlamacazqueh", 0))
-	return 0
+	return _active_population_for_group("tlamacazqueh")
 
 func _favour_band(value: float) -> String:
 	if value < 20.0:

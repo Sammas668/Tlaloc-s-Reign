@@ -2,9 +2,11 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/PalaceRouteOverviewSystem.gd
 #
-# v0.45.7 extraction target.
 # Owns information-only palace route overview logic for Tlaloc, Tezcatlipoca
-# and Quetzalcoatl. TRGameState remains the public UI API.
+# and Quetzalcoatl.
+# Reads CampaignState through TRGameState runtime accessors instead of treating
+# TRGameState mirror fields as the source of truth.
+
 class_name PalaceRouteOverviewSystem
 extends RefCounted
 
@@ -13,16 +15,31 @@ const GOD_HUITZILOPOCHTLI: String = "huitzilopochtli"
 const GOD_TEZCATLIPOCA: String = "tezcatlipoca"
 const GOD_QUETZALCOATL: String = "quetzalcoatl"
 
+
 # -----------------------------------------------------------------------------
 # Shared state access helpers
 # -----------------------------------------------------------------------------
+
+func _campaign_state(state: Node) -> RefCounted:
+	if state == null:
+		return null
+	if state.has_method("_get_campaign_state"):
+		var raw: Variant = state.call("_get_campaign_state")
+		if raw is RefCounted:
+			return raw as RefCounted
+	return null
+
 
 func _palace_dedicated_god(state: Node) -> String:
 	if state == null:
 		return ""
 	if state.has_method("get_palace_dedicated_god"):
 		return String(state.call("get_palace_dedicated_god"))
-	return String(state.get("player_palace_dedicated_god"))
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("get_palace_dedicated_god_value"):
+		return String(runtime_state.call("get_palace_dedicated_god_value"))
+	return ""
+
 
 func _palace_structure_runtime_statuses(state: Node) -> Dictionary:
 	if state == null:
@@ -31,10 +48,11 @@ func _palace_structure_runtime_statuses(state: Node) -> Dictionary:
 		var value: Variant = state.call("get_palace_structure_runtime_statuses")
 		if value is Dictionary:
 			return (value as Dictionary).duplicate(true)
-	var raw: Variant = state.get("palace_structure_runtime_statuses")
-	if raw is Dictionary:
-		return (raw as Dictionary).duplicate(true)
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("get_palace_structure_runtime_statuses_copy"):
+		return runtime_state.call("get_palace_structure_runtime_statuses_copy") as Dictionary
 	return {}
+
 
 func _palace_built_structure_ids_in_tree_order(state: Node, god_id: String) -> Array[String]:
 	var output: Array[String] = []
@@ -47,6 +65,7 @@ func _palace_built_structure_ids_in_tree_order(state: Node, god_id: String) -> A
 				output.append(String(item))
 	return output
 
+
 func _palace_structure_by_id(state: Node, structure_id: String, god_id: String) -> Dictionary:
 	if state == null:
 		return {}
@@ -56,17 +75,23 @@ func _palace_structure_by_id(state: Node, structure_id: String, god_id: String) 
 			return (value as Dictionary).duplicate(true)
 	return {}
 
+
 func _current_veintena(state: Node) -> int:
 	if state == null:
 		return 1
 	if state.has_method("get_current_veintena"):
 		return int(state.call("get_current_veintena"))
-	return int(state.get("current_veintena"))
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("get_current_veintena_value"):
+		return int(runtime_state.call("get_current_veintena_value"))
+	return 1
+
 
 func _resource_name(state: Node, resource_id: String) -> String:
 	if state != null and state.has_method("get_resource_name"):
 		return String(state.call("get_resource_name", resource_id))
 	return resource_id.capitalize()
+
 
 func _market_resolution(state: Node) -> Dictionary:
 	if state != null and state.has_method("estimate_market_resolution"):
@@ -74,6 +99,7 @@ func _market_resolution(state: Node) -> Dictionary:
 		if value is Dictionary:
 			return value as Dictionary
 	return {}
+
 
 func _rival_pressure_hooks(state: Node, detail_tier: int) -> Array[Dictionary]:
 	var output: Array[Dictionary] = []
@@ -85,12 +111,14 @@ func _rival_pressure_hooks(state: Node, detail_tier: int) -> Array[Dictionary]:
 					output.append((item as Dictionary).duplicate(true))
 	return output
 
+
 func _format_amount(state: Node, value: float) -> String:
 	if state != null and state.has_method("_format_amount"):
 		return String(state.call("_format_amount", value))
 	if absf(value - roundf(value)) < 0.01:
 		return str(int(roundf(value)))
 	return str(snappedf(value, 0.01))
+
 
 # -----------------------------------------------------------------------------
 # Tlaloc natural calendar forecast
@@ -158,12 +186,14 @@ func tlaloc_controlled_natural_pressure_events() -> Array[Dictionary]:
 		}
 	]
 
+
 func veintena_distance_to(state: Node, target_veintena: int) -> int:
 	var target: int = clampi(target_veintena, 1, 18)
 	var distance: int = target - _current_veintena(state)
 	if distance < 0:
 		distance += 18
 	return distance
+
 
 func tlaloc_active_structure_tier(state: Node) -> int:
 	if _palace_dedicated_god(state) != GOD_TLALOC:
@@ -180,6 +210,7 @@ func tlaloc_active_structure_tier(state: Node) -> int:
 		highest = maxi(highest, int(structure.get("tier", 1)))
 	return highest
 
+
 func tlaloc_active_structure_names(state: Node) -> Array[String]:
 	var names: Array[String] = []
 	if _palace_dedicated_god(state) != GOD_TLALOC:
@@ -194,6 +225,7 @@ func tlaloc_active_structure_names(state: Node) -> Array[String]:
 			names.append(String(structure.get("name", structure_id)))
 	return names
 
+
 func tlaloc_forecast_range_for_tier(tier: int) -> int:
 	match tier:
 		1:
@@ -205,6 +237,7 @@ func tlaloc_forecast_range_for_tier(tier: int) -> int:
 		4:
 			return 18
 	return 0
+
 
 func tlaloc_forecast_detail_label(tier: int) -> String:
 	match tier:
@@ -218,12 +251,14 @@ func tlaloc_forecast_detail_label(tier: int) -> String:
 			return "Deep natural calendar"
 	return "Dormant"
 
+
 func format_veintena_distance(distance: int) -> String:
 	if distance <= 0:
 		return "Current Veintena"
 	if distance == 1:
 		return "Next Veintena"
 	return "In " + str(distance) + " Veintenas"
+
 
 func format_resource_id_list(state: Node, resource_ids: Array) -> String:
 	var parts: Array[String] = []
@@ -232,6 +267,7 @@ func format_resource_id_list(state: Node, resource_ids: Array) -> String:
 	if parts.is_empty():
 		return "Unknown"
 	return ", ".join(parts)
+
 
 func tlaloc_forecast_row(state: Node, event: Dictionary, detail_tier: int, distance: int) -> Dictionary:
 	var name: String = "Unclear natural pressure"
@@ -267,21 +303,25 @@ func tlaloc_forecast_row(state: Node, event: Dictionary, detail_tier: int, dista
 		"detail_tier": detail_tier
 	}
 
+
 func get_tlaloc_natural_calendar_forecast(state: Node) -> Dictionary:
 	var dedicated: bool = _palace_dedicated_god(state) == GOD_TLALOC
 	var detail_tier: int = tlaloc_active_structure_tier(state)
 	var forecast_range: int = tlaloc_forecast_range_for_tier(detail_tier)
 	var rows: Array[Dictionary] = []
 	var hidden_count: int = 0
+
 	for event: Dictionary in tlaloc_controlled_natural_pressure_events():
 		var distance: int = veintena_distance_to(state, int(event.get("target_veintena", 1)))
 		if dedicated and detail_tier > 0 and distance <= forecast_range:
 			rows.append(tlaloc_forecast_row(state, event, detail_tier, distance))
 		else:
 			hidden_count += 1
+
 	rows.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
 		return int(a.get("turns_until", 0)) < int(b.get("turns_until", 0))
 	)
+
 	var headline: String = "Tlaloc foresight unavailable"
 	var summary_text: String = "Dedicate the Palace to Tlaloc, then build and maintain active Tlaloc structures to reveal natural pressure before rivals can react."
 	if dedicated and detail_tier <= 0:
@@ -290,6 +330,7 @@ func get_tlaloc_natural_calendar_forecast(state: Node) -> Dictionary:
 	elif dedicated and detail_tier > 0:
 		headline = "Tlaloc Natural Calendar Foresight — " + tlaloc_forecast_detail_label(detail_tier)
 		summary_text = "Active Tlaloc structures reveal natural pressures up to " + str(forecast_range) + " Veintenas ahead. This is a controlled prototype forecast; it does not apply event effects yet."
+
 	return {
 		"available": dedicated,
 		"active": dedicated and detail_tier > 0,
@@ -305,6 +346,7 @@ func get_tlaloc_natural_calendar_forecast(state: Node) -> Dictionary:
 		"hidden_event_count": hidden_count,
 		"mechanics_note": "Forecast rows are information only in v0.28. They do not yet alter production, markets, yields, disasters or rival behaviour."
 	}
+
 
 # -----------------------------------------------------------------------------
 # Tezcatlipoca scarcity / intrigue overview
@@ -325,6 +367,7 @@ func tezcatlipoca_active_structure_tier(state: Node) -> int:
 		highest = maxi(highest, int(structure.get("tier", 1)))
 	return highest
 
+
 func tezcatlipoca_active_structure_names(state: Node) -> Array[String]:
 	var names: Array[String] = []
 	if _palace_dedicated_god(state) != GOD_TEZCATLIPOCA:
@@ -339,6 +382,7 @@ func tezcatlipoca_active_structure_names(state: Node) -> Array[String]:
 			names.append(String(structure.get("name", structure_id)))
 	return names
 
+
 func tezcatlipoca_pressure_detail_label(tier: int) -> String:
 	match tier:
 		1:
@@ -351,6 +395,7 @@ func tezcatlipoca_pressure_detail_label(tier: int) -> String:
 			return "Deep mirror council"
 	return "Dormant"
 
+
 func tezcatlipoca_market_pressure_limit(tier: int) -> int:
 	match tier:
 		1:
@@ -362,6 +407,7 @@ func tezcatlipoca_market_pressure_limit(tier: int) -> int:
 		4:
 			return 8
 	return 0
+
 
 func tezcatlipoca_pressure_score(good: Dictionary) -> float:
 	var score: float = 0.0
@@ -382,6 +428,7 @@ func tezcatlipoca_pressure_score(good: Dictionary) -> float:
 		score += maxf(0.0, 3.0 - coverage) * 12.0
 	score += maxf(0.0, (current_value / base_value) - 1.0) * 25.0
 	return score
+
 
 func tezcatlipoca_market_pressure_row(state: Node, good: Dictionary, detail_tier: int) -> Dictionary:
 	var good_id: String = String(good.get("id", ""))
@@ -413,8 +460,10 @@ func tezcatlipoca_market_pressure_row(state: Node, good: Dictionary, detail_tier
 		"detail_tier": detail_tier
 	}
 
+
 func tezcatlipoca_rival_pressure_hooks(state: Node, detail_tier: int) -> Array[Dictionary]:
 	return _rival_pressure_hooks(state, detail_tier)
+
 
 func get_tezcatlipoca_pressure_overview(state: Node) -> Dictionary:
 	var dedicated: bool = _palace_dedicated_god(state) == GOD_TEZCATLIPOCA
@@ -461,6 +510,7 @@ func get_tezcatlipoca_pressure_overview(state: Node) -> Dictionary:
 		"mechanics_note": "Tezcatlipoca pressure rows are information-only in v0.29. They do not yet change market stock, prices, rival behaviour, sabotage, prestige or diplomacy."
 	}
 
+
 # -----------------------------------------------------------------------------
 # Quetzalcoatl legitimacy overview
 # -----------------------------------------------------------------------------
@@ -478,6 +528,7 @@ func quetzalcoatl_active_structure_tier(state: Node) -> int:
 		max_tier = maxi(max_tier, int(structure.get("tier", structure.get("level", 0))))
 	return max_tier
 
+
 func quetzalcoatl_active_structure_names(state: Node) -> Array[String]:
 	var names: Array[String] = []
 	if _palace_dedicated_god(state) != GOD_QUETZALCOATL:
@@ -492,6 +543,7 @@ func quetzalcoatl_active_structure_names(state: Node) -> Array[String]:
 			names.append(String(structure.get("name", structure_id)))
 	return names
 
+
 func quetzalcoatl_detail_label(tier: int) -> String:
 	match tier:
 		1:
@@ -504,13 +556,14 @@ func quetzalcoatl_detail_label(tier: int) -> String:
 			return "Great legitimacy court"
 	return "Dormant"
 
+
 func quetzalcoatl_legitimacy_rows(detail_tier: int) -> Array[Dictionary]:
 	var rows: Array[Dictionary] = []
 	if detail_tier <= 0:
 		return rows
 	var raw_rows: Array[Dictionary] = [
 		{"id": "palace_order", "name": "Palace Order", "domain": "Court order and visible authority", "summary": "The palace can present itself as orderly, deliberate and ruler-facing.", "future_hook": "Future hook: improves palace-performance confidence and reduces ambiguity around obligations."},
-		{"id": "tribute_credibility", "name": "Tribute Credibility", "domain": "Demand delivery and tribute reliability", "summary": "The house can make promised goods and delivered goods appear more credible to higher authority.", "future_hook": "Future hook: clearer demand delivery quality and better ruler-facing trust."},
+		{"id": "tribute_credibility", "name": "Tribute Credibility", "domain": "Demand delivery and tribute reliability", "summary": "The house can make promised goods and delivered goods appear more credible to higher authority.", "future_hook": "Future hook: improves clarity around demand delivery quality and better ruler-facing trust."},
 		{"id": "recognition_route", "name": "Recognition Route", "domain": "Regional legitimacy and public reputation", "summary": "The palace can frame estate success as lawful, civilised and worthy of recognition.", "future_hook": "Future hook: supports future formal recognition once that system is designed."},
 		{"id": "court_witness", "name": "Ruler Witness", "domain": "Agents, witnesses and formal reporting", "summary": "The palace is prepared to impress agents of higher authority and make obligations visible.", "future_hook": "Future hook: stronger effect on court presentation and formal recognition."}
 	]
@@ -538,6 +591,7 @@ func quetzalcoatl_legitimacy_rows(detail_tier: int) -> Array[Dictionary]:
 			row["future_hook"] = String(source.get("future_hook", row["future_hook"]))
 		rows.append(row)
 	return rows
+
 
 func quetzalcoatl_obligation_rows(detail_tier: int) -> Array[Dictionary]:
 	var rows: Array[Dictionary] = []
@@ -571,6 +625,7 @@ func quetzalcoatl_obligation_rows(detail_tier: int) -> Array[Dictionary]:
 		rows.append(row)
 	return rows
 
+
 func get_quetzalcoatl_legitimacy_overview(state: Node) -> Dictionary:
 	var dedicated: bool = _palace_dedicated_god(state) == GOD_QUETZALCOATL
 	var detail_tier: int = quetzalcoatl_active_structure_tier(state)
@@ -582,11 +637,13 @@ func get_quetzalcoatl_legitimacy_overview(state: Node) -> Dictionary:
 	elif dedicated and detail_tier > 0:
 		headline = "Quetzalcoatl Legitimacy Court — " + quetzalcoatl_detail_label(detail_tier)
 		summary_text = "Active Quetzalcoatl structures reveal legitimacy, tribute credibility and recognition-route hooks. This route is information-only; court-need donations create prestige separately by base value."
+
 	var legitimacy_rows: Array[Dictionary] = []
 	var obligation_rows: Array[Dictionary] = []
 	if dedicated and detail_tier > 0:
 		legitimacy_rows = quetzalcoatl_legitimacy_rows(detail_tier)
 		obligation_rows = quetzalcoatl_obligation_rows(detail_tier)
+
 	return {
 		"available": dedicated,
 		"active": dedicated and detail_tier > 0,

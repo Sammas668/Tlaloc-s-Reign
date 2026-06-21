@@ -5,6 +5,8 @@
 # Extracted calendar strip, calendar report and advance-button label helper.
 # The main GameScreenMarketOverviewPatch.gd remains the coordinator, but the
 # bulky calendar-data/UI rules live here so the wrapper can keep shrinking.
+# Reads calendar state through TRGameState/CampaignState runtime accessors instead
+# of falling back to TRGameState compatibility mirror fields.
 class_name CalendarPacingController
 extends RefCounted
 
@@ -103,10 +105,9 @@ func calendar_current_veintena(host: Node) -> int:
 	var state: Node = _host_state(host)
 	if state != null and state.has_method("get_current_veintena"):
 		return clampi(int(state.call("get_current_veintena")), 1, 18)
-	if state != null:
-		var raw: Variant = state.get("current_veintena")
-		if raw != null:
-			return clampi(int(raw), 1, 18)
+	var snapshot: RefCounted = _campaign_snapshot(host)
+	if snapshot != null and snapshot.has_method("get_current_veintena_value"):
+		return clampi(int(snapshot.call("get_current_veintena_value")), 1, 18)
 	return 1
 
 func calendar_veintena_name(host: Node, veintena_number: int) -> String:
@@ -337,38 +338,32 @@ func _host_state(host: Node) -> Node:
 			return raw_state as Node
 	return null
 
+func _campaign_snapshot(host: Node) -> RefCounted:
+	var state: Node = _host_state(host)
+	if state != null and state.has_method("get_campaign_state_snapshot"):
+		var snapshot_raw: Variant = state.call("get_campaign_state_snapshot")
+		if snapshot_raw is RefCounted:
+			return snapshot_raw as RefCounted
+	if state != null and state.has_method("_get_campaign_state"):
+		var raw: Variant = state.call("_get_campaign_state")
+		if raw is RefCounted:
+			return raw as RefCounted
+	return null
+
 func _calendar_period(host: Node) -> String:
 	var state: Node = _host_state(host)
-	if state != null:
-		# Patch 8G: CampaignState is the calendar authority. Prefer the
-		# TRGameState facade snapshot before metadata or legacy mirrors.
-		if state.has_method("get_campaign_state_snapshot"):
-			var snapshot_raw: Variant = state.call("get_campaign_state_snapshot")
-			if snapshot_raw is RefCounted and (snapshot_raw as RefCounted).has_method("get_calendar_period_value"):
-				return String((snapshot_raw as RefCounted).call("get_calendar_period_value"))
-		if state.has_method("get_calendar_period"):
-			return String(state.call("get_calendar_period"))
-		if state.has_meta("calendar_period"):
-			return String(state.get_meta("calendar_period"))
-		var raw: Variant = state.get("calendar_period")
-		if raw != null:
-			return String(raw)
+	if state != null and state.has_method("get_calendar_period"):
+		return String(state.call("get_calendar_period"))
+	var snapshot: RefCounted = _campaign_snapshot(host)
+	if snapshot != null and snapshot.has_method("get_calendar_period_value"):
+		return String(snapshot.call("get_calendar_period_value"))
 	return "veintena"
 
 func _ritual_year(host: Node) -> int:
 	var state: Node = _host_state(host)
-	if state != null:
-		# Patch 8G: CampaignState is the ritual-year authority. Prefer the
-		# TRGameState facade snapshot before metadata or legacy mirrors.
-		if state.has_method("get_campaign_state_snapshot"):
-			var snapshot_raw: Variant = state.call("get_campaign_state_snapshot")
-			if snapshot_raw is RefCounted and (snapshot_raw as RefCounted).has_method("get_ritual_year_value"):
-				return max(1, int((snapshot_raw as RefCounted).call("get_ritual_year_value")))
-		if state.has_method("get_ritual_year"):
-			return max(1, int(state.call("get_ritual_year")))
-		if state.has_meta("ritual_year"):
-			return max(1, int(state.get_meta("ritual_year")))
-		var raw: Variant = state.get("ritual_year")
-		if raw != null:
-			return max(1, int(raw))
+	if state != null and state.has_method("get_ritual_year"):
+		return max(1, int(state.call("get_ritual_year")))
+	var snapshot: RefCounted = _campaign_snapshot(host)
+	if snapshot != null and snapshot.has_method("get_ritual_year_value"):
+		return max(1, int(snapshot.call("get_ritual_year_value")))
 	return 1
