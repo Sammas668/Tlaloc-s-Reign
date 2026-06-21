@@ -11,7 +11,7 @@ const FLOWER_WAR_DOCTRINES: Dictionary = {
 	"unspecialised": {"name": "Unspecialised", "offence": 1.0, "defence": 1.0, "role": "Balanced household warriors."},
 	"eagle": {"name": "Eagle", "offence": 1.0, "defence": 1.2, "role": "Captive specialists and sustained war fighters."},
 	"jaguar": {"name": "Jaguar", "offence": 1.3, "defence": 1.0, "role": "Elite offensive warriors. No hidden Prestige bonus; Prestige comes from victories, casualties, captives and loot."},
-	"otomi": {"name": "Otomi", "offence": 1.0, "defence": 1.5, "role": "Defensive veterans who preserve warriors without sacrificing baseline offence."},
+	"otomi": {"name": "Otomi", "offence": 0.8, "defence": 1.5, "role": "Defensive veterans who trade offence for survival."},
 	"coyote": {"name": "Coyote", "offence": 1.4, "defence": 0.5, "role": "Glass-cannon raiders who favour loot."}
 }
 

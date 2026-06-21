@@ -3,8 +3,8 @@
 # Project path: res://Scripts/ui/widgets/FlowerWarEventOverlay.gd
 #
 # Extracted full-screen Flower War attack / defence / return event panel.
-# This keeps GameScreenMarketOverviewPatch.gd as a coordinator while the
-# self-contained event UI lives in a reusable widget file.
+# This can be hosted by GameScreenMarketOverviewPatch.gd or by the extracted
+# BarracksScreenController. The self-contained event UI lives in a reusable widget file.
 #
 # Important: this is a GameScreen-wide modal event. The host adds this widget to
 # the GameScreen Control itself, not to the left DynamicViewHost and not to the
@@ -15,7 +15,7 @@ const COLOR_TEXT: Color = Color(0.92, 0.88, 0.78, 1.0)
 const COLOR_MUTED: Color = Color(0.70, 0.78, 0.74, 1.0)
 const COLOR_TEAL: Color = Color(0.50, 0.92, 0.84, 1.0)
 
-var host: Node = null
+var host: Object = null
 
 var _flower_war_event_overlay: Control = null
 var _flower_war_event_option_id: String = "standard"
@@ -24,12 +24,12 @@ var _flower_war_event_selected_warbands: Dictionary = {}
 var _flower_war_event_report: Dictionary = {}
 var _flower_war_defence_strategy_id: String = "balanced"
 
-func open_attack_event(host_node: Node, option_id: String = "standard", source_id: String = "player", context: Dictionary = {}) -> void:
+func open_attack_event(host_node: Object, option_id: String = "standard", source_id: String = "player", context: Dictionary = {}) -> void:
 	host = host_node
 	_configure_overlay_root()
 	_open_flower_war_attack_event(option_id, source_id, context)
 
-func open_defence_event(host_node: Node, option_id: String = "standard", source_id: String = "rival", context: Dictionary = {}) -> void:
+func open_defence_event(host_node: Object, option_id: String = "standard", source_id: String = "rival", context: Dictionary = {}) -> void:
 	host = host_node
 	_configure_overlay_root()
 	_open_flower_war_defence_event(option_id, source_id, context)
