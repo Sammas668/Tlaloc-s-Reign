@@ -2,10 +2,10 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/PalaceSystem.gd
 #
-# Palace system for the TRGameState -> CampaignState split.
 # Owns palace dedication, palace route labels, palace structure rules,
-# palace static structure-tree data, and route authority presentation.
-# TRGameState remains the public API during the migration.
+# palace static structure-tree data, route authority presentation and court needs.
+# Reads/writes CampaignState first through TRGameState accessors, with
+# TRGameState field fallback kept only for compatibility.
 class_name PalaceSystem
 extends RefCounted
 
@@ -18,14 +18,14 @@ const PALACE_GOD_IDS: Array[String] = [GOD_TLALOC, GOD_HUITZILOPOCHTLI, GOD_TEZC
 func get_player_palace_dedicated_god(state: Node) -> String:
 	if state == null:
 		return ""
-	return String(state.get("player_palace_dedicated_god"))
+	return _palace_string(state, "player_palace_dedicated_god", "")
 
 func set_player_palace_dedicated_god(state: Node, god_id: String) -> Dictionary:
 	if state == null:
 		return {"ok": false, "reason": "Palace state is not connected."}
 	var cleaned: String = god_id.strip_edges().to_lower()
 	if cleaned == "":
-		state.set("player_palace_dedicated_god", "")
+		_set_palace_value(state, "player_palace_dedicated_god", "")
 		if is_flower_war_palace_gate_enabled(state):
 			_append_report(state, "Palace dedication cleared. Flower Wars are locked until the palace is dedicated to Huitzilopochtli.")
 		else:
@@ -34,7 +34,7 @@ func set_player_palace_dedicated_god(state: Node, god_id: String) -> Dictionary:
 		return {"ok": true, "reason": "Palace dedication cleared."}
 	if not PALACE_GOD_IDS.has(cleaned):
 		return {"ok": false, "reason": "Unknown palace god: " + god_id + "."}
-	state.set("player_palace_dedicated_god", cleaned)
+	_set_palace_value(state, "player_palace_dedicated_god", cleaned)
 	_append_report(state, "Palace dedicated to " + god_display_name(cleaned) + ".")
 	_emit_state_changed(state)
 	return {"ok": true, "reason": "Palace dedicated to " + god_display_name(cleaned) + "."}
@@ -46,12 +46,12 @@ func has_war_god_palace(state: Node) -> bool:
 func is_flower_war_palace_gate_enabled(state: Node) -> bool:
 	if state == null:
 		return false
-	return bool(state.get("flower_war_palace_gate_enabled"))
+	return _palace_bool(state, "flower_war_palace_gate_enabled", false)
 
 func set_flower_war_palace_gate_enabled(state: Node, enabled: bool) -> Dictionary:
 	if state == null:
 		return {"ok": false, "reason": "Palace state is not connected."}
-	state.set("flower_war_palace_gate_enabled", enabled)
+	_set_palace_value(state, "flower_war_palace_gate_enabled", enabled)
 	if enabled:
 		_append_report(state, "Flower War palace gate enabled. Flower Wars now require a Huitzilopochtli-dedicated palace.")
 	else:
@@ -137,7 +137,7 @@ func dedicate_palace_to_god(state: Node, god_id: String) -> Dictionary:
 		_emit_state_changed(state)
 		return status
 	var cleaned: String = god_id.strip_edges().to_lower()
-	state.set("player_palace_dedicated_god", cleaned)
+	_set_palace_value(state, "player_palace_dedicated_god", cleaned)
 	_append_report(state, "Palace dedicated to " + god_display_name(cleaned) + ". The Divine Seat now displays the " + get_palace_route_name(cleaned) + " structure node data.")
 	_emit_state_changed(state)
 	return {"ok": true, "reason": "Palace dedicated to " + god_display_name(cleaned) + ".", "god_id": cleaned}
@@ -324,7 +324,7 @@ func get_built_palace_structure_ids(state: Node) -> Array[String]:
 	var output: Array[String] = []
 	if state == null:
 		return output
-	var built_variant: Variant = state.get("palace_built_structures")
+	var built_variant: Variant = _palace_dictionary(state, "palace_built_structures")
 	if not (built_variant is Dictionary):
 		return output
 	var built: Dictionary = built_variant as Dictionary
@@ -338,7 +338,7 @@ func get_built_palace_structure_ids(state: Node) -> Array[String]:
 func is_palace_structure_built(state: Node, structure_id: String) -> bool:
 	if state == null:
 		return false
-	var built_variant: Variant = state.get("palace_built_structures")
+	var built_variant: Variant = _palace_dictionary(state, "palace_built_structures")
 	if not (built_variant is Dictionary):
 		return false
 	return bool((built_variant as Dictionary).get(structure_id, false))
@@ -529,11 +529,11 @@ func build_palace_structure(state: Node, structure_id: String) -> Dictionary:
 	var cost: Dictionary = structure.get("build_cost", {}) as Dictionary
 	for resource_variant: Variant in cost.keys():
 		var resource_id: String = String(resource_variant)
-		state.call("_add_stock", resource_id, -float(cost[resource_variant]))
-	var built: Dictionary = state.get("palace_built_structures") as Dictionary
+		_add_stock(state, resource_id, -float(cost[resource_variant]))
+	var built: Dictionary = _palace_dictionary(state, "palace_built_structures")
 	built[structure_id] = true
-	state.set("palace_built_structures", built)
-	state.set("palace_structure_runtime_statuses", {})
+	_set_palace_dictionary(state, "palace_built_structures", built)
+	_set_palace_dictionary(state, "palace_structure_runtime_statuses", {})
 	_append_report(state, "Built palace structure: " + String(structure.get("name", structure_id)) + ". It must now be maintained and staffed each Veintena to remain active.")
 	_emit_state_changed(state)
 	return {"ok": true, "reason": "Built " + String(structure.get("name", structure_id)) + ".", "structure_id": structure_id}
@@ -649,7 +649,7 @@ func get_palace_structure_operation_preview(state: Node) -> Dictionary:
 func get_palace_structure_runtime_statuses(state: Node) -> Dictionary:
 	if state == null:
 		return {}
-	var statuses_variant: Variant = state.get("palace_structure_runtime_statuses")
+	var statuses_variant: Variant = _palace_dictionary(state, "palace_structure_runtime_statuses")
 	if statuses_variant is Dictionary and not (statuses_variant as Dictionary).is_empty():
 		return (statuses_variant as Dictionary).duplicate(true)
 	return (get_palace_structure_operation_preview(state).get("statuses", {}) as Dictionary).duplicate(true)
@@ -693,10 +693,7 @@ func resolve_palace_structure_operation(state: Node, pay_costs: bool) -> Diction
 	}
 	if state == null or dedicated_god == "":
 		return result
-	var stock_variant: Variant = state.get("estate_stockpiles")
-	var temp_stockpile: Dictionary = {}
-	if stock_variant is Dictionary:
-		temp_stockpile = _copy_stockpile_dictionary(stock_variant as Dictionary)
+	var temp_stockpile: Dictionary = _copy_stockpile_dictionary(_estate_stockpiles_copy(state))
 	var available_staff: Dictionary = get_palace_staff_capacity(state)
 	var structure_ids: Array[String] = palace_built_structure_ids_in_tree_order(state, dedicated_god)
 	for structure_id: String in structure_ids:
@@ -757,18 +754,18 @@ func resolve_palace_structure_operation(state: Node, pay_costs: bool) -> Diction
 	if pay_costs:
 		for resource_variant: Variant in (result["maintenance_paid"] as Dictionary).keys():
 			var resource_id: String = String(resource_variant)
-			state.call("_add_stock", resource_id, -float((result["maintenance_paid"] as Dictionary)[resource_variant]))
+			_add_stock(state, resource_id, -float((result["maintenance_paid"] as Dictionary)[resource_variant]))
 	return result
 
 func pay_palace_maintenance(state: Node) -> void:
 	if state == null:
 		return
-	state.set("last_palace_maintenance_report", [])
+	_set_palace_string_array(state, "last_palace_maintenance_report", [])
 	if get_palace_dedicated_god(state) == "" or get_built_palace_structure_ids(state).is_empty():
-		state.set("palace_structure_runtime_statuses", {})
+		_set_palace_dictionary(state, "palace_structure_runtime_statuses", {})
 		return
 	var resolution: Dictionary = resolve_palace_structure_operation(state, true)
-	state.set("palace_structure_runtime_statuses", (resolution.get("statuses", {}) as Dictionary).duplicate(true))
+	_set_palace_dictionary(state, "palace_structure_runtime_statuses", (resolution.get("statuses", {}) as Dictionary).duplicate(true))
 	var reports: Array = resolution.get("reports", []) as Array
 	if reports.is_empty():
 		return
@@ -778,7 +775,7 @@ func pay_palace_maintenance(state: Node) -> void:
 		var line: String = String(report_variant)
 		last_maintenance.append(line)
 		_append_report(state, line)
-	state.set("last_palace_maintenance_report", last_maintenance)
+	_set_palace_string_array(state, "last_palace_maintenance_report", last_maintenance)
 
 func get_palace_total_maintenance(state: Node) -> Dictionary:
 	var result: Dictionary = {}
@@ -977,7 +974,7 @@ func palace_ruler_demand_sets() -> Array[Dictionary]:
 func current_palace_ruler_demand_index(state: Node) -> int:
 	if state == null:
 		return 0
-	var current_veintena: int = int(state.get("current_veintena"))
+	var current_veintena: int = _current_veintena_value(state)
 	var index: int = int(floor(float(current_veintena - 1) / 6.0))
 	return clampi(index, 0, palace_ruler_demand_sets().size() - 1)
 
@@ -999,7 +996,7 @@ func palace_ruler_demand_deadline_summary(state: Node, index: int = -1) -> Dicti
 	var window: Dictionary = palace_ruler_demand_cycle_window(selected_index)
 	var start_veintena: int = int(window.get("start_veintena", 1))
 	var end_veintena: int = int(window.get("end_veintena", 6))
-	var current_veintena: int = int(state.get("current_veintena"))
+	var current_veintena: int = _current_veintena_value(state)
 	var remaining: int = maxi(0, end_veintena - current_veintena + 1)
 	var urgency: String = "Time remains"
 	if current_veintena < start_veintena:
@@ -1056,7 +1053,7 @@ func palace_donation_records_for_cycle(state: Node, cycle_id: String = "") -> Ar
 	var output: Array[Dictionary] = []
 	if state == null:
 		return output
-	var records_variant: Variant = state.get("palace_ruler_demand_donations")
+	var records_variant: Variant = _palace_dictionary_array(state, "palace_ruler_demand_donations")
 	if not (records_variant is Array):
 		return output
 	var all_records: Array = records_variant as Array
@@ -1133,10 +1130,10 @@ func donate_palace_need(state: Node, slot_id: String, amount: float) -> Dictiona
 	var raw_row: Dictionary = palace_ruler_demand_raw_row_by_slot(state, slot_id)
 	var resource_id: String = String(raw_row.get("resource_id", ""))
 	var free_before: float = float(state.call("free_stock_after_reserves", resource_id))
-	var stored_before: float = float(state.call("_stock", resource_id))
+	var stored_before: float = _stock(state, resource_id)
 	var base_value: float = _resource_base_value(state, resource_id)
 	var prestige_gain: float = snappedf(amount * base_value, 0.01)
-	state.call("_add_stock", resource_id, -amount)
+	_add_stock(state, resource_id, -amount)
 	var record: Dictionary = {
 		"source_id": "court_need_donation",
 		"cycle_id": palace_ruler_demand_cycle_id(state),
@@ -1147,16 +1144,16 @@ func donate_palace_need(state: Node, slot_id: String, amount: float) -> Dictiona
 		"amount": amount,
 		"base_value": base_value,
 		"prestige_gain": prestige_gain,
-		"donated_veintena": int(state.get("current_veintena")),
+		"donated_veintena": _current_veintena_value(state),
 		"free_before_donation": free_before,
 		"stored_before_donation": stored_before
 	}
-	var donations_variant: Variant = state.get("palace_ruler_demand_donations")
+	var donations_variant: Variant = _palace_dictionary_array(state, "palace_ruler_demand_donations")
 	var donations: Array = []
 	if donations_variant is Array:
 		donations = donations_variant as Array
 	donations.append(record.duplicate(true))
-	state.set("palace_ruler_demand_donations", donations)
+	_set_palace_dictionary_array(state, "palace_ruler_demand_donations", donations)
 	state.call("add_player_prestige", prestige_gain, "court_need_donation", "Donated " + _format_amount(state, amount) + " " + _resource_name(state, resource_id) + " to a court need.", record)
 	_append_report(state, "Court need donation: " + _format_amount(state, amount) + " " + _resource_name(state, resource_id) + " for +" + _format_amount(state, prestige_gain) + " Prestige.")
 	_emit_state_changed(state)
@@ -1261,7 +1258,7 @@ func palace_ruler_demand_row(state: Node, raw_row: Dictionary) -> Dictionary:
 	var slot_id: String = String(raw_row.get("slot", ""))
 	var resource_id: String = String(raw_row.get("resource_id", ""))
 	var need_marker: float = float(raw_row.get("amount", 0.0))
-	var stored: float = float(state.call("_stock", resource_id))
+	var stored: float = _stock(state, resource_id)
 	var free_value: float = float(state.call("free_stock_after_reserves", resource_id))
 	var base_value: float = _resource_base_value(state, resource_id)
 	var donation: Dictionary = palace_donation_total_for_slot(state, palace_ruler_demand_cycle_id(state), slot_id)
@@ -1331,7 +1328,7 @@ func get_palace_ruler_demands_summary(state: Node) -> Dictionary:
 		"active": true,
 		"donation_enabled": true,
 		"delivery_enabled": false,
-		"current_veintena": int(state.get("current_veintena")),
+		"current_veintena": _current_veintena_value(state),
 		"cycle_index": selected_index,
 		"cycle_id": String(selected.get("id", "")),
 		"title": String(selected.get("title", "Current Court Needs")),
@@ -1362,7 +1359,7 @@ func get_palace_ruler_demands_summary(state: Node) -> Dictionary:
 		"total_requested_value": total_need_marker_value,
 		"total_free_matching_value": total_free_matching_value,
 		"total_donated_prestige": donated_prestige,
-		"player_prestige": float(state.get("player_prestige")),
+		"player_prestige": _player_prestige_value(state),
 		"mechanics_note": "Court needs are donation opportunities. Donating a needed good grants Prestige equal to donated amount × that good's base value. Prestige is score only and is never spent. No royal favour, local stability or palace-route credit is created."
 	}
 
@@ -1423,6 +1420,245 @@ func get_palace_summary(state: Node) -> Dictionary:
 		"implementation_note": "v0.36 reframes court needs as court needs. Donating needed goods grants Prestige based on donated amount × resource base value. Prestige is score only and is never spent."
 	}
 
+
+# -----------------------------------------------------------------------------
+# CampaignState-first palace access helpers
+# -----------------------------------------------------------------------------
+
+func _campaign_state(state: Node) -> RefCounted:
+	if state == null:
+		return null
+	if state.has_method("_get_campaign_state"):
+		var raw: Variant = state.call("_get_campaign_state")
+		if raw is RefCounted:
+			return raw as RefCounted
+	return null
+
+func _palace_string(state: Node, property_name: String, default_value: String = "") -> String:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null:
+		match property_name:
+			"player_palace_dedicated_god":
+				if runtime_state.has_method("get_palace_dedicated_god_value"):
+					return String(runtime_state.call("get_palace_dedicated_god_value"))
+			_:
+				var runtime_value: Variant = runtime_state.get(property_name)
+				if runtime_value != null:
+					return String(runtime_value)
+	if state != null:
+		var fallback: Variant = state.get(property_name)
+		if fallback != null:
+			return String(fallback)
+	return default_value
+
+func _palace_bool(state: Node, property_name: String, default_value: bool = false) -> bool:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null:
+		match property_name:
+			"flower_war_palace_gate_enabled":
+				if runtime_state.has_method("get_flower_war_palace_gate_enabled_value"):
+					return bool(runtime_state.call("get_flower_war_palace_gate_enabled_value"))
+			_:
+				var runtime_value: Variant = runtime_state.get(property_name)
+				if runtime_value != null:
+					return bool(runtime_value)
+	if state != null:
+		var fallback: Variant = state.get(property_name)
+		if fallback != null:
+			return bool(fallback)
+	return default_value
+
+func _palace_dictionary(state: Node, property_name: String) -> Dictionary:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null:
+		match property_name:
+			"palace_built_structures":
+				if runtime_state.has_method("get_palace_built_structures_copy"):
+					return runtime_state.call("get_palace_built_structures_copy") as Dictionary
+			"palace_structure_runtime_statuses":
+				if runtime_state.has_method("get_palace_structure_runtime_statuses_copy"):
+					return runtime_state.call("get_palace_structure_runtime_statuses_copy") as Dictionary
+			"palace_delivered_ruler_demands":
+				if runtime_state.has_method("get_palace_delivered_ruler_demands_copy"):
+					return runtime_state.call("get_palace_delivered_ruler_demands_copy") as Dictionary
+			"estate_stockpiles":
+				if runtime_state.has_method("get_estate_stockpiles_copy"):
+					return runtime_state.call("get_estate_stockpiles_copy") as Dictionary
+			_:
+				var runtime_value: Variant = runtime_state.get(property_name)
+				if runtime_value is Dictionary:
+					return (runtime_value as Dictionary).duplicate(true)
+	if state != null:
+		var fallback: Variant = state.get(property_name)
+		if fallback is Dictionary:
+			return (fallback as Dictionary).duplicate(true)
+	return {}
+
+func _palace_dictionary_array(state: Node, property_name: String) -> Array[Dictionary]:
+	var output: Array[Dictionary] = []
+	var runtime_state: RefCounted = _campaign_state(state)
+	var raw_value: Variant = null
+	if runtime_state != null:
+		match property_name:
+			"palace_ruler_demand_donations":
+				if runtime_state.has_method("get_palace_ruler_demand_donations_copy"):
+					raw_value = runtime_state.call("get_palace_ruler_demand_donations_copy")
+			_:
+				raw_value = runtime_state.get(property_name)
+	if raw_value == null and state != null:
+		raw_value = state.get(property_name)
+	if raw_value is Array:
+		for item: Variant in raw_value as Array:
+			if item is Dictionary:
+				output.append((item as Dictionary).duplicate(true))
+	return output
+
+func _palace_string_array(state: Node, property_name: String) -> Array[String]:
+	var output: Array[String] = []
+	var runtime_state: RefCounted = _campaign_state(state)
+	var raw_value: Variant = null
+	if runtime_state != null:
+		match property_name:
+			"last_palace_maintenance_report":
+				if runtime_state.has_method("get_last_palace_maintenance_report_copy"):
+					raw_value = runtime_state.call("get_last_palace_maintenance_report_copy")
+			_:
+				raw_value = runtime_state.get(property_name)
+	if raw_value == null and state != null:
+		raw_value = state.get(property_name)
+	if raw_value is Array:
+		for item: Variant in raw_value as Array:
+			output.append(String(item))
+	return output
+
+func _set_palace_value(state: Node, property_name: String, value: Variant) -> void:
+	if state == null:
+		return
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null:
+		match property_name:
+			"player_palace_dedicated_god":
+				if runtime_state.has_method("set_palace_dedicated_god_value"):
+					runtime_state.call("set_palace_dedicated_god_value", String(value))
+					_mirror_palace_state(state)
+					return
+			"flower_war_palace_gate_enabled":
+				if runtime_state.has_method("set_flower_war_palace_gate_enabled_value"):
+					runtime_state.call("set_flower_war_palace_gate_enabled_value", bool(value))
+					_mirror_palace_state(state)
+					return
+	state.set(property_name, value)
+
+func _set_palace_dictionary(state: Node, property_name: String, value: Dictionary) -> void:
+	if state == null:
+		return
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null:
+		match property_name:
+			"palace_built_structures":
+				if runtime_state.has_method("set_palace_built_structures"):
+					runtime_state.call("set_palace_built_structures", value)
+					_mirror_palace_state(state)
+					return
+			"palace_structure_runtime_statuses":
+				if runtime_state.has_method("set_palace_structure_runtime_statuses"):
+					runtime_state.call("set_palace_structure_runtime_statuses", value)
+					_mirror_palace_state(state)
+					return
+			"palace_delivered_ruler_demands":
+				if runtime_state.has_method("set_palace_delivered_ruler_demands"):
+					runtime_state.call("set_palace_delivered_ruler_demands", value)
+					_mirror_palace_state(state)
+					return
+			"estate_stockpiles":
+				if runtime_state.has_method("set_estate_stockpiles_values"):
+					runtime_state.call("set_estate_stockpiles_values", value)
+					_mirror_stockpiles(state)
+					return
+	state.set(property_name, value.duplicate(true))
+
+func _set_palace_dictionary_array(state: Node, property_name: String, value: Array) -> void:
+	if state == null:
+		return
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null:
+		match property_name:
+			"palace_ruler_demand_donations":
+				if runtime_state.has_method("set_palace_ruler_demand_donations"):
+					runtime_state.call("set_palace_ruler_demand_donations", value)
+					_mirror_palace_state(state)
+					return
+	state.set(property_name, value.duplicate(true))
+
+func _set_palace_string_array(state: Node, property_name: String, value: Array) -> void:
+	if state == null:
+		return
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null:
+		match property_name:
+			"last_palace_maintenance_report":
+				if runtime_state.has_method("set_last_palace_maintenance_report"):
+					runtime_state.call("set_last_palace_maintenance_report", value)
+					_mirror_palace_state(state)
+					return
+	state.set(property_name, value.duplicate())
+
+func _estate_stockpiles_copy(state: Node) -> Dictionary:
+	return _palace_dictionary(state, "estate_stockpiles")
+
+func _stock(state: Node, resource_id: String) -> float:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("get_estate_stock"):
+		return float(runtime_state.call("get_estate_stock", resource_id))
+	if state != null and state.has_method("_stock"):
+		return float(state.call("_stock", resource_id))
+	return float(_estate_stockpiles_copy(state).get(resource_id, 0.0))
+
+func _add_stock(state: Node, resource_id: String, amount: float) -> void:
+	if state == null:
+		return
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("add_estate_stock"):
+		runtime_state.call("add_estate_stock", resource_id, amount)
+		_mirror_stockpiles(state)
+		return
+	if state.has_method("_add_stock"):
+		state.call("_add_stock", resource_id, amount)
+
+func _current_veintena_value(state: Node) -> int:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("get_current_veintena_value"):
+		return int(runtime_state.call("get_current_veintena_value"))
+	if state != null and state.has_method("get_current_veintena"):
+		return int(state.call("get_current_veintena"))
+	if state != null:
+		return int(state.get("current_veintena"))
+	return 1
+
+func _player_prestige_value(state: Node) -> float:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("get_player_prestige_value"):
+		return float(runtime_state.call("get_player_prestige_value"))
+	if state != null:
+		return float(state.get("player_prestige"))
+	return 0.0
+
+func _mirror_palace_state(state: Node) -> void:
+	if state != null and state.has_method("_mirror_palace_state_from_campaign_state_to_legacy"):
+		state.call("_mirror_palace_state_from_campaign_state_to_legacy")
+		return
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("mirror_palace_state_to_game_state"):
+		runtime_state.call("mirror_palace_state_to_game_state", state)
+
+func _mirror_stockpiles(state: Node) -> void:
+	if state != null and state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
+		state.call("_mirror_stockpile_compatibility_from_campaign_state")
+		return
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("mirror_stockpiles_to_game_state"):
+		runtime_state.call("mirror_stockpiles_to_game_state", state)
+
 func _copy_stockpile_dictionary(source: Dictionary) -> Dictionary:
 	var output: Dictionary = {}
 	for key_variant: Variant in source.keys():
@@ -1458,7 +1694,16 @@ func _labour_group_name(state: Node, group_id: String) -> String:
 	return group_id.replace("_", " ").capitalize()
 
 func _append_report(state: Node, text: String) -> void:
-	if state == null:
+	if state == null or text.strip_edges() == "":
+		return
+	if state.has_method("_append_report_line"):
+		state.call("_append_report_line", text)
+		return
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("append_report_line"):
+		runtime_state.call("append_report_line", text)
+		if state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
+			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 		return
 	var report_variant: Variant = state.get("last_report")
 	if report_variant is Array:

@@ -2,11 +2,13 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/HousingSystem.gd
 #
-# Extracted in v0.43.5 from TRGameState.gd.
 # Owns housing-capacity, active/mothballed housing and housing-maintenance rules.
-# TRGameState remains the live state owner and public UI-facing API during migration.
+# Reads and writes CampaignState first through TRGameState bridge/accessors, with
+# TRGameState field fallback kept only for compatibility.
+
 class_name HousingSystem
 extends RefCounted
+
 
 func get_housing_summary(state: Node) -> Dictionary:
 	var tiers: Array[Dictionary] = []
@@ -20,6 +22,7 @@ func get_housing_summary(state: Node) -> Dictionary:
 	var built_capacity_by_group: Dictionary = housing_capacity_by_group(state, {}, false)
 	var active_capacity_by_group: Dictionary = housing_capacity_by_group(state, {}, true)
 	var maintenance: Dictionary = estimate_housing_maintenance(state)
+
 	for category_id: String in housing_category_order():
 		var tier: Dictionary = housing_category_summary(state, category_id, built_capacity_by_group, active_capacity_by_group)
 		tiers.append(tier)
@@ -30,6 +33,7 @@ func get_housing_summary(state: Node) -> Dictionary:
 		total_active_capacity += int(tier.get("active_capacity", 0))
 		total_over += int(tier.get("over_capacity", 0))
 		total_free += int(tier.get("free_capacity", 0))
+
 	return {
 		"tiers": tiers,
 		"capacity_by_group": active_capacity_by_group,
@@ -45,16 +49,19 @@ func get_housing_summary(state: Node) -> Dictionary:
 		"status_text": housing_status_text(total_active_population, total_active_capacity)
 	}
 
+
 func get_housing_rows(state: Node, focus_id: String = "overview") -> Array[Dictionary]:
 	var output: Array[Dictionary] = []
 	var built_capacity_by_group: Dictionary = housing_capacity_by_group(state, {}, false)
 	var active_capacity_by_group: Dictionary = housing_capacity_by_group(state, {}, true)
+
 	if focus_id == "" or focus_id == "overview":
 		for category_id: String in housing_category_order():
 			var tier: Dictionary = housing_category_summary(state, category_id, built_capacity_by_group, active_capacity_by_group)
 			tier["is_summary"] = true
 			output.append(tier)
 		return output
+
 	if focus_id == "mothball":
 		return get_housing_mothball_rows(state)
 
@@ -67,11 +74,14 @@ func get_housing_rows(state: Node, focus_id: String = "overview") -> Array[Dicti
 			continue
 		if String(definition.get("category", "")) != focus_id:
 			continue
-		output.append(housing_building_view_data(state, building_id))
+		output.append(housing_building_view_data(state, building_id, built_capacity_by_group, active_capacity_by_group))
+
 	return output
+
 
 func housing_capacity_by_group(state: Node, overrides: Dictionary = {}, active_only: bool = true) -> Dictionary:
 	ensure_active_housing_counts(state)
+
 	var result: Dictionary = {}
 	var base_housing_capacity: Dictionary = _base_housing_capacity(state)
 	var population: Dictionary = _population(state)
@@ -82,72 +92,99 @@ func housing_capacity_by_group(state: Node, overrides: Dictionary = {}, active_o
 	for group_variant: Variant in base_housing_capacity.keys():
 		var group_id: String = String(group_variant)
 		result[group_id] = int(base_housing_capacity[group_variant])
+
 	for group_variant: Variant in population.keys():
 		var group_id: String = String(group_variant)
 		if not result.has(group_id):
 			result[group_id] = 0
+
 	for building_id: String in _building_order(state):
 		if not is_housing_building_id(state, building_id):
 			continue
+		if not buildings.has(building_id):
+			continue
+
 		var built_count: int = int(estate_buildings.get(building_id, 0))
 		var count: int = built_count
 		if active_only:
 			count = int(active_housing_counts.get(building_id, built_count))
 		if overrides.has(building_id):
 			count = int(overrides[building_id])
+
 		count = clampi(count, 0, built_count)
 		if count <= 0:
 			continue
+
 		var definition: Dictionary = buildings[building_id] as Dictionary
 		var capacity: Dictionary = definition.get("housing_capacity", {}) as Dictionary
 		for group_variant: Variant in capacity.keys():
 			var group_id: String = String(group_variant)
 			result[group_id] = int(result.get(group_id, 0)) + int(capacity[group_variant]) * count
+
 	return result
+
 
 func active_population_by_group(state: Node) -> Dictionary:
 	var result: Dictionary = {}
 	var active_capacity: Dictionary = housing_capacity_by_group(state, {}, true)
-	for group_variant: Variant in _population(state).keys():
+	var population: Dictionary = _population(state)
+
+	for group_variant: Variant in population.keys():
 		var group_id: String = String(group_variant)
-		var total: int = int(_population(state).get(group_id, 0))
+		var total: int = int(population.get(group_id, 0))
 		var active_cap: int = int(active_capacity.get(group_id, total))
 		result[group_id] = mini(total, max(0, active_cap))
+
 	return result
+
 
 func inactive_population_by_group(state: Node) -> Dictionary:
 	var result: Dictionary = {}
 	var active: Dictionary = active_population_by_group(state)
-	for group_variant: Variant in _population(state).keys():
+	var population: Dictionary = _population(state)
+
+	for group_variant: Variant in population.keys():
 		var group_id: String = String(group_variant)
-		result[group_id] = max(0, int(_population(state).get(group_id, 0)) - int(active.get(group_id, 0)))
+		result[group_id] = max(0, int(population.get(group_id, 0)) - int(active.get(group_id, 0)))
+
 	return result
+
 
 func active_population_for_group(state: Node, group_id: String) -> int:
 	return int(active_population_by_group(state).get(group_id, 0))
 
+
 func estimate_housing_maintenance(state: Node) -> Dictionary:
-	# Mothballing does not avoid building maintenance. Maintenance is paid for all
-	# built housing, active or inactive.
 	var result: Dictionary = {}
 	var estate_buildings: Dictionary = _estate_buildings(state)
 	var buildings: Dictionary = _buildings(state)
+
 	for building_id: String in _building_order(state):
 		if not is_housing_building_id(state, building_id):
 			continue
+		if not buildings.has(building_id):
+			continue
+
 		var count: int = int(estate_buildings.get(building_id, 0))
 		if count <= 0:
 			continue
+
 		var definition: Dictionary = buildings[building_id] as Dictionary
 		var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
 		for resource_variant: Variant in maintenance.keys():
 			var resource_id: String = String(resource_variant)
 			result[resource_id] = float(result.get(resource_id, 0.0)) + float(maintenance[resource_variant]) * float(count)
+
 	return result
 
-func housing_building_view_data(state: Node, building_id: String) -> Dictionary:
+
+func housing_building_view_data(state: Node, building_id: String, built_capacity_by_group: Dictionary = {}, active_capacity_by_group: Dictionary = {}) -> Dictionary:
 	ensure_active_housing_counts(state)
+
 	var buildings: Dictionary = _buildings(state)
+	if not buildings.has(building_id):
+		return {}
+
 	var estate_buildings: Dictionary = _estate_buildings(state)
 	var active_housing_counts: Dictionary = _active_housing_counts(state)
 	var definition: Dictionary = buildings[building_id] as Dictionary
@@ -157,19 +194,27 @@ func housing_building_view_data(state: Node, building_id: String) -> Dictionary:
 	var capacity: Dictionary = definition.get("housing_capacity", {}) as Dictionary
 	var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
 	var category_id: String = String(definition.get("category", ""))
-	var category_summary: Dictionary = housing_category_summary(state, category_id, housing_capacity_by_group(state, {}, false), housing_capacity_by_group(state, {}, true))
+	var built_capacity_cache: Dictionary = built_capacity_by_group
+	var active_capacity_cache: Dictionary = active_capacity_by_group
+	if built_capacity_cache.is_empty():
+		built_capacity_cache = housing_capacity_by_group(state, {}, false)
+	if active_capacity_cache.is_empty():
+		active_capacity_cache = housing_capacity_by_group(state, {}, true)
+	var category_summary: Dictionary = housing_category_summary(state, category_id, built_capacity_cache, active_capacity_cache)
+
 	var can_build_value: bool = false
 	var build_status_value: String = "Build status unavailable."
 	var can_destroy_value: bool = false
 	var destroy_status_value: String = "Destroy status unavailable."
-	if state.has_method("can_build"):
+	if state != null and state.has_method("can_build"):
 		can_build_value = bool(state.call("can_build", building_id))
-	if state.has_method("build_status_text"):
+	if state != null and state.has_method("build_status_text"):
 		build_status_value = String(state.call("build_status_text", building_id))
-	if state.has_method("can_destroy"):
+	if state != null and state.has_method("can_destroy"):
 		can_destroy_value = bool(state.call("can_destroy", building_id))
-	if state.has_method("destroy_status_text"):
+	if state != null and state.has_method("destroy_status_text"):
 		destroy_status_value = String(state.call("destroy_status_text", building_id))
+
 	return {
 		"id": building_id,
 		"name": String(definition.get("name", building_id.capitalize())),
@@ -203,6 +248,7 @@ func housing_building_view_data(state: Node, building_id: String) -> Dictionary:
 		"status_text": housing_building_status_text(state, building_id)
 	}
 
+
 func housing_category_summary(state: Node, category_id: String, built_capacity_by_group: Dictionary, active_capacity_by_group: Dictionary) -> Dictionary:
 	var group_ids: Array[String] = housing_group_ids_for_category(category_id)
 	var population_total: int = 0
@@ -212,12 +258,13 @@ func housing_category_summary(state: Node, category_id: String, built_capacity_b
 	var active_capacity_total: int = 0
 	var member_rows: Array[Dictionary] = []
 	var population: Dictionary = _population(state)
+
 	for group_id: String in group_ids:
 		var pop_count: int = int(population.get(group_id, 0))
-		var active_pop: int = active_population_for_group(state, group_id)
-		var inactive_pop: int = max(0, pop_count - active_pop)
 		var built_capacity_count: int = int(built_capacity_by_group.get(group_id, 0))
 		var active_capacity_count: int = int(active_capacity_by_group.get(group_id, 0))
+		var active_pop: int = mini(pop_count, max(0, active_capacity_count))
+		var inactive_pop: int = max(0, pop_count - active_pop)
 		population_total += pop_count
 		active_population_total += active_pop
 		inactive_population_total += inactive_pop
@@ -235,16 +282,22 @@ func housing_category_summary(state: Node, category_id: String, built_capacity_b
 			"over_capacity": max(0, active_pop - active_capacity_count),
 			"status": housing_status_text(active_pop, active_capacity_count)
 		})
+
 	var building_options: Array[Dictionary] = []
 	var buildings: Dictionary = _buildings(state)
 	var estate_buildings: Dictionary = _estate_buildings(state)
 	var active_housing_counts: Dictionary = _active_housing_counts(state)
+
 	for building_id: String in _building_order(state):
 		if not is_housing_building_id(state, building_id):
 			continue
+		if not buildings.has(building_id):
+			continue
+
 		var definition: Dictionary = buildings[building_id] as Dictionary
 		if String(definition.get("category", "")) != category_id:
 			continue
+
 		building_options.append({
 			"id": building_id,
 			"name": String(definition.get("name", building_id.capitalize())),
@@ -256,6 +309,7 @@ func housing_category_summary(state: Node, category_id: String, built_capacity_b
 			"housing_maintenance": definition.get("housing_maintenance", {}) as Dictionary,
 			"efficiency_text": housing_efficiency_text(definition.get("housing_capacity", {}) as Dictionary, definition.get("housing_maintenance", {}) as Dictionary)
 		})
+
 	return {
 		"id": category_id,
 		"name": housing_category_name(category_id),
@@ -268,12 +322,14 @@ func housing_category_summary(state: Node, category_id: String, built_capacity_b
 		"over_capacity": max(0, active_population_total - active_capacity_total),
 		"status": housing_status_text(active_population_total, active_capacity_total),
 		"members": member_rows,
-		"building_options": building_options,
+		"buildings": building_options,
 		"maintenance": housing_maintenance_for_category(state, category_id)
 	}
 
+
 func housing_category_order() -> Array[String]:
 	return ["field_labour", "artisans", "tlacotin", "warriors", "priests", "nobles", "captives"]
+
 
 func housing_category_name(category_id: String) -> String:
 	match category_id:
@@ -293,6 +349,7 @@ func housing_category_name(category_id: String) -> String:
 			return "Captives"
 	return category_id.capitalize()
 
+
 func housing_group_ids_for_category(category_id: String) -> Array[String]:
 	match category_id:
 		"field_labour":
@@ -311,24 +368,33 @@ func housing_group_ids_for_category(category_id: String) -> Array[String]:
 			return ["malli"]
 	return []
 
+
 func housing_maintenance_for_category(state: Node, category_id: String) -> Dictionary:
 	var result: Dictionary = {}
 	var estate_buildings: Dictionary = _estate_buildings(state)
 	var buildings: Dictionary = _buildings(state)
+
 	for building_id: String in _building_order(state):
 		if not is_housing_building_id(state, building_id):
 			continue
+		if not buildings.has(building_id):
+			continue
+
 		var definition: Dictionary = buildings[building_id] as Dictionary
 		if String(definition.get("category", "")) != category_id:
 			continue
+
 		var count: int = int(estate_buildings.get(building_id, 0))
 		if count <= 0:
 			continue
+
 		var maintenance: Dictionary = definition.get("housing_maintenance", {}) as Dictionary
 		for resource_variant: Variant in maintenance.keys():
 			var resource_id: String = String(resource_variant)
 			result[resource_id] = float(result.get(resource_id, 0.0)) + float(maintenance[resource_variant]) * float(count)
+
 	return result
+
 
 func housing_status_text(population_count: int, capacity_count: int) -> String:
 	if capacity_count <= 0:
@@ -339,6 +405,7 @@ func housing_status_text(population_count: int, capacity_count: int) -> String:
 		return "Inactive overflow"
 	if population_count == capacity_count:
 		return "Full"
+
 	var use_ratio: float = float(population_count) / float(capacity_count)
 	if use_ratio >= 0.9:
 		return "Strained"
@@ -346,10 +413,13 @@ func housing_status_text(population_count: int, capacity_count: int) -> String:
 		return "Tight"
 	return "Comfortable"
 
+
 func housing_building_status_text(state: Node, building_id: String) -> String:
-	if not _buildings(state).has(building_id):
+	var buildings: Dictionary = _buildings(state)
+	if not buildings.has(building_id):
 		return "Unknown building."
-	var definition: Dictionary = _buildings(state)[building_id] as Dictionary
+
+	var definition: Dictionary = buildings[building_id] as Dictionary
 	var count: int = int(_estate_buildings(state).get(building_id, 0))
 	var active_count: int = int(_active_housing_counts(state).get(building_id, count))
 	var capacity: Dictionary = definition.get("housing_capacity", {}) as Dictionary
@@ -359,84 +429,112 @@ func housing_building_status_text(state: Node, building_id: String) -> String:
 		text += " Building upkeep each: " + _dictionary_to_named_string(state, maintenance, "") + "."
 	return text
 
+
 func housing_efficiency_text(capacity: Dictionary, maintenance: Dictionary) -> String:
 	if maintenance.is_empty():
 		return "No building upkeep"
 	return "Larger housing tiers have lower upkeep per capacity."
 
+
 func would_destroy_overcrowd(state: Node, building_id: String) -> Dictionary:
-	# Destroying removes the building entirely. It is blocked if that would make
-	# currently active people inactive. Mothballing is the safe way to deactivate.
 	var result: Dictionary = {"blocked": false, "lines": []}
 	if not is_housing_building_id(state, building_id):
 		return result
+
 	var current_count: int = int(_estate_buildings(state).get(building_id, 0))
 	if current_count <= 0:
 		return result
+
 	var active_count: int = int(_active_housing_counts(state).get(building_id, current_count))
 	var active_after: int = mini(active_count, max(0, current_count - 1))
 	var overrides: Dictionary = {building_id: active_after}
 	var after_capacity: Dictionary = housing_capacity_by_group(state, overrides, true)
+	var active_by_group: Dictionary = active_population_by_group(state)
 	var lines: Array[String] = []
+
 	for group_variant: Variant in _population(state).keys():
 		var group_id: String = String(group_variant)
-		var active_pop: int = active_population_for_group(state, group_id)
+		var active_pop: int = int(active_by_group.get(group_id, 0))
 		var capacity_count: int = int(after_capacity.get(group_id, 0))
 		if active_pop > capacity_count:
 			lines.append(labour_group_name(group_id) + " by " + str(active_pop - capacity_count))
+
 	if not lines.is_empty():
 		result["blocked"] = true
 		result["lines"] = lines
+
 	return result
+
 
 func is_housing_building_id(state: Node, building_id: String) -> bool:
 	var buildings: Dictionary = _buildings(state)
 	if not buildings.has(building_id):
 		return false
+
 	var definition: Dictionary = buildings[building_id] as Dictionary
 	return String(definition.get("screen", "")) == "housing" and (definition.has("housing_capacity") or definition.has("housing_maintenance"))
+
 
 func ensure_base_housing_capacity(state: Node) -> void:
 	var base_housing_capacity: Dictionary = _base_housing_capacity(state)
 	for group_variant: Variant in _population(state).keys():
 		var group_id: String = String(group_variant)
 		if not base_housing_capacity.has(group_id):
-			# Missing base capacity should not silently house the population.
-			# Starting housing now comes from start_state estate_buildings +
-			# active_housing_counts, so future/new groups default to 0 unless
-			# the start data explicitly grants inherited base capacity.
 			base_housing_capacity[group_id] = 0
-	state.set("base_housing_capacity", base_housing_capacity)
+	_set_base_housing_capacity(state, base_housing_capacity)
+
 
 func ensure_active_housing_counts(state: Node) -> void:
 	var active_housing_counts: Dictionary = _active_housing_counts(state)
+	var estate_buildings: Dictionary = _estate_buildings(state)
+	var buildings: Dictionary = _buildings(state)
+	var changed: bool = false
+
 	for building_id: String in _building_order(state):
-		if not is_housing_building_id(state, building_id):
+		var is_housing: bool = false
+		if buildings.has(building_id):
+			var definition: Dictionary = buildings[building_id] as Dictionary
+			is_housing = String(definition.get("screen", "")) == "housing" and (definition.has("housing_capacity") or definition.has("housing_maintenance"))
+		if not is_housing:
 			if active_housing_counts.has(building_id):
 				active_housing_counts.erase(building_id)
+				changed = true
 			continue
-		var built_count: int = int(_estate_buildings(state).get(building_id, 0))
+
+		var built_count: int = int(estate_buildings.get(building_id, 0))
 		if built_count <= 0:
-			active_housing_counts[building_id] = 0
+			if int(active_housing_counts.get(building_id, -1)) != 0:
+				active_housing_counts[building_id] = 0
+				changed = true
 			continue
+
 		if not active_housing_counts.has(building_id):
 			active_housing_counts[building_id] = built_count
+			changed = true
 		else:
-			active_housing_counts[building_id] = clampi(int(active_housing_counts[building_id]), 0, built_count)
-	state.set("active_housing_counts", active_housing_counts)
+			var clamped: int = clampi(int(active_housing_counts[building_id]), 0, built_count)
+			if int(active_housing_counts[building_id]) != clamped:
+				active_housing_counts[building_id] = clamped
+				changed = true
+
+	if changed:
+		_set_active_housing_counts(state, active_housing_counts)
 
 func set_active_housing_count(state: Node, building_id: String, active_count: int) -> bool:
 	if not is_housing_building_id(state, building_id):
 		return false
+
 	ensure_active_housing_counts(state)
 	var active_housing_counts: Dictionary = _active_housing_counts(state)
 	var built_count: int = int(_estate_buildings(state).get(building_id, 0))
 	active_housing_counts[building_id] = clampi(active_count, 0, built_count)
-	state.set("active_housing_counts", active_housing_counts)
+	_set_active_housing_counts(state, active_housing_counts)
 	return true
+
 
 func get_housing_mothball_rows(state: Node) -> Array[Dictionary]:
 	ensure_active_housing_counts(state)
+
 	var rows: Array[Dictionary] = []
 	for building_id: String in _building_order(state):
 		if not is_housing_building_id(state, building_id):
@@ -445,15 +543,19 @@ func get_housing_mothball_rows(state: Node) -> Array[Dictionary]:
 		if count <= 0:
 			continue
 		rows.append(housing_building_view_data(state, building_id))
+
 	return rows
+
 
 func get_housing_mothball_data(state: Node) -> Dictionary:
 	return {"summary": get_housing_summary(state), "rows": get_housing_mothball_rows(state)}
+
 
 func pay_housing_maintenance(state: Node) -> Array[Dictionary]:
 	var payments: Array[Dictionary] = []
 	var maintenance: Dictionary = estimate_housing_maintenance(state)
 	var estate_stockpiles: Dictionary = _estate_stockpiles(state)
+
 	for resource_variant: Variant in maintenance.keys():
 		var resource_id: String = String(resource_variant)
 		var needed: float = float(maintenance[resource_variant])
@@ -466,8 +568,10 @@ func pay_housing_maintenance(state: Node) -> Array[Dictionary]:
 			"paid": paid,
 			"shortfall": maxf(0.0, needed - paid)
 		})
-	state.set("estate_stockpiles", estate_stockpiles)
+
+	_set_estate_stockpiles(state, estate_stockpiles)
 	return payments
+
 
 func labour_group_name(group_id: String) -> String:
 	match group_id:
@@ -487,50 +591,113 @@ func labour_group_name(group_id: String) -> String:
 			return "Captives"
 	return group_id.capitalize()
 
-func _buildings(state: Node) -> Dictionary:
-	var value: Variant = state.get("buildings")
-	if value is Dictionary:
-		return value as Dictionary
+
+# -----------------------------------------------------------------------------
+# CampaignState-first accessors
+# -----------------------------------------------------------------------------
+
+func _campaign_state(state: Node) -> RefCounted:
+	if state == null:
+		return null
+	if state.has_method("_get_campaign_state"):
+		var raw: Variant = state.call("_get_campaign_state")
+		if raw is RefCounted:
+			return raw as RefCounted
+	return null
+
+func _dictionary_from_runtime_or_state(state: Node, key: String) -> Dictionary:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null:
+		var runtime_value: Variant = runtime_state.get(key)
+		if runtime_value is Dictionary:
+			return runtime_value as Dictionary
+
+	if state != null:
+		var fallback: Variant = state.get(key)
+		if fallback is Dictionary:
+			return fallback as Dictionary
+
 	return {}
+
+func _buildings(state: Node) -> Dictionary:
+	return _dictionary_from_runtime_or_state(state, "buildings")
+
 
 func _building_order(state: Node) -> Array[String]:
 	var output: Array[String] = []
-	var value: Variant = state.get("building_order")
-	if value is Array:
-		var array_value: Array = value as Array
-		for item: Variant in array_value:
+	var runtime_state: RefCounted = _campaign_state(state)
+	var raw_value: Variant = null
+	if runtime_state != null:
+		raw_value = runtime_state.get("building_order")
+	if raw_value == null and state != null:
+		raw_value = state.get("building_order")
+	if raw_value is Array:
+		for item: Variant in raw_value as Array:
 			output.append(String(item))
 	return output
 
+
 func _estate_buildings(state: Node) -> Dictionary:
-	var value: Variant = state.get("estate_buildings")
-	if value is Dictionary:
-		return value as Dictionary
-	return {}
+	return _dictionary_from_runtime_or_state(state, "estate_buildings")
+
 
 func _active_housing_counts(state: Node) -> Dictionary:
-	var value: Variant = state.get("active_housing_counts")
-	if value is Dictionary:
-		return value as Dictionary
-	return {}
+	return _dictionary_from_runtime_or_state(state, "active_housing_counts")
+
 
 func _population(state: Node) -> Dictionary:
-	var value: Variant = state.get("population")
-	if value is Dictionary:
-		return value as Dictionary
-	return {}
+	return _dictionary_from_runtime_or_state(state, "population")
+
 
 func _base_housing_capacity(state: Node) -> Dictionary:
-	var value: Variant = state.get("base_housing_capacity")
-	if value is Dictionary:
-		return value as Dictionary
-	return {}
+	return _dictionary_from_runtime_or_state(state, "base_housing_capacity")
+
 
 func _estate_stockpiles(state: Node) -> Dictionary:
-	var value: Variant = state.get("estate_stockpiles")
-	if value is Dictionary:
-		return value as Dictionary
-	return {}
+	return _dictionary_from_runtime_or_state(state, "estate_stockpiles")
+
+
+func _set_base_housing_capacity(state: Node, values: Dictionary) -> void:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("set_base_housing_capacity_values"):
+		runtime_state.call("set_base_housing_capacity_values", values)
+		_mirror_estate_structure(state)
+		return
+	if state != null:
+		state.set("base_housing_capacity", values)
+
+
+func _set_active_housing_counts(state: Node, values: Dictionary) -> void:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null:
+		for building_variant: Variant in values.keys():
+			var building_id: String = String(building_variant)
+			if runtime_state.has_method("set_active_housing_count_value"):
+				runtime_state.call("set_active_housing_count_value", building_id, int(values[building_variant]))
+			else:
+				runtime_state.set("active_housing_counts", values.duplicate(true))
+				break
+		_mirror_estate_structure(state)
+		return
+	if state != null:
+		state.set("active_housing_counts", values)
+
+
+func _set_estate_stockpiles(state: Node, values: Dictionary) -> void:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("set_estate_stockpiles_values"):
+		runtime_state.call("set_estate_stockpiles_values", values)
+		if state != null and state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
+			state.call("_mirror_stockpile_compatibility_from_campaign_state")
+		return
+	if state != null:
+		state.set("estate_stockpiles", values)
+
+
+func _mirror_estate_structure(state: Node) -> void:
+	if state != null and state.has_method("_mirror_estate_structure_compatibility_from_campaign_state"):
+		state.call("_mirror_estate_structure_compatibility_from_campaign_state")
+
 
 func _multiply_dictionary(values: Dictionary, multiplier: int) -> Dictionary:
 	var output: Dictionary = {}
@@ -539,9 +706,11 @@ func _multiply_dictionary(values: Dictionary, multiplier: int) -> Dictionary:
 		output[key] = float(values[key_variant]) * float(multiplier)
 	return output
 
+
 func _dictionary_to_named_string(state: Node, values: Dictionary, suffix: String = "") -> String:
 	if values.is_empty():
 		return "none"
+
 	var parts: Array[String] = []
 	for key_variant: Variant in values.keys():
 		var resource_id: String = String(key_variant)
@@ -553,7 +722,9 @@ func _dictionary_to_named_string(state: Node, values: Dictionary, suffix: String
 		if suffix != "":
 			piece += " " + suffix
 		parts.append(piece)
+
 	return ", ".join(parts)
+
 
 func _format_amount(value: float) -> String:
 	if absf(value - roundf(value)) < 0.01:

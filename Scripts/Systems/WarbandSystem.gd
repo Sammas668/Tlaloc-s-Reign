@@ -2,9 +2,9 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/WarbandSystem.gd
 #
-# Extracted warband roster / skill-web public API slice.
-# v0.45.4 owns the static warband trait-web definitions that used to bloat TRGameState.
-# TRGameState remains the public compatibility API during the CampaignState migration.
+# Owns warband roster, recovery, warrior assignment and skill-web rules.
+# Reads/writes CampaignState first through TRGameState accessors, with
+# TRGameState field fallback kept only for compatibility.
 class_name WarbandSystem
 extends RefCounted
 
@@ -2399,33 +2399,39 @@ func warband_doctrine_name(doctrine_id: String) -> String:
 # State/proxy helpers
 # -----------------------------------------------------------------------------
 
-func _warbands(state: Node) -> Dictionary:
+func _campaign_state(state: Node) -> RefCounted:
 	if state == null:
-		return {}
-	# v0.45.4a: keep WarbandSystem aligned with the CampaignState bridge before
-	# reading the legacy TRGameState.warbands compatibility dictionary.
-	if state.has_method("_ensure_campaign_state_warband_flower_war_bridge"):
-		state.call("_ensure_campaign_state_warband_flower_war_bridge")
-	var value: Variant = state.get("warbands")
-	if value is Dictionary:
-		return value as Dictionary
+		return null
+	if state.has_method("_get_campaign_state"):
+		var raw: Variant = state.call("_get_campaign_state")
+		if raw is RefCounted:
+			return raw as RefCounted
+	return null
+
+func _warbands(state: Node) -> Dictionary:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("get_warbands_copy"):
+		return runtime_state.call("get_warbands_copy") as Dictionary
+	if state != null:
+		var value: Variant = state.get("warbands")
+		if value is Dictionary:
+			return (value as Dictionary).duplicate(true)
 	return {}
 
 func _set_warbands(state: Node, warbands: Dictionary) -> void:
 	if state == null:
 		return
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("set_warbands_values"):
+		runtime_state.call("set_warbands_values", warbands)
+		if state.has_method("_mirror_warband_flower_war_compatibility_from_campaign_state"):
+			state.call("_mirror_warband_flower_war_compatibility_from_campaign_state")
+		return
 	state.set("warbands", warbands)
-	if state.has_method("_get_campaign_state"):
-		var runtime_state: Variant = state.call("_get_campaign_state")
-		if runtime_state != null and runtime_state.has_method("set_warbands_values"):
-			runtime_state.call("set_warbands_values", warbands)
-	if state.has_method("_mirror_warband_flower_war_compatibility_from_campaign_state"):
-		state.call("_mirror_warband_flower_war_compatibility_from_campaign_state")
 
 func _ensure_warbands(state: Node) -> void:
 	ensure_warband_state(state)
-	if state != null and state.has_method("_ensure_campaign_state_warband_flower_war_bridge"):
-		state.call("_ensure_campaign_state_warband_flower_war_bridge")
+	_campaign_state(state)
 
 func _matching_warband_id(state: Node, requested_id: String) -> String:
 	var requested: String = requested_id.strip_edges()
@@ -2478,7 +2484,18 @@ func _skill_node_by_id(state: Node, trait_id: String) -> Dictionary:
 	return warband_skill_node_by_id(trait_id)
 
 func _append_report(state: Node, line: String) -> void:
-	var report_variant: Variant = state.get("last_report")
+	if line.strip_edges() == "":
+		return
+	if state != null and state.has_method("_append_report_line"):
+		state.call("_append_report_line", line)
+		return
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("append_report_line"):
+		runtime_state.call("append_report_line", line)
+		if state != null and state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
+			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
+		return
+	var report_variant: Variant = state.get("last_report") if state != null else []
 	if report_variant is Array:
 		var report: Array = report_variant as Array
 		report.append(line)

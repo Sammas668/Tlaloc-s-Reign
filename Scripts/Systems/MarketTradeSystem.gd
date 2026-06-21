@@ -2,16 +2,16 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/MarketTradeSystem.gd
 #
-# v0.44.8 stockpile-authority update.
-# Owns barter-trade pricing, validation and application rules. When available,
-# accepted trades mutate stockpiles through CampaignState rather than directly
-# treating TRGameState dictionaries as the authority.
+# Owns barter-trade pricing, validation and application rules.
+# Accepted trades mutate CampaignState stockpiles first. TRGameState dictionary
+# fallback remains only for compatibility.
 
 class_name MarketTradeSystem
 extends RefCounted
 
 const SCHEMA_TRADE_PREVIEW: String = "market_trade_preview_v0_43_2"
 const SCHEMA_TRADE_VALIDATION: String = "market_trade_validation_v0_43_2"
+
 
 func get_trade_preview(state: Node, trade_plan: Dictionary) -> Dictionary:
 	var market_goods: Dictionary = market_goods_by_id(state)
@@ -22,6 +22,7 @@ func get_trade_preview(state: Node, trade_plan: Dictionary) -> Dictionary:
 	var bought_value: float = float(totals.get("bought_value", 0.0))
 	var balance: float = sold_value - bought_value
 	var trade_lines: Array[Dictionary] = prestige_trade_lines(trade_plan, market_goods)
+
 	return {
 		"schema_version": SCHEMA_TRADE_PREVIEW,
 		"trade_plan": _clean_trade_plan(trade_plan),
@@ -36,9 +37,11 @@ func get_trade_preview(state: Node, trade_plan: Dictionary) -> Dictionary:
 		"summary": trade_summary_text(sold_value, bought_value, balance)
 	}
 
+
 func validate_trade_plan(state: Node, trade_plan: Dictionary, market_goods: Dictionary = {}, store_goods: Dictionary = {}, include_parts: bool = true) -> Dictionary:
 	if state == null:
 		return {"schema_version": SCHEMA_TRADE_VALIDATION, "valid": false, "reason": "Trade data is not connected."}
+
 	if market_goods.is_empty():
 		market_goods = market_goods_by_id(state)
 	if store_goods.is_empty():
@@ -55,6 +58,7 @@ func validate_trade_plan(state: Node, trade_plan: Dictionary, market_goods: Dict
 		var amount: float = float(trade_plan[key_variant])
 		if absf(amount) <= 0.001:
 			continue
+
 		var store_good: Dictionary = store_goods.get(resource_id, {}) as Dictionary
 		var market_good: Dictionary = market_goods.get(resource_id, {}) as Dictionary
 		var free_value: float = maxf(0.0, float(store_good.get("free", 0.0)))
@@ -62,6 +66,7 @@ func validate_trade_plan(state: Node, trade_plan: Dictionary, market_goods: Dict
 		var pricing: Dictionary = trade_pricing(market_goods, resource_id, amount)
 		var trade_value: float = float(pricing.get("total_value", 0.0))
 		var name: String = good_name(state, resource_id, store_good, market_good)
+
 		if amount < -0.001:
 			var sell_amount: float = absf(amount)
 			if sell_amount > free_value + 0.001:
@@ -80,9 +85,11 @@ func validate_trade_plan(state: Node, trade_plan: Dictionary, market_goods: Dict
 
 	if clean_plan.is_empty():
 		return {"schema_version": SCHEMA_TRADE_VALIDATION, "valid": false, "reason": "No barter offer selected."}
+
 	var balance: float = sold_value - bought_value
 	if balance < -0.001:
 		return {"schema_version": SCHEMA_TRADE_VALIDATION, "valid": false, "reason": "Trade asks for " + _fmt(absf(balance)) + " more value than offered."}
+
 	return {
 		"schema_version": SCHEMA_TRADE_VALIDATION,
 		"valid": true,
@@ -96,6 +103,7 @@ func validate_trade_plan(state: Node, trade_plan: Dictionary, market_goods: Dict
 		"trade_lines": prestige_trade_lines(clean_plan, market_goods)
 	}
 
+
 func apply_trade_plan(state: Node, trade_plan: Dictionary) -> Dictionary:
 	var validation: Dictionary = validate_trade_plan(state, trade_plan)
 	if not bool(validation.get("valid", false)):
@@ -104,9 +112,7 @@ func apply_trade_plan(state: Node, trade_plan: Dictionary) -> Dictionary:
 		return {"valid": false, "reason": "Trade data is not connected."}
 
 	var plan: Dictionary = validation.get("plan", {}) as Dictionary
-	var campaign_state: Variant = null
-	if state.has_method("_ensure_campaign_state_stockpile_bridge"):
-		campaign_state = state.call("_ensure_campaign_state_stockpile_bridge")
+	var campaign_state: RefCounted = _campaign_stockpile_state(state)
 
 	if campaign_state != null and campaign_state.has_method("add_estate_stock") and campaign_state.has_method("add_market_stock"):
 		for key_variant: Variant in plan.keys():
@@ -114,13 +120,13 @@ func apply_trade_plan(state: Node, trade_plan: Dictionary) -> Dictionary:
 			var amount: float = float(plan[key_variant])
 			campaign_state.call("add_estate_stock", resource_id, amount)
 			campaign_state.call("add_market_stock", resource_id, -amount)
-		if state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
-			state.call("_mirror_stockpile_compatibility_from_campaign_state")
+		_mirror_stockpile_compatibility(state)
 	else:
 		var estate_variant: Variant = state.get("estate_stockpiles")
 		var market_variant: Variant = state.get("market_stockpiles")
 		if not (estate_variant is Dictionary) or not (market_variant is Dictionary):
 			return {"valid": false, "reason": "Stockpile data is not connected."}
+
 		var estate_stockpiles: Dictionary = estate_variant as Dictionary
 		var market_stockpiles: Dictionary = market_variant as Dictionary
 		for key_variant: Variant in plan.keys():
@@ -132,11 +138,8 @@ func apply_trade_plan(state: Node, trade_plan: Dictionary) -> Dictionary:
 		state.set("market_stockpiles", market_stockpiles)
 
 	var report_line: String = accepted_trade_report_line(validation)
-	var report_variant: Variant = state.get("last_report")
-	if report_variant is Array:
-		var report: Array = report_variant as Array
-		report.append(report_line)
-		state.set("last_report", report)
+	_append_report_line(state, report_line)
+
 	if state.has_signal("state_changed"):
 		state.emit_signal("state_changed")
 
@@ -144,26 +147,32 @@ func apply_trade_plan(state: Node, trade_plan: Dictionary) -> Dictionary:
 	validation["report_line"] = report_line
 	return validation
 
+
 func accepted_trade_report_line(validation: Dictionary) -> String:
 	var sold_parts: Array = validation.get("sold_parts", []) as Array
 	var bought_parts: Array = validation.get("bought_parts", []) as Array
 	var balance: float = float(validation.get("balance", 0.0))
 	var report_line: String = "Barter trade accepted."
+
 	if not sold_parts.is_empty():
 		report_line += " Sold: " + ", ".join(PackedStringArray(sold_parts)) + "."
 	if not bought_parts.is_empty():
 		report_line += " Bought: " + ", ".join(PackedStringArray(bought_parts)) + "."
 	if balance > 0.001:
 		report_line += " Surplus barter value " + _fmt(balance) + " lost."
+
 	return report_line
+
 
 func basket_totals(trade_plan: Dictionary, market_goods: Dictionary, excluded_resource_id: String = "") -> Dictionary:
 	var sold_value: float = 0.0
 	var bought_value: float = 0.0
+
 	for key_variant: Variant in trade_plan.keys():
 		var resource_id: String = String(key_variant)
 		if excluded_resource_id != "" and resource_id == excluded_resource_id:
 			continue
+
 		var amount: float = float(trade_plan[key_variant])
 		var pricing: Dictionary = trade_pricing(market_goods, resource_id, amount)
 		var value: float = float(pricing.get("total_value", 0.0))
@@ -171,7 +180,9 @@ func basket_totals(trade_plan: Dictionary, market_goods: Dictionary, excluded_re
 			sold_value += value
 		elif amount > 0.001:
 			bought_value += value
+
 	return {"sold_value": sold_value, "bought_value": bought_value, "balance": sold_value - bought_value}
+
 
 func largest_buy_amount_within_value(market_goods: Dictionary, resource_id: String, target_value: float, max_amount: int) -> int:
 	var best_amount: int = 0
@@ -183,6 +194,7 @@ func largest_buy_amount_within_value(market_goods: Dictionary, resource_id: Stri
 			break
 	return best_amount
 
+
 func smallest_sell_amount_covering_value(market_goods: Dictionary, resource_id: String, target_value: float, max_amount: int) -> int:
 	for amount: int in range(1, max_amount + 1):
 		var value: float = float(trade_pricing(market_goods, resource_id, -float(amount)).get("total_value", 0.0))
@@ -190,13 +202,16 @@ func smallest_sell_amount_covering_value(market_goods: Dictionary, resource_id: 
 			return amount
 	return 0
 
+
 func prestige_trade_lines(trade_plan: Dictionary, market_goods: Dictionary) -> Array[Dictionary]:
 	var output: Array[Dictionary] = []
+
 	for key_variant: Variant in trade_plan.keys():
 		var resource_id: String = String(key_variant)
 		var amount: float = float(trade_plan[key_variant])
 		if absf(amount) <= 0.001:
 			continue
+
 		var pricing: Dictionary = trade_pricing(market_goods, resource_id, amount)
 		output.append({
 			"resource_id": resource_id,
@@ -204,7 +219,9 @@ func prestige_trade_lines(trade_plan: Dictionary, market_goods: Dictionary) -> A
 			"average_unit_value": float(pricing.get("average_value", 0.0)),
 			"total_value": float(pricing.get("total_value", 0.0))
 		})
+
 	return output
+
 
 func trade_pricing(market_goods: Dictionary, resource_id: String, amount: float) -> Dictionary:
 	var market_good: Dictionary = market_goods.get(resource_id, {}) as Dictionary
@@ -244,6 +261,7 @@ func trade_pricing(market_goods: Dictionary, resource_id: String, amount: float)
 	var average_value: float = 0.0
 	if remaining_amount > 0:
 		average_value = total_value / float(remaining_amount)
+
 	return {
 		"total_value": total_value,
 		"average_value": average_value,
@@ -254,15 +272,16 @@ func trade_pricing(market_goods: Dictionary, resource_id: String, amount: float)
 		"final_stock": working_stock
 	}
 
+
 func current_unit_value_for(market_goods: Dictionary, resource_id: String) -> float:
 	var market_good: Dictionary = market_goods.get(resource_id, {}) as Dictionary
 	var pricing_stock: float = market_stock_for_pricing(market_good)
 	return trade_price_for_stock(market_goods, resource_id, pricing_stock)
 
+
 func market_stock_for_pricing(market_good: Dictionary) -> float:
-	# Price from projected post-village stock when available, matching the visible
-	# market rows and the existing Trade Basket behaviour.
 	return maxf(0.0, float(market_good.get("projected_market_stock", market_good.get("market_stock", 0.0))))
+
 
 func trade_price_for_stock(market_goods: Dictionary, resource_id: String, stock_value: float) -> float:
 	var market_good: Dictionary = market_goods.get(resource_id, {}) as Dictionary
@@ -270,8 +289,10 @@ func trade_price_for_stock(market_goods: Dictionary, resource_id: String, stock_
 	var demand_value: float = market_demand_for_pricing(market_good)
 	if demand_value <= 0.001:
 		return base_value
+
 	var coverage: float = maxf(0.0, stock_value) / demand_value
 	return base_value * local_scarcity_multiplier(coverage, demand_value)
+
 
 func market_demand_for_pricing(market_good: Dictionary) -> float:
 	var demand_value: float = maxf(0.0, float(market_good.get("village_total_demand", 0.0)))
@@ -279,41 +300,53 @@ func market_demand_for_pricing(market_good: Dictionary) -> float:
 		demand_value = maxf(0.0, float(market_good.get("demand", 0.0)))
 	return demand_value
 
+
 func local_scarcity_multiplier(coverage: float, demand: float) -> float:
 	return MarketPricingRules.scarcity_multiplier(coverage, demand)
+
 
 func market_goods_by_id(state: Node) -> Dictionary:
 	var output: Dictionary = {}
 	if state == null or not state.has_method("get_market_goods"):
 		return output
+
 	var goods: Array = state.call("get_market_goods") as Array
 	for good_variant: Variant in goods:
 		if good_variant is Dictionary:
 			var good: Dictionary = good_variant as Dictionary
 			output[String(good.get("id", ""))] = good
+
 	return output
+
 
 func store_goods_by_id(state: Node) -> Dictionary:
 	var output: Dictionary = {}
 	if state == null or not state.has_method("get_storehouse_goods"):
 		return output
+
 	var goods: Array = state.call("get_storehouse_goods") as Array
 	for good_variant: Variant in goods:
 		if good_variant is Dictionary:
 			var good: Dictionary = good_variant as Dictionary
 			output[String(good.get("id", ""))] = good
+
 	return output
+
 
 func good_name(state: Node, resource_id: String, store_good: Dictionary, market_good: Dictionary) -> String:
 	var name: String = String(store_good.get("name", ""))
 	if name != "":
 		return name
+
 	name = String(market_good.get("name", ""))
 	if name != "":
 		return name
+
 	if state != null and state.has_method("get_resource_name"):
 		return String(state.call("get_resource_name", resource_id))
+
 	return resource_id.replace("_", " ").capitalize()
+
 
 func trade_summary_text(sold_value: float, bought_value: float, balance: float) -> String:
 	if balance < -0.001:
@@ -324,6 +357,48 @@ func trade_summary_text(sold_value: float, bought_value: float, balance: float) 
 		return "Surplus value will be lost when accepted."
 	return "Balanced barter ready."
 
+
+func _campaign_stockpile_state(state: Node) -> RefCounted:
+	if state == null:
+		return null
+	if state.has_method("_get_campaign_state"):
+		var raw: Variant = state.call("_get_campaign_state")
+		if raw is RefCounted:
+			return raw as RefCounted
+	return null
+
+func _mirror_stockpile_compatibility(state: Node) -> void:
+	if state != null and state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
+		state.call("_mirror_stockpile_compatibility_from_campaign_state")
+
+
+func _append_report_line(state: Node, line: String) -> void:
+	if line.strip_edges() == "":
+		return
+
+	if state != null and state.has_method("_append_report_line"):
+		state.call("_append_report_line", line)
+		return
+
+	var runtime_state: RefCounted = null
+	if state != null and state.has_method("_get_campaign_state"):
+		var runtime: Variant = state.call("_get_campaign_state")
+		if runtime is RefCounted:
+			runtime_state = runtime as RefCounted
+
+	if runtime_state != null and runtime_state.has_method("append_report_line"):
+		runtime_state.call("append_report_line", line)
+		if state != null and state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
+			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
+		return
+
+	var report_variant: Variant = state.get("last_report") if state != null else []
+	if report_variant is Array:
+		var report: Array = report_variant as Array
+		report.append(line)
+		state.set("last_report", report)
+
+
 func _clean_trade_plan(trade_plan: Dictionary) -> Dictionary:
 	var output: Dictionary = {}
 	for key_variant: Variant in trade_plan.keys():
@@ -332,6 +407,7 @@ func _clean_trade_plan(trade_plan: Dictionary) -> Dictionary:
 		if absf(amount) > 0.001:
 			output[resource_id] = amount
 	return output
+
 
 func _fmt(value: float) -> String:
 	if is_equal_approx(value, roundf(value)):

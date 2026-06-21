@@ -1696,9 +1696,74 @@ func _build_palace_ruler_demands_probe_reports() -> void:
 
 func _palace_probe_summary() -> Dictionary:
 	var state: Node = _state()
-	if state != null and state.has_method("get_palace_summary"):
-		return state.call("get_palace_summary") as Dictionary
-	return {"palace_level": 1, "dedicated": false, "dedicated_god": "", "dedicated_god_name": "None", "route_name": "No dedication", "power_summary": "Palace backend summary is not connected.", "authority_status": "Not connected.", "built_structure_count": 0}
+	if state == null:
+		return {"palace_level": 1, "dedicated": false, "dedicated_god": "", "dedicated_god_name": "None", "route_name": "No dedication", "power_summary": "Palace backend summary is not connected.", "authority_status": "Not connected.", "built_structure_count": 0}
+
+	var dedicated_god: String = ""
+	if state.has_method("get_palace_dedicated_god"):
+		dedicated_god = String(state.call("get_palace_dedicated_god"))
+
+	var dedicated: bool = dedicated_god != ""
+	var god_name: String = "None"
+	if dedicated and state.has_method("_god_display_name"):
+		god_name = String(state.call("_god_display_name", dedicated_god))
+	elif dedicated:
+		god_name = dedicated_god.capitalize()
+
+	var route_name: String = "No dedication"
+	if state.has_method("get_palace_route_name"):
+		route_name = String(state.call("get_palace_route_name", dedicated_god))
+
+	var power_summary: String = "Choose a Divine Seat to define the palace route."
+	if state.has_method("get_palace_route_power_summary"):
+		power_summary = String(state.call("get_palace_route_power_summary", dedicated_god))
+
+	var palace_level: int = 1
+	if state.has_method("get_palace_level"):
+		palace_level = int(state.call("get_palace_level"))
+
+	var active_ids: Array = []
+	var inactive_ids: Array = []
+	var built_ids: Array = []
+	if state.has_method("get_built_palace_structure_ids"):
+		built_ids = state.call("get_built_palace_structure_ids") as Array
+	if state.has_method("get_active_palace_structure_ids"):
+		active_ids = state.call("get_active_palace_structure_ids") as Array
+	if state.has_method("get_inactive_palace_structure_ids"):
+		inactive_ids = state.call("get_inactive_palace_structure_ids") as Array
+
+	var staff_summary: Dictionary = {}
+	if state.has_method("get_palace_staff_summary"):
+		staff_summary = state.call("get_palace_staff_summary") as Dictionary
+
+	var total_maintenance: Dictionary = {}
+	if state.has_method("get_palace_total_maintenance"):
+		total_maintenance = state.call("get_palace_total_maintenance") as Dictionary
+
+	var operation_preview: Dictionary = {}
+	if state.has_method("get_palace_structure_operation_preview"):
+		operation_preview = state.call("get_palace_structure_operation_preview") as Dictionary
+
+	var authority_status: String = "Palace authority mechanics are not active yet."
+	if dedicated:
+		authority_status = str(active_ids.size()) + " active palace structure" + ("s" if active_ids.size() != 1 else "") + " for " + route_name + "."
+
+	return {
+		"schema_version": "palace_lightweight_probe_v0_8n5",
+		"palace_level": palace_level,
+		"dedicated": dedicated,
+		"dedicated_god": dedicated_god,
+		"dedicated_god_name": god_name,
+		"route_name": route_name,
+		"power_summary": power_summary,
+		"built_structure_count": built_ids.size(),
+		"active_structure_count": active_ids.size(),
+		"inactive_structure_count": inactive_ids.size(),
+		"staff_summary": staff_summary,
+		"total_maintenance": total_maintenance,
+		"palace_operation_preview": operation_preview,
+		"authority_status": authority_status
+	}
 
 func _palace_probe_routes() -> Array[Dictionary]:
 	var output: Array[Dictionary] = []

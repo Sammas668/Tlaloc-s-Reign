@@ -2,9 +2,10 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/ProductionSystem.gd
 #
-# Extracted in v0.43.6.
 # Owns production resolution and production operation rules.
-# TRGameState remains the live-state owner and public API while the architecture split continues.
+# CampaignState is the live/save-state owner. TRGameState remains the public
+# facade and compatibility API while systems migrate toward CampaignState-first
+# reads and writes.
 class_name ProductionSystem
 extends RefCounted
 
@@ -12,7 +13,7 @@ func estimate_production_resolution(state: Node) -> Dictionary:
 	if state == null:
 		return _empty_resolution()
 	_call_if_present(state, "_ensure_labour_assignments")
-	var temp_stockpile: Dictionary = _copy_float_dictionary(state.get("estate_stockpiles") as Dictionary)
+	var temp_stockpile: Dictionary = _copy_float_dictionary(_estate_stockpiles_copy(state))
 	var upkeep_needed: Dictionary = _call_dictionary(state, "estimate_population_upkeep")
 	var maintenance_needed: Dictionary = _call_dictionary(state, "estimate_housing_maintenance")
 	var upkeep_paid: Dictionary = {}
@@ -27,12 +28,11 @@ func estimate_production_resolution(state: Node) -> Dictionary:
 	var total_outputs: Dictionary = {}
 	var building_statuses: Dictionary = {}
 	var report_lines: Array[String] = []
-	var building_order: Array = state.get("building_order") as Array
-	var buildings: Dictionary = state.get("buildings") as Dictionary
-	var estate_buildings: Dictionary = state.get("estate_buildings") as Dictionary
+	var building_order: Array[String] = _building_order_copy(state)
+	var buildings: Dictionary = _buildings_copy(state)
+	var estate_buildings: Dictionary = _estate_buildings_copy(state)
 
-	for building_id_variant: Variant in building_order:
-		var building_id: String = String(building_id_variant)
+	for building_id: String in building_order:
 		if not buildings.has(building_id):
 			continue
 		var definition: Dictionary = buildings[building_id] as Dictionary
@@ -112,12 +112,11 @@ func operate_buildings(state: Node) -> Array[String]:
 	if state == null:
 		return reports
 	_call_if_present(state, "_ensure_labour_assignments")
-	var building_order: Array = state.get("building_order") as Array
-	var buildings: Dictionary = state.get("buildings") as Dictionary
-	var estate_buildings: Dictionary = state.get("estate_buildings") as Dictionary
+	var building_order: Array[String] = _building_order_copy(state)
+	var buildings: Dictionary = _buildings_copy(state)
+	var estate_buildings: Dictionary = _estate_buildings_copy(state)
 
-	for building_id_variant: Variant in building_order:
-		var building_id: String = String(building_id_variant)
+	for building_id: String in building_order:
 		var count: int = int(estate_buildings.get(building_id, 0))
 		if count <= 0 or not buildings.has(building_id):
 			continue
@@ -140,6 +139,7 @@ func operate_buildings(state: Node) -> Array[String]:
 			reports.append(String(definition.get("name", building_id)) + " operated x" + str(operated) + ".")
 		if _is_productive_building_id(state, building_id) and target_count < count:
 			reports.append(String(definition.get("name", building_id)) + " unstaffed x" + str(count - target_count) + ".")
+	_mirror_stockpiles_to_legacy(state)
 	return reports
 
 func _empty_resolution() -> Dictionary:
@@ -168,6 +168,66 @@ func _not_built_status() -> Dictionary:
 		"input_shortages": []
 	}
 
+func _campaign_state(state: Node) -> RefCounted:
+	if state == null:
+		return null
+	if state.has_method("_get_campaign_state"):
+		var raw: Variant = state.call("_get_campaign_state")
+		if raw is RefCounted:
+			return raw as RefCounted
+	return null
+
+func _campaign_dictionary(state: Node, key: String) -> Dictionary:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null:
+		match key:
+			"estate_stockpiles":
+				if runtime_state.has_method("get_estate_stockpiles_copy"):
+					return runtime_state.call("get_estate_stockpiles_copy") as Dictionary
+			"buildings":
+				var buildings_value: Variant = runtime_state.get("buildings")
+				if buildings_value is Dictionary:
+					return (buildings_value as Dictionary).duplicate(true)
+			"estate_buildings":
+				if runtime_state.has_method("get_estate_buildings_copy"):
+					return runtime_state.call("get_estate_buildings_copy") as Dictionary
+				var estate_value: Variant = runtime_state.get("estate_buildings")
+				if estate_value is Dictionary:
+					return (estate_value as Dictionary).duplicate(true)
+			_:
+				var generic_value: Variant = runtime_state.get(key)
+				if generic_value is Dictionary:
+					return (generic_value as Dictionary).duplicate(true)
+	var fallback: Variant = state.get(key)
+	if fallback is Dictionary:
+		return (fallback as Dictionary).duplicate(true)
+	return {}
+
+func _campaign_string_array(state: Node, key: String) -> Array[String]:
+	var output: Array[String] = []
+	var runtime_state: RefCounted = _campaign_state(state)
+	var raw_value: Variant = null
+	if runtime_state != null:
+		raw_value = runtime_state.get(key)
+	if raw_value == null:
+		raw_value = state.get(key)
+	if raw_value is Array:
+		for item: Variant in raw_value as Array:
+			output.append(String(item))
+	return output
+
+func _estate_stockpiles_copy(state: Node) -> Dictionary:
+	return _campaign_dictionary(state, "estate_stockpiles")
+
+func _buildings_copy(state: Node) -> Dictionary:
+	return _campaign_dictionary(state, "buildings")
+
+func _estate_buildings_copy(state: Node) -> Dictionary:
+	return _campaign_dictionary(state, "estate_buildings")
+
+func _building_order_copy(state: Node) -> Array[String]:
+	return _campaign_string_array(state, "building_order")
+
 func _call_if_present(state: Node, method_name: String) -> void:
 	if state != null and state.has_method(method_name):
 		state.call(method_name)
@@ -182,7 +242,7 @@ func _call_dictionary(state: Node, method_name: String) -> Dictionary:
 func _is_productive_building_id(state: Node, building_id: String) -> bool:
 	if state != null and state.has_method("_is_productive_building_id"):
 		return bool(state.call("_is_productive_building_id", building_id))
-	var buildings: Dictionary = state.get("buildings") as Dictionary
+	var buildings: Dictionary = _buildings_copy(state)
 	if not buildings.has(building_id):
 		return false
 	var definition: Dictionary = buildings[building_id] as Dictionary
@@ -192,7 +252,7 @@ func _is_productive_building_id(state: Node, building_id: String) -> bool:
 func _staffed_count_for_building(state: Node, building_id: String) -> int:
 	if state != null and state.has_method("_staffed_count_for_building"):
 		return int(state.call("_staffed_count_for_building", building_id))
-	var estate_buildings: Dictionary = state.get("estate_buildings") as Dictionary
+	var estate_buildings: Dictionary = _estate_buildings_copy(state)
 	return int(estate_buildings.get(building_id, 0))
 
 func _resource_name(state: Node, resource_id: String) -> String:
@@ -251,18 +311,35 @@ func _can_operate_instance(state: Node, definition: Dictionary) -> String:
 	return ""
 
 func _stock(state: Node, resource_id: String) -> float:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("get_estate_stock"):
+		return float(runtime_state.call("get_estate_stock", resource_id))
 	if state != null and state.has_method("_stock"):
 		return float(state.call("_stock", resource_id))
-	var stockpiles: Dictionary = state.get("estate_stockpiles") as Dictionary
+	var stockpiles: Dictionary = _estate_stockpiles_copy(state)
 	return float(stockpiles.get(resource_id, 0.0))
 
 func _add_stock(state: Node, resource_id: String, amount: float) -> void:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("add_estate_stock"):
+		runtime_state.call("add_estate_stock", resource_id, amount)
+		_mirror_stockpiles_to_legacy(state)
+		return
 	if state != null and state.has_method("_add_stock"):
 		state.call("_add_stock", resource_id, amount)
 		return
-	var stockpiles: Dictionary = state.get("estate_stockpiles") as Dictionary
+	var stockpiles: Dictionary = _estate_stockpiles_copy(state)
 	stockpiles[resource_id] = maxf(0.0, float(stockpiles.get(resource_id, 0.0)) + amount)
-	state.set("estate_stockpiles", stockpiles)
+	if state != null:
+		state.set("estate_stockpiles", stockpiles)
+
+func _mirror_stockpiles_to_legacy(state: Node) -> void:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("mirror_stockpiles_to_game_state"):
+		runtime_state.call("mirror_stockpiles_to_game_state", state)
+		return
+	if state != null and state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
+		state.call("_mirror_stockpile_compatibility_from_campaign_state")
 
 func _consume_inputs(state: Node, inputs: Dictionary) -> void:
 	for resource_variant: Variant in inputs.keys():

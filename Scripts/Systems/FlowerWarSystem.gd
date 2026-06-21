@@ -128,7 +128,7 @@ func flower_war_loot_display_value(state: Node, loot: Dictionary) -> float:
 	var total: float = 0.0
 	var resources: Dictionary = {}
 	if state != null:
-		var resources_variant: Variant = state.get("resources")
+		var resources_variant: Variant = _state_dictionary(state, "resources")
 		if resources_variant is Dictionary:
 			resources = resources_variant as Dictionary
 	for resource_variant: Variant in loot.keys():
@@ -393,7 +393,7 @@ func launch_combined_attack(state: Node, warband_ids: Array, option_id: String =
 		}
 		failed_report["all_warbands"] = all_warbands
 		failed_report["selected_warbands"] = not all_warbands
-		state.set("last_flower_war_report", failed_report)
+		_set_state_dictionary(state, "last_flower_war_report", failed_report)
 		_append_state_report(state, "Flower War not launched: " + String(failed_report.get("reason", "blocked")) + ".")
 		if state.has_signal("state_changed"):
 			state.emit_signal("state_changed")
@@ -420,7 +420,7 @@ func launch_combined_attack(state: Node, warband_ids: Array, option_id: String =
 	var participant_reports: Array[Dictionary] = []
 	var level_reports: Array[String] = []
 	var warbands: Dictionary = _state_dictionary(state, "warbands")
-	var current_veintena: int = int(state.get("current_veintena"))
+	var current_veintena: int = _current_veintena(state)
 
 	for participant_variant: Variant in participants:
 		if not (participant_variant is Dictionary):
@@ -488,7 +488,7 @@ func launch_combined_attack(state: Node, warband_ids: Array, option_id: String =
 			participant_report["returned_ready"] = max(0, committed_i - casualties_i)
 		participant_reports.append(participant_report)
 
-	state.set("warbands", warbands)
+	_set_state_dictionary(state, "warbands", warbands)
 	if total_dead > 0:
 		var population: Dictionary = _state_dictionary(state, "population")
 		var warrior_count: int = 0
@@ -497,11 +497,11 @@ func launch_combined_attack(state: Node, warband_ids: Array, option_id: String =
 		else:
 			warrior_count = int(population.get("yaotequihuaqueh", 0))
 		population["yaotequihuaqueh"] = max(0, warrior_count - total_dead)
-		state.set("population", population)
+		_set_state_dictionary(state, "population", population)
 	if captives > 0:
 		var estate_stockpiles: Dictionary = _state_dictionary(state, "estate_stockpiles")
 		estate_stockpiles["captives"] = float(estate_stockpiles.get("captives", 0.0)) + float(captives)
-		state.set("estate_stockpiles", estate_stockpiles)
+		_set_state_dictionary(state, "estate_stockpiles", estate_stockpiles)
 	if state.has_method("add_looted_goods_bundle"):
 		state.call("add_looted_goods_bundle", preview.get("loot", {}) as Dictionary)
 
@@ -526,7 +526,7 @@ func launch_combined_attack(state: Node, warband_ids: Array, option_id: String =
 		report = state.call("_apply_flower_war_prestige_to_report", report) as Dictionary
 	if state.has_method("_archive_flower_war_report"):
 		state.call("_archive_flower_war_report", report)
-	state.set("last_flower_war_report", report)
+	_set_state_dictionary(state, "last_flower_war_report", report)
 
 	var line_prefix: String = "All warbands fought " if all_warbands else "Selected warbands fought "
 	var line: String = line_prefix + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_total) + " shared by participating warbands. " + String(report.get("prestige_text", "Prestige +0")) + "."
@@ -855,18 +855,54 @@ func _warband_combat_stats_from_warband(state: Node, warband: Dictionary) -> Dic
 			return result as Dictionary
 	return _fallback_warband_combat_stats(warband)
 
+func _campaign_state(state: Node) -> RefCounted:
+	if state == null:
+		return null
+	if state.has_method("_get_campaign_state"):
+		var raw: Variant = state.call("_get_campaign_state")
+		if raw is RefCounted:
+			return raw as RefCounted
+	return null
+
 func _set_state_dictionary(state: Node, property_name: String, value: Dictionary) -> void:
-	if state != null:
-		state.set(property_name, value.duplicate(true))
+	if state == null:
+		return
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null:
+		match property_name:
+			"warbands":
+				if runtime_state.has_method("set_warbands_values"):
+					runtime_state.call("set_warbands_values", value)
+					_mirror_warband_state(state)
+					return
+			"population":
+				for key_variant: Variant in value.keys():
+					if runtime_state.has_method("set_population_count"):
+						runtime_state.call("set_population_count", String(key_variant), int(value[key_variant]))
+				if state.has_method("_mirror_population_building_housing_to_game_state"):
+					state.call("_mirror_population_building_housing_to_game_state")
+				return
+			"estate_stockpiles":
+				if runtime_state.has_method("set_estate_stockpiles_values"):
+					runtime_state.call("set_estate_stockpiles_values", value)
+					if state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
+						state.call("_mirror_stockpile_compatibility_from_campaign_state")
+					return
+			"last_flower_war_report":
+				if runtime_state.has_method("set_last_flower_war_report"):
+					runtime_state.call("set_last_flower_war_report", value)
+					_mirror_warband_state(state)
+					return
+	state.set(property_name, value.duplicate(true))
 
 func _mirror_warband_state(state: Node) -> void:
 	if state != null and state.has_method("_mirror_warband_flower_war_compatibility_from_campaign_state"):
-		# Capture first when available so CampaignState sees any mutation made through the legacy dictionary.
-		if state.has_method("_ensure_campaign_state_warband_flower_war_bridge"):
-			state.call("_ensure_campaign_state_warband_flower_war_bridge")
 		state.call("_mirror_warband_flower_war_compatibility_from_campaign_state")
 
 func _current_veintena(state: Node) -> int:
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("get_current_veintena_value"):
+		return int(runtime_state.call("get_current_veintena_value"))
 	if state != null and state.has_method("get_current_veintena"):
 		return int(state.call("get_current_veintena"))
 	if state != null:
@@ -874,15 +910,42 @@ func _current_veintena(state: Node) -> int:
 	return 1
 
 func _state_dictionary(state: Node, property_name: String) -> Dictionary:
-	if state == null:
-		return {}
-	var value: Variant = state.get(property_name)
-	if value is Dictionary:
-		return value as Dictionary
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null:
+		match property_name:
+			"warbands":
+				if runtime_state.has_method("get_warbands_copy"):
+					return runtime_state.call("get_warbands_copy") as Dictionary
+			"population":
+				if runtime_state.has_method("get_population_copy"):
+					return runtime_state.call("get_population_copy") as Dictionary
+			"estate_stockpiles":
+				if runtime_state.has_method("get_estate_stockpiles_copy"):
+					return runtime_state.call("get_estate_stockpiles_copy") as Dictionary
+			"resources", "market_economy":
+				var runtime_value: Variant = runtime_state.get(property_name)
+				if runtime_value is Dictionary:
+					return (runtime_value as Dictionary).duplicate(true)
+			"last_flower_war_report":
+				if runtime_state.has_method("get_last_flower_war_report_copy"):
+					return runtime_state.call("get_last_flower_war_report_copy") as Dictionary
+	if state != null:
+		var value: Variant = state.get(property_name)
+		if value is Dictionary:
+			return (value as Dictionary).duplicate(true)
 	return {}
 
 func _append_state_report(state: Node, line: String) -> void:
-	if state == null:
+	if state == null or line.strip_edges() == "":
+		return
+	if state.has_method("_append_report_line"):
+		state.call("_append_report_line", line)
+		return
+	var runtime_state: RefCounted = _campaign_state(state)
+	if runtime_state != null and runtime_state.has_method("append_report_line"):
+		runtime_state.call("append_report_line", line)
+		if state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
+			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 		return
 	var report_variant: Variant = state.get("last_report")
 	if report_variant is Array:
@@ -946,7 +1009,7 @@ func resolve_defence(state: Node, option_id: String = "standard", strategy_id: S
 			"reason": String(status.get("reason", "Flower War defence cannot resolve.")),
 			"war_direction": "defence"
 		}
-		state.set("last_flower_war_report", failed_report)
+		_set_state_dictionary(state, "last_flower_war_report", failed_report)
 		_append_state_report(state, "Flower War defence not resolved: " + String(failed_report.get("reason", "blocked")) + ".")
 		if state.has_signal("state_changed"):
 			state.emit_signal("state_changed")
@@ -966,7 +1029,7 @@ func resolve_defence(state: Node, option_id: String = "standard", strategy_id: S
 	var participant_reports: Array[Dictionary] = []
 	var level_reports: Array[String] = []
 	var warbands: Dictionary = _state_dictionary(state, "warbands")
-	var current_veintena: int = int(state.get("current_veintena"))
+	var current_veintena: int = _current_veintena(state)
 
 	for participant_variant: Variant in participants:
 		if not (participant_variant is Dictionary):
@@ -1028,7 +1091,7 @@ func resolve_defence(state: Node, option_id: String = "standard", strategy_id: S
 			"level_after": level_after
 		})
 
-	state.set("warbands", warbands)
+	_set_state_dictionary(state, "warbands", warbands)
 	if total_dead > 0:
 		var population: Dictionary = _state_dictionary(state, "population")
 		var warrior_count: int = 0
@@ -1037,7 +1100,7 @@ func resolve_defence(state: Node, option_id: String = "standard", strategy_id: S
 		else:
 			warrior_count = int(population.get("yaotequihuaqueh", 0))
 		population["yaotequihuaqueh"] = max(0, warrior_count - total_dead)
-		state.set("population", population)
+		_set_state_dictionary(state, "population", population)
 
 	var report: Dictionary = preview.duplicate(true)
 	report["ok"] = true
@@ -1054,7 +1117,7 @@ func resolve_defence(state: Node, option_id: String = "standard", strategy_id: S
 		report = state.call("_apply_flower_war_prestige_to_report", report) as Dictionary
 	if state.has_method("_archive_flower_war_report"):
 		state.call("_archive_flower_war_report", report)
-	state.set("last_flower_war_report", report)
+	_set_state_dictionary(state, "last_flower_war_report", report)
 
 	var line: String = "Defending warbands resolved " + String(preview.get("option_name", "Flower War")) + " using " + String(preview.get("defence_strategy_name", "Balanced Defence")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors defending " + str(committed) + " across " + str(participant_reports.size()) + " warbands; casualties " + str(casualties) + " (injured " + str(total_injured) + ", dead " + str(total_dead) + "). Enemy casualties " + str(int(preview.get("enemy_casualties", 0))) + ". XP +" + str(xp_total) + " shared by defending warbands. " + String(report.get("prestige_text", "Prestige +0")) + "."
 	if not level_reports.is_empty():
@@ -1074,11 +1137,7 @@ func get_defence_preview(state: Node, option_id: String = "standard", strategy_i
 		return {"ok": false, "reason": "Unknown Flower War option."}
 	var option: Dictionary = FLOWER_WAR_OPTIONS[option_id] as Dictionary
 	var strategy: Dictionary = flower_war_defence_strategy_data(strategy_id)
-	var warbands: Dictionary = {}
-	if state != null:
-		var warbands_variant: Variant = state.get("warbands")
-		if warbands_variant is Dictionary:
-			warbands = warbands_variant as Dictionary
+	var warbands: Dictionary = _state_dictionary(state, "warbands")
 	var participants: Array[Dictionary] = []
 	var warriors_committed: int = 0
 	var weighted_offence: float = 0.0
@@ -1113,7 +1172,7 @@ func get_defence_preview(state: Node, option_id: String = "standard", strategy_i
 		weighted_offence += float(stats.get("effective_offence", 0.0))
 		weighted_defence += float(stats.get("effective_defence", 0.0))
 	if state != null:
-		state.set("warbands", warbands)
+		_set_state_dictionary(state, "warbands", warbands)
 	if warriors_committed <= 0:
 		return {"ok": false, "reason": "No ready warbands can defend."}
 	var enemy_warriors: int = int(option.get("enemy_warriors", option.get("warriors", 0)))
