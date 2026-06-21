@@ -10,7 +10,9 @@
 #
 # This view now asks TRGameState / MarketTradeSystem for trade pricing,
 # validation and application rules instead of owning those rules itself.
-# The local pricing helpers remain only as fallback compatibility.
+# Local pricing remains preview-only fallback compatibility. Emergency trade
+# application fallback writes through CampaignState/runtime helpers, not
+# TRGameState mirror fields.
 
 extends PanelContainer
 
@@ -611,27 +613,28 @@ func _apply_trade(validation: Dictionary) -> Dictionary:
 		var result_variant: Variant = state.call("apply_market_trade_plan", validation.get("plan", trade_plan))
 		if result_variant is Dictionary:
 			return result_variant as Dictionary
-	_apply_trade_fallback(validation)
-	return {"valid": true, "applied": true}
+	return _apply_trade_fallback(validation)
 
 
-func _apply_trade_fallback(validation: Dictionary) -> void:
+func _apply_trade_fallback(validation: Dictionary) -> Dictionary:
 	var plan: Dictionary = validation.get("plan", {}) as Dictionary
-	var estate_variant: Variant = state.get("estate_stockpiles")
-	var market_variant: Variant = state.get("market_stockpiles")
-	if not (estate_variant is Dictionary) or not (market_variant is Dictionary):
-		return
-	var estate_stockpiles: Dictionary = estate_variant as Dictionary
-	var market_stockpiles: Dictionary = market_variant as Dictionary
+	if plan.is_empty():
+		return {"valid": false, "applied": false, "reason": "No barter offer selected."}
+
+	if _campaign_state() == null:
+		return {
+			"valid": false,
+			"applied": false,
+			"reason": "MarketTradeSystem API is not connected and CampaignState fallback is unavailable."
+		}
 
 	for key_variant: Variant in plan.keys():
 		var resource_id: String = String(key_variant)
 		var amount: float = float(plan[key_variant])
-		estate_stockpiles[resource_id] = maxf(0.0, float(estate_stockpiles.get(resource_id, 0.0)) + amount)
-		market_stockpiles[resource_id] = maxf(0.0, float(market_stockpiles.get(resource_id, 0.0)) - amount)
+		_add_estate_stock(resource_id, amount)
+		_add_market_stock(resource_id, -amount)
 
-	state.set("estate_stockpiles", estate_stockpiles)
-	state.set("market_stockpiles", market_stockpiles)
+	_mirror_stockpiles_if_needed()
 
 	var sold_parts: Array = validation.get("sold_parts", []) as Array
 	var bought_parts: Array = validation.get("bought_parts", []) as Array
@@ -644,13 +647,57 @@ func _apply_trade_fallback(validation: Dictionary) -> void:
 	if balance > 0.001:
 		report_line += " Surplus barter value " + _fmt(balance) + " lost."
 
-	var report_variant: Variant = state.get("last_report")
-	if report_variant is Array:
-		var report: Array = report_variant as Array
-		report.append(report_line)
-		state.set("last_report", report)
-	if state.has_signal("state_changed"):
+	_append_report_line(report_line)
+
+	if state != null and state.has_signal("state_changed"):
 		state.emit_signal("state_changed")
+
+	return {"valid": true, "applied": true, "reason": "Trade applied through CampaignState fallback."}
+
+
+func _campaign_state() -> RefCounted:
+	if state == null:
+		return null
+	if state.has_method("_get_campaign_state"):
+		var raw: Variant = state.call("_get_campaign_state")
+		if raw is RefCounted:
+			return raw as RefCounted
+	if state.has_method("get_campaign_state_snapshot"):
+		var snapshot_raw: Variant = state.call("get_campaign_state_snapshot")
+		if snapshot_raw is RefCounted:
+			return snapshot_raw as RefCounted
+	return null
+
+
+func _add_estate_stock(resource_id: String, amount: float) -> void:
+	if state != null and state.has_method("_add_stock"):
+		state.call("_add_stock", resource_id, amount)
+		return
+	var campaign: RefCounted = _campaign_state()
+	if campaign != null and campaign.has_method("add_estate_stock"):
+		campaign.call("add_estate_stock", resource_id, amount)
+
+
+func _add_market_stock(resource_id: String, amount: float) -> void:
+	var campaign: RefCounted = _campaign_state()
+	if campaign != null and campaign.has_method("add_market_stock"):
+		campaign.call("add_market_stock", resource_id, amount)
+
+
+func _mirror_stockpiles_if_needed() -> void:
+	if state != null and state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
+		state.call("_mirror_stockpile_compatibility_from_campaign_state")
+
+
+func _append_report_line(line: String) -> void:
+	if state != null and state.has_method("_append_report_line"):
+		state.call("_append_report_line", line)
+		return
+	var campaign: RefCounted = _campaign_state()
+	if campaign != null and campaign.has_method("append_report_line"):
+		campaign.call("append_report_line", line)
+		if state != null and state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
+			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 
 
 func _market_goods_by_id() -> Dictionary:
