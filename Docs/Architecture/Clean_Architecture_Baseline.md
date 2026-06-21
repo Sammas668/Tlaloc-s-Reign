@@ -1,9 +1,9 @@
 # Tlaloc's Reign — Clean Architecture Baseline
 
 Last updated: 2026-06-21  
-Milestone: Patch 8L / v0.48.0 — Clean Architecture Baseline
+Milestone: Patch 8O4F — Post-Mirror Architecture Baseline
 
-This document defines where code belongs after the Patch 8A–8K2 architecture cleanup sequence.
+This document defines where code belongs after the 8O3 mirror deletion series and the 8O4 post-mirror cleanup sequence.
 
 ---
 
@@ -25,6 +25,7 @@ This means:
 - Systems calculate rules and mutate state.
 - `CampaignState` owns live/save campaign data.
 - Legacy files do not receive new gameplay work.
+- No old live-state mirror fields should be restored on `TRGameState`.
 
 ---
 
@@ -34,10 +35,10 @@ This means:
 |---|---|
 | Public runtime facade | `Scripts/Autoload/TRGameState.gd` |
 | Live/save state owner | `Scripts/state/CampaignState.gd` |
-| Legacy state shim | `Scripts/state/GameState.gd` |
+| Legacy state forwarder | `Scripts/state/GameState.gd` |
 | Active gameplay coordinator | `Scripts/ui/GameScreenMarketOverviewPatch.gd` |
 | Turn / Veintena / Nemontemi resolution | `Scripts/Systems/TurnResolutionSystem.gd` |
-| CampaignState bridge | `Scripts/Systems/CampaignBridgeSystem.gd` |
+| State compatibility/audit bridge | `Scripts/Systems/CampaignBridgeSystem.gd` |
 | Religion state | `Scripts/Systems/ReligionStateSystem.gd` |
 | Shrine / ritual static rules | `Scripts/Systems/ShrineRitualRules.gd` |
 | War doctrine rules | `Scripts/Systems/WarDoctrineRules.gd` |
@@ -85,7 +86,7 @@ Allowed:
 - instantiate controllers and widgets
 - connect UI events
 - call `TRGameState`
-- provide compatibility helpers during migration
+- provide small compatibility helpers during migration
 
 Not allowed:
 
@@ -96,6 +97,7 @@ Not allowed:
 - duplicated doctrine values
 - market pricing rules
 - new rival AI logic
+- direct live-state storage
 
 ### `UIScreenContext.gd`
 
@@ -127,11 +129,17 @@ It is allowed to:
 
 - expose gameplay methods to UI
 - instantiate/access systems
-- bridge to CampaignState
+- delegate to `CampaignState`
 - emit state/turn signals
-- hold compatibility mirrors during migration
+- provide stable public helper methods for UI and systems
 
-It should not become the permanent live-state owner.
+It is not allowed to:
+
+- own duplicated live-state containers
+- recreate old live-state mirror fields
+- use broad sync calls in read paths
+- use property getters/setters for state migration
+- become the permanent live-state owner
 
 ### `CampaignState.gd`
 
@@ -142,9 +150,15 @@ It owns the authoritative containers for:
 - calendar state
 - report state
 - turn summary state
-- stockpiles
-- market state
-- population/housing/labour state
+- static resource/building definitions loaded for the campaign
+- estate stockpiles
+- market stockpiles and demand
+- market economy data
+- estate buildings
+- active housing
+- population
+- base housing capacity
+- labour assignments
 - palace state
 - prestige state
 - religion state
@@ -152,19 +166,35 @@ It owns the authoritative containers for:
 - warbands
 - rival scaffold state
 
+`CampaignState` should contain data containers, data-shaping helpers and save/load helpers. It should not become a gameplay-rules dumping ground.
+
 ### `CampaignBridgeSystem.gd`
 
-Role: transitional bridge.
+Current role: compatibility and diagnostics.
 
-It keeps old TRGameState mirrors from breaking active UI while preserving CampaignState-authoritative domains.
+It no longer owns broad `TRGameState <-> CampaignState` syncing.
 
-Calendar/report state and religion state should not be overwritten by legacy mirrors.
+Allowed:
+
+- return CampaignState handles for old callers
+- emit `state_changed` through the runtime facade
+- provide diagnostic sync-report text
+- retain harmless no-op compatibility hooks until 8O4G proves callers are gone
+
+Not allowed:
+
+- copying live state from `TRGameState` into `CampaignState`
+- writing old mirror fields back onto `TRGameState`
+- seeding religion/rival state from metadata or old facade fields
+- broad sync calls in read paths
 
 ### `GameState.gd`
 
-Role: legacy shim only.
+Role: retired legacy forwarder only.
 
 It is not an autoload. Do not target it for new Prototype 0 work.
+
+It may forward old calls to `/root/TRGameState`, but it must not inspect old `TRGameState` fields.
 
 ---
 
@@ -198,7 +228,7 @@ CampaignState.religion_state
 
 Authoritative ordinary and Nemontemi divine favour decay belongs in `TurnResolutionSystem.gd`.
 
-Shrine controller decay/reset methods are legacy compatibility bridges only and should not be used by new turn code.
+8O4C removed metadata seeding and mirror write-back from the religion bridge. New religion work should use CampaignState-backed APIs only.
 
 ---
 
@@ -271,11 +301,27 @@ Doctrine values come from `WarDoctrineRules.gd`.
 
 ---
 
-## 11. Legacy / inactive files
+## 11. Rival architecture
+
+`RivalSystem.gd` owns rival identity, pressure-note and placeholder rival-prestige rules.
+
+Rival live data belongs in `CampaignState`:
+
+- `rival_houses`
+- `rival_stockpiles`
+- `rival_build_progress`
+- `rival_action_history`
+- `rival_prestige`
+
+8O4D removed old `game_state.get("rival_prestige")` and `game_state.set("rival_prestige", ...)` fallback paths. New rival work should not restore those paths.
+
+---
+
+## 12. Legacy / inactive files
 
 ### `Scripts/state/GameState.gd`
 
-Legacy compatibility shim only.
+Retired forwarder only.
 
 ### `Scripts/ui/GameScreenStateDriven.gd`
 
@@ -285,7 +331,7 @@ Do not use these as sources of truth for future coding.
 
 ---
 
-## 12. File placement rules
+## 13. File placement rules
 
 ### Put new gameplay rules in:
 
@@ -323,31 +369,40 @@ Scripts/ui/GameScreenStateDriven.gd
 
 ---
 
-## 13. Clean enough definition
+## 14. Post-mirror definition of clean
 
-The architecture is now clean enough to continue gameplay because:
+The architecture is post-mirror when:
 
-- `TRGameState` is the public facade.
+- `TRGameState` is the public facade only.
 - `CampaignState` is the live/save data owner.
 - `GameState` is legacy and not an active autoload.
 - `GameScreenMarketOverviewPatch` is a coordinator.
 - major UI screens are extracted controllers.
 - turn resolution is system-owned.
 - religion state is CampaignState-backed.
+- rival state is CampaignState-backed.
 - doctrine values have one source of truth.
 - market UI is extracted.
-- docs match the current structure.
+- no live-state compatibility mirrors remain on `TRGameState`.
+- no broad `apply_to_game_state()` / `copy_from_game_state()` bridge path remains active.
+- remaining compatibility hooks are no-op/direct CampaignState access only.
 
-Remaining compatibility mirrors are acceptable Prototype 0 migration debt, not blockers.
+8O4F records this baseline. 8O4G should verify it with a final grep audit.
 
 ---
 
-## 14. Next development target
+## 15. Next development target
 
-Proceed to:
+First complete:
+
+```text
+8O4G — Final grep audit: state.get/state.set/mirror/legacy/fallback
+```
+
+Then proceed to:
 
 ```text
 Patch 9 — Structured Veintena Results Summary
 ```
 
-This should display `CampaignState.last_turn_summary` / runtime turn-summary output in a readable player-facing panel after turn advancement.
+Patch 9 should display `CampaignState.last_turn_summary` / runtime turn-summary output in a readable player-facing panel after turn advancement.

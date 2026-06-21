@@ -1,9 +1,9 @@
 # Tlaloc's Reign — Development Roadmap
 
 Last updated: 2026-06-21  
-Current milestone: Patch 8L / v0.48.0 — Clean Architecture Baseline
+Current milestone: Patch 8O4F — Post-Mirror Architecture Baseline
 
-This roadmap starts from the post-architecture-cleanup project state. The architecture stabilisation sequence from Patch 8A through Patch 8L is now considered complete enough to resume gameplay development.
+This roadmap starts from the post-mirror architecture state. The 8O3 sequence removed old `TRGameState` live-state mirrors, and the 8O4 sequence is removing the scaffolding that supported those mirrors.
 
 ---
 
@@ -65,7 +65,7 @@ Started cleanup of stale wrapper code and duplicate references.
 
 ### Patch 8K2 — Architecture Cleanup Completion
 
-Completed the cleanup:
+Completed the first cleanup pass:
 
 - wrapper preloads/constants cleaned
 - stale comments cleaned
@@ -76,7 +76,33 @@ Completed the cleanup:
 
 ### Patch 8L — Documentation Refresh
 
-Current patch. Records the final clean baseline.
+Recorded the original clean architecture baseline before the mirror-deletion series.
+
+### Patch 8O3A-G — Mirror Deletion Series
+
+Removed old `TRGameState` live-state mirrors across:
+
+- calendar/report
+- prestige
+- palace
+- stockpiles
+- estate/population/labour
+- warbands and Flower War reports
+- static resources/buildings and market demand/economy
+
+### Patch 8O4A-E — Post-Mirror Cleanup
+
+Removed or neutralised the scaffolding that supported deleted mirrors:
+
+- retired broad `apply_to_game_state` usage
+- removed `CampaignState` mirror-to-game-state helpers
+- cleaned religion mirror/fallback paths
+- cleaned rival mirror/fallback paths
+- converted legacy `GameState.gd` into a pure forwarder
+
+### Patch 8O4F — Post-Mirror Documentation Baseline
+
+Current patch. Updates baseline docs to match the post-mirror architecture.
 
 ---
 
@@ -95,7 +121,7 @@ Current ownership:
 |---|---|
 | Runtime facade | `TRGameState.gd` |
 | Live/save state | `CampaignState.gd` |
-| Legacy state shim | `GameState.gd` |
+| Legacy state forwarder | `GameState.gd` |
 | Active UI coordinator | `GameScreenMarketOverviewPatch.gd` |
 | Turn resolution | `TurnResolutionSystem.gd` |
 | Religion state | `ReligionStateSystem.gd`, backed by `CampaignState.religion_state` |
@@ -104,18 +130,23 @@ Current ownership:
 | Palace UI | `PalaceScreenController.gd` |
 | Barracks / Warband UI | `BarracksScreenController.gd` |
 | Shrine UI | `ShrineScreenController.gd` |
+| Compatibility/audit bridge | `CampaignBridgeSystem.gd` |
 
 ---
 
 ## 3. Roadmap principles from here
 
-### Build on the clean structure
+### Build on the post-mirror structure
 
 New systems should follow the current dependency direction:
 
 ```text
 UI -> TRGameState -> Systems -> CampaignState
 ```
+
+### Do not restore mirrors
+
+Do not reintroduce old `TRGameState` live-state mirror fields or broad sync paths.
 
 ### Do not add gameplay rules to the wrapper
 
@@ -135,6 +166,7 @@ Do not attempt full game AI, full event libraries or deep save/load polish until
 
 | Patch | Milestone | Main goal |
 |---|---|---|
+| 8O4G | Final grep audit | Confirm no stale mirror/fallback/state.get/state.set artefacts remain in active code/docs. |
 | Patch 9 | Structured Veintena Results Summary | Display turn summary sections clearly after each Veintena. |
 | Patch 10 | Rival Prototype 1 | Make rivals visible economic actors with stockpiles, procurement caps and simple reports. |
 | Patch 11 | Warband Progression Connection | Connect XP, injuries and skill web effects more fully to Flower War outcomes. |
@@ -146,7 +178,36 @@ Do not attempt full game AI, full event libraries or deep save/load polish until
 
 ---
 
-## 5. Patch 9 — Structured Veintena Results Summary
+## 5. 8O4G — Final grep audit
+
+### Goal
+
+Confirm that the mirror-removal architecture is not only patched, but clean.
+
+### Required search terms
+
+- `state.get(`
+- `state.set(`
+- `.get("resources")`
+- `.get("rival_prestige")`
+- `mirror_`
+- `compatibility mirror`
+- `legacy mirror`
+- `fallback`
+- `copy_from_game_state`
+- `apply_to_game_state`
+
+### Success criteria
+
+- No active code reads deleted `TRGameState` mirror fields.
+- No active code writes deleted `TRGameState` mirror fields.
+- Remaining compatibility hooks are either no-op, direct CampaignState access, or clearly documented legacy forwarders.
+- Documentation no longer claims that active compatibility mirrors remain.
+- Lore uses of words like mirror are not confused with state architecture.
+
+---
+
+## 6. Patch 9 — Structured Veintena Results Summary
 
 ### Goal
 
@@ -187,7 +248,7 @@ It should appear after advancing a Veintena and show clear sections.
 
 ---
 
-## 6. Patch 10 — Rival Prototype 1
+## 7. Patch 10 — Rival Prototype 1
 
 ### Goal
 
@@ -214,7 +275,7 @@ Make rivals visible economic competitors rather than decorative score entries.
 
 ---
 
-## 7. Patch 11 — Warband Progression Connection
+## 8. Patch 11 — Warband Progression Connection
 
 ### Goal
 
@@ -238,7 +299,7 @@ Make persistent warbands matter.
 
 ---
 
-## 8. Patch 12 — Religion Loop Consolidation
+## 9. Patch 12 — Religion Loop Consolidation
 
 ### Goal
 
@@ -262,7 +323,7 @@ Make religion a recurring strategic loop rather than a static shrine panel.
 
 ---
 
-## 9. Patch 13 — Palace / Recognition Loop Pass
+## 10. Patch 13 — Palace / Recognition Loop Pass
 
 ### Goal
 
@@ -278,7 +339,7 @@ Make the palace path and recognition race more legible.
 
 ---
 
-## 10. Patch 14 — First Full Ritual Year Playtest
+## 11. Patch 14 — First Full Ritual Year Playtest
 
 ### Goal
 
@@ -294,55 +355,3 @@ Make one full Ritual Year playable from Veintena 1 through Nemontemi.
 - Palace demand pressure appears.
 - Rivals move enough to feel present.
 - Flower Wars remain optional but meaningful.
-
----
-
-## 11. Patch 15 — Balance and Readability Pass
-
-### Goal
-
-Tune the first-year experience after the loop is visible.
-
-### Test questions
-
-- Can the player pursue a war route?
-- Can the player pursue a palace/diplomatic route?
-- Can the player pursue a shrine/religion route?
-- Does the economy punish bad planning without becoming opaque?
-- Do rivals pressure the market without overwhelming the player?
-- Is Savvy Trade useful but not dominant?
-- Are shortages visible before they become failures?
-
----
-
-## 12. Patch 16 — Prototype 0 Vertical Slice
-
-### Goal
-
-Package a coherent one-year playable prototype.
-
-Prototype 0 should prove:
-
-- estate production works
-- stockpiles matter
-- market trade matters
-- Prestige is readable
-- Palace route matters
-- Flower Wars are usable
-- religion pressure matters
-- rivals visibly compete
-- Veintena summaries explain the game
-
----
-
-## 13. Later, not now
-
-Do not prioritise these until after the vertical slice:
-
-- full save/load polish
-- large event libraries
-- deep AI rival decision trees
-- Tezcatlipoca sabotage system
-- major art/audio polish
-- tutorial/onboarding
-- multiple-year victory balance

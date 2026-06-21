@@ -1251,14 +1251,9 @@ func can_sacrifice_for_prestige(sacrifice_id: String, amount: int = 1) -> Dictio
 	return _get_religion_system().can_sacrifice_for_prestige(self, sacrifice_id, amount)
 
 func sacrifice_for_prestige(sacrifice_id: String, amount: int = 1, god_id: String = "") -> Dictionary:
-	var result: Dictionary = _get_religion_system().sacrifice_for_prestige(self, sacrifice_id, amount, god_id)
-	# Compatibility: ReligionSystem still returns the created record after older
-	# paths append it. Capture the returned record into CampaignState directly so
-	# TRGameState does not read its own sacrifice-record mirror.
-	if bool(result.get("ok", false)) and result.has("record") and result["record"] is Dictionary:
-		var runtime_state: CampaignState = _get_campaign_state()
-		runtime_state.append_sacrifice_prestige_record(result["record"] as Dictionary)
-	return result
+	# 8O4C: ReligionSystem writes sacrifice records directly to CampaignState.
+	# TRGameState no longer performs a second compatibility capture.
+	return _get_religion_system().sacrifice_for_prestige(self, sacrifice_id, amount, god_id)
 
 func get_sacrifice_prestige_records() -> Array[Dictionary]:
 	return _get_campaign_state().get_sacrifice_prestige_records_copy()

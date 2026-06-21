@@ -3,8 +3,9 @@
 # Project path: res://Scripts/Systems/RivalSystem.gd
 #
 # Owns rival identity, pressure-note and placeholder rival-prestige state rules.
-# Reads/writes CampaignState first through TRGameState accessors, with
-# TRGameState field fallback kept only for compatibility.
+# Reads/writes CampaignState through TRGameState runtime accessors.
+# 8O4D removes the remaining TRGameState rival-prestige fallback reads/writes
+# and mirror-refresh calls.
 #
 # This is still information-only: it does not add rival AI, procurement,
 # sabotage or turn actions yet.
@@ -12,7 +13,7 @@
 class_name RivalSystem
 extends RefCounted
 
-const SYSTEM_VERSION: String = "v0.48_8n2c"
+const SYSTEM_VERSION: String = "v0.48_8o4d"
 
 
 func system_name() -> String:
@@ -134,7 +135,7 @@ func tezcatlipoca_rival_pressure_hooks(detail_tier: int) -> Array[Dictionary]:
 			"id": String(hook.get("id", "hook")),
 			"rival": String(hook.get("rival", "Rival")),
 			"domain": "Hidden",
-			"summary": "The mirror suggests a rival pressure point, but the details are not yet clear.",
+			"summary": "The omen suggests a rival pressure point, but the details are not yet clear.",
 			"future_hook": "Build higher active Tezcatlipoca structures to reveal future manipulation hooks.",
 			"detail_tier": detail_tier
 		}
@@ -157,16 +158,11 @@ func _campaign_state(game_state: Node) -> RefCounted:
 			return raw as RefCounted
 	return null
 
+
 func _rival_prestige(game_state: Node) -> Dictionary:
 	var runtime_state: RefCounted = _campaign_state(game_state)
 	if runtime_state != null and runtime_state.has_method("get_rival_prestige_copy"):
 		return runtime_state.call("get_rival_prestige_copy") as Dictionary
-
-	if game_state != null:
-		var value: Variant = game_state.get("rival_prestige")
-		if value is Dictionary:
-			return (value as Dictionary).duplicate(true)
-
 	return {}
 
 
@@ -174,9 +170,3 @@ func _set_rival_prestige(game_state: Node, values: Dictionary) -> void:
 	var runtime_state: RefCounted = _campaign_state(game_state)
 	if runtime_state != null and runtime_state.has_method("set_rival_prestige_values"):
 		runtime_state.call("set_rival_prestige_values", values)
-		if game_state != null and game_state.has_method("_mirror_prestige_compatibility_from_campaign_state"):
-			game_state.call("_mirror_prestige_compatibility_from_campaign_state")
-		return
-
-	if game_state != null:
-		game_state.set("rival_prestige", values)

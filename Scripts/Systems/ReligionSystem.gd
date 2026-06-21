@@ -3,8 +3,9 @@
 # Project path: res://Scripts/Systems/ReligionSystem.gd
 #
 # Owns religion and sacrifice rule logic extracted from TRGameState.gd.
-# Reads/writes CampaignState through TRGameState runtime accessors instead of
-# treating TRGameState mirror fields as the source of truth.
+# Reads/writes CampaignState directly through the TRGameState runtime facade.
+# 8O4C removes the remaining mirror refresh calls and legacy religion fallback
+# seeding paths; religion data lives in CampaignState only.
 
 class_name ReligionSystem
 extends RefCounted
@@ -153,9 +154,7 @@ func get_sacrifice_prestige_records(state: Node) -> Array[Dictionary]:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("get_sacrifice_prestige_records_copy"):
 		return runtime_state.call("get_sacrifice_prestige_records_copy") as Array[Dictionary]
-
-	var output: Array[Dictionary] = []
-	return output
+	return []
 
 
 # -----------------------------------------------------------------------------
@@ -173,29 +172,29 @@ func _campaign_state(state: Node) -> RefCounted:
 
 
 func _stock(state: Node, resource_id: String) -> float:
-	if state != null and state.has_method("_stock"):
-		return float(state.call("_stock", resource_id))
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("get_estate_stock"):
 		return float(runtime_state.call("get_estate_stock", resource_id))
+	if state != null and state.has_method("_stock"):
+		return float(state.call("_stock", resource_id))
 	return 0.0
 
 
 func _add_stock(state: Node, resource_id: String, amount: float) -> void:
-	if state != null and state.has_method("_add_stock"):
-		state.call("_add_stock", resource_id, amount)
-		return
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("add_estate_stock"):
 		runtime_state.call("add_estate_stock", resource_id, amount)
+		return
+	if state != null and state.has_method("_add_stock"):
+		state.call("_add_stock", resource_id, amount)
 
 
 func _active_population_for_group(state: Node, group_id: String) -> int:
-	if state != null and state.has_method("_active_population_for_group"):
-		return int(state.call("_active_population_for_group", group_id))
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("get_population_count"):
 		return int(runtime_state.call("get_population_count", group_id))
+	if state != null and state.has_method("_active_population_for_group"):
+		return int(state.call("_active_population_for_group", group_id))
 	return 0
 
 
@@ -203,8 +202,6 @@ func _add_population(state: Node, group_id: String, amount: int) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("add_population_count"):
 		runtime_state.call("add_population_count", group_id, amount)
-		if state != null and state.has_method("_mirror_estate_structure_compatibility_from_campaign_state"):
-			state.call("_mirror_estate_structure_compatibility_from_campaign_state")
 		return
 
 
@@ -218,11 +215,11 @@ func _ensure_population_dependent_runtime(state: Node) -> void:
 
 
 func _current_veintena(state: Node) -> int:
-	if state != null and state.has_method("get_current_veintena"):
-		return int(state.call("get_current_veintena"))
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("get_current_veintena_value"):
 		return int(runtime_state.call("get_current_veintena_value"))
+	if state != null and state.has_method("get_current_veintena"):
+		return int(state.call("get_current_veintena"))
 	return 1
 
 
@@ -236,8 +233,6 @@ func _append_sacrifice_prestige_record(state: Node, record: Dictionary) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("append_sacrifice_prestige_record"):
 		runtime_state.call("append_sacrifice_prestige_record", record)
-		if state != null and state.has_method("_mirror_prestige_compatibility_from_campaign_state"):
-			state.call("_mirror_prestige_compatibility_from_campaign_state")
 
 
 func _append_report_line(state: Node, line: String) -> void:
@@ -248,8 +243,6 @@ func _append_report_line(state: Node, line: String) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("append_report_line"):
 		runtime_state.call("append_report_line", line)
-		if state != null and state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
-			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 
 
 func _format_amount(state: Node, value: float) -> String:

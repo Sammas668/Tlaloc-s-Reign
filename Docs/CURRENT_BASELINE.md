@@ -1,11 +1,11 @@
 # Tlaloc's Reign — Current Baseline
 
 Last updated: 2026-06-21  
-Current milestone: Patch 8L / v0.48.0 — Clean Architecture Baseline
+Current milestone: Patch 8O4F — Post-Mirror Architecture Baseline
 
-This document records the current working baseline for the Godot Prototype 0 branch of **Tlaloc's Reign**. It should be treated as the repo truth before starting the next gameplay phase.
+This document records the current working baseline for the Godot Prototype 0 branch of **Tlaloc's Reign** after the 8O3 mirror-deletion series and the 8O4 post-mirror cleanup sequence.
 
-Patch 8L follows the architecture cleanup sequence from Patch 8A through Patch 8K2. It records the final clean baseline after UI extraction, CampaignState authority work, religion-state migration, GameState legacy retirement, market extraction and dead-code cleanup.
+Treat this as the repo truth for architecture until the final 8O4G grep audit is completed.
 
 ---
 
@@ -19,13 +19,25 @@ TRGameState = res://Scripts/Autoload/TRGameState.gd
 
 `TRGameState` is the active Prototype 0 runtime facade.
 
+It exposes public methods to UI and delegates rules/state work to systems and `CampaignState`.
+
+It is **not** the live-state owner.
+
+### Live/save state owner
+
+```text
+Scripts/state/CampaignState.gd
+```
+
+`CampaignState` owns live campaign state and save/load-facing state containers.
+
 ### Legacy state path
 
 ```text
 Scripts/state/GameState.gd
 ```
 
-`GameState.gd` is now a legacy shim only. It is not an active autoload. Do not add Prototype 0 gameplay logic to it.
+`GameState.gd` is a retired legacy forwarder only. It is not an active autoload. It must not inspect old `TRGameState` fields or receive new Prototype 0 gameplay logic.
 
 ### Active gameplay UI
 
@@ -38,9 +50,9 @@ Scripts/ui/GameScreenMarketOverviewPatch.gd
 
 ---
 
-## 2. Clean architecture baseline
+## 2. Post-mirror architecture baseline
 
-The project now follows this intended direction:
+The project now follows this dependency direction:
 
 ```text
 UI screens/widgets
@@ -55,7 +67,7 @@ UI screens/widgets
 |---|---|
 | Public runtime API | `TRGameState.gd` |
 | Live/save campaign data | `CampaignState.gd` |
-| Legacy compatibility only | `GameState.gd` |
+| Legacy compatibility only | `GameState.gd` as pure forwarder |
 | Turn / Veintena / Nemontemi resolution | `TurnResolutionSystem.gd` |
 | Mutable religion state | `ReligionStateSystem.gd`, backed by `CampaignState.religion_state` |
 | Flower War / warband doctrine values | `WarDoctrineRules.gd` |
@@ -112,7 +124,18 @@ Reusable, modal, canvas or helper UI belongs in `Scripts/ui/widgets/`.
 
 `TRGameState` is the public facade. UI should call it for gameplay data and actions.
 
-It still contains some compatibility mirrors while the project migrates fully to `CampaignState`, but those mirrors are not the intended long-term source of truth.
+After 8O3, the old live-state compatibility mirrors were removed from `TRGameState` across:
+
+- calendar/report state
+- prestige state
+- palace state
+- estate and market stockpiles
+- estate buildings, housing, population and labour assignments
+- warbands and Flower War reports
+- static resource/building dictionaries
+- market demand/economy data
+
+`TRGameState` may still expose small private helper methods that delegate into `CampaignState` or systems, but it must not own duplicated live data containers.
 
 ### `CampaignState.gd`
 
@@ -142,11 +165,19 @@ It owns or scaffolds containers for:
 - rival build progress
 - rival action history
 
+8O4B removed broad `CampaignState -> TRGameState` mirror helpers and old `TRGameState -> CampaignState` import helpers. Future code should use direct CampaignState access methods or TRGameState public facade methods, not mirror sync.
+
 ### `CampaignBridgeSystem.gd`
 
-`CampaignBridgeSystem` handles transitional `TRGameState <-> CampaignState` syncing.
+`CampaignBridgeSystem` is no longer a broad state synchroniser.
 
-Calendar/report state and religion state are CampaignState-authoritative. Legacy mirrors exist only so older UI/system paths do not break during migration.
+Its remaining purpose is:
+
+- safe compatibility entry points for old callers
+- state-changed signal routing
+- diagnostic sync-report text
+
+It must not copy live state from `TRGameState` into `CampaignState`, and it must not write old mirror fields back onto `TRGameState`.
 
 ---
 
@@ -161,8 +192,8 @@ Advance button
   -> TRGameState.advance_turn() / advance_veintena()
     -> TurnResolutionSystem.advance_veintena()
       -> CampaignState-backed state
-      -> last_report
-      -> last_turn_summary
+      -> CampaignState.last_report
+      -> CampaignState.last_turn_summary
       -> state_changed / turn_advanced signals
 ```
 
@@ -202,7 +233,9 @@ It owns:
 - ritual capacity used this Veintena
 - recent offering report lines
 
-`ShrineScreenController.gd` is UI-only. It reads and mutates religion through `UIScreenContext` / runtime access. Legacy shrine decay methods may remain as compatibility bridges only; authoritative turn decay belongs in `TurnResolutionSystem.gd`.
+`ShrineScreenController.gd` is UI-only. It reads and mutates religion through `UIScreenContext` / runtime access. Authoritative turn decay belongs in `TurnResolutionSystem.gd`.
+
+8O4C removed religion metadata seeding and mirror write-back. Future religion work must not restore metadata-backed state as an authority path.
 
 ---
 
@@ -279,6 +312,8 @@ Prototype 0 rivals are:
 
 Rivals are not yet full duplicate player estates. Future Rival Prototype 1 should use stockpiles, fixed build orders, procurement caps, personality hoards and readable turn-summary output.
 
+8O4D removed the old rival prestige fallback path through `TRGameState` fields. Rival state should remain CampaignState-direct.
+
 ---
 
 ## 11. Removed or rejected mechanics
@@ -292,6 +327,9 @@ Do not reintroduce these casually:
 - new gods beyond Tlaloc, Huitzilopochtli, Tezcatlipoca and Quetzalcoatl for Prototype 0
 - passive economic Prestige from simply hoarding maize or surplus
 - spending Prestige as currency
+- live-state compatibility mirrors on `TRGameState`
+- broad sync-from-runtime calls in read paths
+- property getters/setters for state access
 
 ---
 
@@ -299,7 +337,7 @@ Do not reintroduce these casually:
 
 ### `Scripts/state/GameState.gd`
 
-Legacy shim only. Not active autoload.
+Retired forwarder only. Not active autoload. It should forward old calls to `/root/TRGameState` where possible, and it must not inspect old runtime fields.
 
 ### `Scripts/ui/GameScreenStateDriven.gd`
 
@@ -311,25 +349,37 @@ Future work should not target either file unless deliberately removing or archiv
 
 ## 13. Current architecture status
 
-The architecture is clean enough to move to the next gameplay phase.
+The architecture is now post-mirror and ready for a final grep audit.
 
-Remaining technical debt is normal prototype migration debt:
+Completed cleanup:
 
-- `TRGameState` still has compatibility mirrors.
-- Some fallback metadata bridges remain for older local paths.
-- Some domains are not fully CampaignState-authoritative yet.
-- Save/load still needs hardening after the next gameplay loop becomes visible.
+- 8O3A-G removed TRGameState live-state mirrors.
+- 8O4A removed broad active `apply_to_game_state` usage.
+- 8O4B removed CampaignState mirror-to-game-state helpers.
+- 8O4C removed religion mirror/fallback paths.
+- 8O4D removed rival mirror/fallback paths.
+- 8O4E converted legacy `GameState.gd` into a pure forwarder.
+- 8O4F updates documentation to match the post-mirror baseline.
 
-These are not blockers for the next feature.
+Remaining technical debt before resuming gameplay:
+
+- 8O4G final grep audit for `state.get`, `state.set`, `mirror`, `legacy`, `fallback` and stale documentation references.
+- Save/load hardening after the next gameplay loop becomes visible.
 
 ---
 
-## 14. Next gameplay target
+## 14. Next technical target
 
-The next major gameplay patch should be:
+The next patch should be:
+
+```text
+8O4G — Final grep audit: state.get/state.set/mirror/legacy/fallback
+```
+
+After that passes, resume gameplay work with:
 
 ```text
 Patch 9 — Structured Veintena Results Summary
 ```
 
-It should display the `last_turn_summary` generated by turn resolution and make each turn readable to the player.
+Patch 9 should display the `last_turn_summary` generated by turn resolution and make each turn readable to the player.

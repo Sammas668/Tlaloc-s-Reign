@@ -4,14 +4,117 @@ This changelog records implementation milestones for the Godot Prototype 0 proje
 
 ---
 
-## Patch 8L / v0.48.0 — Documentation Refresh / Clean Architecture Baseline
+## Patch 8O4F — Post-Mirror Documentation Baseline
 
 Status: current baseline.
+
+### Changed
+
+- Updated `Docs/CURRENT_BASELINE.md` to reflect the post-8O3/8O4 architecture.
+- Updated `Docs/Architecture/Clean_Architecture_Baseline.md` so it no longer describes active `TRGameState` compatibility mirrors as acceptable migration debt.
+- Updated `Docs/ROADMAP.md` so the next technical step is 8O4G final grep audit before Patch 9 gameplay work.
+- Added `Docs/Architecture/Patch_8O4F_Post_Mirror_Baseline_Update.md` as the patch-specific architecture note.
+
+### Clarified
+
+- `TRGameState` is now a public runtime facade only.
+- `CampaignState` is the live/save-state owner.
+- `CampaignBridgeSystem` is no longer a broad state synchroniser.
+- `GameState.gd` is a retired forwarder only.
+- Live-state mirrors must not be restored on `TRGameState`.
+- Broad `copy_from_game_state()` / `apply_to_game_state()` style sync paths are retired.
+
+### Notes
+
+- Documentation-only patch.
+- No runtime behaviour changes.
+- 8O4G remains the final verification step for stale `state.get`, `state.set`, `mirror`, `legacy` and `fallback` artefacts.
+
+---
+
+## Patch 8O4E — Legacy GameState Pure Forwarder
+
+Status: completed.
+
+### Changed
+
+- Kept `Scripts/state/GameState.gd` as a safe retired forwarder rather than deleting it.
+- Removed direct inspection of old `TRGameState` fields from the legacy path.
+- Preserved soft forwarding to `/root/TRGameState` for older calls.
+
+---
+
+## Patch 8O4D — Rival Mirror/Fallback Cleanup
+
+Status: completed.
+
+### Changed
+
+- Removed rival mirror write-back from the bridge path.
+- Removed old rival prestige fallback reads/writes through `TRGameState` fields.
+- Kept rival state CampaignState-direct.
+
+---
+
+## Patch 8O4C — Religion Mirror/Fallback Cleanup
+
+Status: completed.
+
+### Changed
+
+- Removed religion metadata seeding and mirror write-back from the bridge path.
+- Removed religion-system calls to old mirror refresh hooks.
+- Kept religion state CampaignState-direct.
+
+---
+
+## Patch 8O4B — Remove CampaignState Mirror Helpers
+
+Status: completed.
+
+### Changed
+
+- Removed broad `CampaignState` helpers that copied from or wrote to a game-state node.
+- Removed domain-specific `mirror_*_to_game_state` helpers.
+
+---
+
+## Patch 8O4A — Remove Broad apply_to_game_state Usage
+
+Status: completed.
+
+### Changed
+
+- Removed active usage of broad `CampaignState.apply_to_game_state()` during project-data loading.
+- Converted the bridge application path into a no-op compatibility hook.
+
+---
+
+## Patch 8O3A-G — TRGameState Mirror Deletion Series
+
+Status: completed.
+
+### Changed
+
+- Removed `TRGameState` live-state mirrors across:
+  - calendar/report
+  - prestige
+  - palace
+  - stockpiles
+  - estate/population/labour
+  - warband and Flower War reports
+  - static resources/buildings and market demand/economy
+
+---
+
+## Patch 8L / v0.48.0 — Documentation Refresh / Clean Architecture Baseline
+
+Status: superseded by 8O4F post-mirror documentation.
 
 ### Added
 
 - Updated final clean architecture baseline documentation after the full Patch 8A–8K2 cleanup sequence.
-- Recorded the final current architecture:
+- Recorded the first clean architecture baseline:
   - `TRGameState` = public runtime facade
   - `CampaignState` = live/save-state owner
   - `GameState` = legacy shim, not active autoload
@@ -33,7 +136,7 @@ Status: current baseline.
 
 - Documentation-only patch.
 - No runtime behaviour changes.
-- Architecture is now considered clean enough to resume gameplay development.
+- This baseline was later superseded by the 8O3/8O4 post-mirror architecture cleanup.
 
 ---
 
@@ -88,7 +191,7 @@ Status: completed.
 
 ## Patch 8I — GameState Legacy Decision
 
-Status: completed.
+Status: completed / superseded by 8O4E.
 
 ### Changed
 
@@ -115,7 +218,7 @@ Status: completed.
 
 ## Patch 8H — Religion State into CampaignState
 
-Status: completed.
+Status: completed / superseded by 8O4C cleanup.
 
 ### Changed
 
@@ -128,7 +231,7 @@ Status: completed.
 
 ## Patch 8G — CampaignState Authority Pass
 
-Status: completed.
+Status: completed / superseded by 8O3A and 8O4A-B cleanup.
 
 ### Changed
 
@@ -180,7 +283,7 @@ Status: completed.
 
 ## Patch 8D — Religion Runtime Ownership
 
-Status: completed.
+Status: completed / superseded by 8H and 8O4C.
 
 ### Changed
 
@@ -252,5 +355,3 @@ The earlier patch sequence established:
 - Barracks UI extraction.
 - Religion state extraction.
 - Shrine UI extraction.
-
-These are now absorbed into the Patch 8L clean architecture baseline.
