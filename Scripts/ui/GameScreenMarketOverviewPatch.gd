@@ -30,6 +30,7 @@ const TRADE_BASKET_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/Trade
 const WARBAND_SKILL_WEB_CANVAS_SCRIPT: Script = preload("res://Scripts/ui/widgets/WarbandSkillWebCanvas.gd")
 const FLOWER_WAR_EVENT_OVERLAY_SCRIPT: Script = preload("res://Scripts/ui/widgets/FlowerWarEventOverlay.gd")
 const CALENDAR_PACING_CONTROLLER_SCRIPT: Script = preload("res://Scripts/ui/widgets/CalendarPacingController.gd")
+const UI_SCREEN_CONTEXT_SCRIPT: Script = preload("res://Scripts/ui/UIScreenContext.gd")
 const SHRINE_RITUAL_RULES_SCRIPT: Script = preload("res://Scripts/Systems/ShrineRitualRules.gd")
 const RELIGION_STATE_SYSTEM_SCRIPT: Script = preload("res://Scripts/Systems/ReligionStateSystem.gd")
 const SHRINE_SCREEN_CONTROLLER_SCRIPT: Script = preload("res://Scripts/ui/screens/ShrineScreenController.gd")
@@ -80,6 +81,13 @@ var _palace_screen_controller: RefCounted = null
 # Warband Skill Web canvas is now a standalone widget.
 # Gameplay rules still live in backend systems; this wrapper only instantiates
 # and wires the widget into the current Barracks screen.
+
+func _make_ui_screen_context() -> RefCounted:
+	var context: RefCounted = UI_SCREEN_CONTEXT_SCRIPT.new() as RefCounted
+	if context != null and context.has_method("setup"):
+		context.call("setup", self, content_root, content_text, dynamic_view_host, notification_list)
+	return context
+
 
 func _ready() -> void:
 	_remove_shrine_offerings_focus()
@@ -432,14 +440,14 @@ func _palace_controller() -> RefCounted:
 	return _palace_screen_controller
 
 func _show_palace_content() -> void:
-	_palace_controller().call("show_palace_content", self, dynamic_view_host, content_root, content_text)
+	_palace_controller().call("show_palace_content_with_context", _make_ui_screen_context())
 
 # -----------------------------------------------------------------------------
 # Palace navigation probe v0.20.3
 # -----------------------------------------------------------------------------
 
 func _build_palace_navigation_probe_reports() -> void:
-	_palace_controller().call("build_palace_navigation_probe_reports", self, notification_list)
+	_palace_controller().call("build_palace_navigation_probe_reports_with_context", _make_ui_screen_context())
 # -----------------------------------------------------------------------------
 # Market / Trade Basket patch
 # -----------------------------------------------------------------------------
@@ -787,22 +795,22 @@ func _reset_shrine_panel_selection() -> void:
 	_shrine_controller().call("reset_panel_selection")
 
 func _show_shrine_content() -> void:
-	_shrine_controller().call("show_content", self, content_root, content_text, dynamic_view_host)
+	_shrine_controller().call("show_content_with_context", _make_ui_screen_context())
 
 func _build_shrine_reports() -> void:
-	_shrine_controller().call("build_reports", self)
+	_shrine_controller().call("build_reports_with_context", _make_ui_screen_context())
 
 func _apply_divine_favour_decay(report: Array, decay_amount: float = RELIGION_NORMAL_DECAY) -> void:
-	_shrine_controller().call("apply_divine_favour_decay", self, report, decay_amount)
+	_shrine_controller().call("apply_divine_favour_decay_with_context", _make_ui_screen_context(), report, decay_amount)
 
 func _reset_religion_veintena_capacity() -> void:
-	_shrine_controller().call("reset_religion_veintena_capacity", self)
+	_shrine_controller().call("reset_religion_veintena_capacity_with_context", _make_ui_screen_context())
 
 func _current_festival_god_id() -> String:
-	return String(_shrine_controller().call("current_festival_god_id", self))
+	return String(_shrine_controller().call("current_festival_god_id_with_context", _make_ui_screen_context()))
 
 func _current_festival_text() -> String:
-	return String(_shrine_controller().call("current_festival_text", self))
+	return String(_shrine_controller().call("current_festival_text_with_context", _make_ui_screen_context()))
 
 func _format_religion_amount(value: float) -> String:
 	if is_equal_approx(value, roundf(value)):
@@ -837,16 +845,16 @@ func _reset_barracks_skill_web_selection() -> void:
 	_barracks_controller().call("reset_skill_web_selection")
 
 func _show_barracks_content() -> void:
-	_barracks_controller().call("show_content", self, content_root, content_text, dynamic_view_host)
+	_barracks_controller().call("show_content_with_context", _make_ui_screen_context())
 
 func _build_barracks_reports() -> void:
-	_barracks_controller().call("build_reports", self)
+	_barracks_controller().call("build_reports_with_context", _make_ui_screen_context())
 
 func _open_flower_war_attack_event(option_id: String = "standard", source_id: String = "player", context: Dictionary = {}) -> void:
-	_barracks_controller().call("open_attack_event", self, option_id, source_id, context)
+	_barracks_controller().call("open_attack_event_with_context", _make_ui_screen_context(), option_id, source_id, context)
 
 func _open_flower_war_defence_event(option_id: String = "standard", source_id: String = "rival", context: Dictionary = {}) -> void:
-	_barracks_controller().call("open_defence_event", self, option_id, source_id, context)
+	_barracks_controller().call("open_defence_event_with_context", _make_ui_screen_context(), option_id, source_id, context)
 
 # -----------------------------------------------------------------------------
 # Calendar Pacing v2 — extracted coordinator bridge

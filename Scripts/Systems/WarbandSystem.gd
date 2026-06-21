@@ -8,15 +8,7 @@
 class_name WarbandSystem
 extends RefCounted
 
-const VALID_DOCTRINE_IDS: Array[String] = ["unspecialised", "eagle", "jaguar", "otomi", "coyote"]
-
-const FLOWER_WAR_DOCTRINES: Dictionary = {
-	"unspecialised": {"name": "Unspecialised", "offence": 1.0, "defence": 1.0, "role": "Balanced household warriors."},
-	"eagle": {"name": "Eagle", "offence": 1.0, "defence": 1.2, "role": "Captive specialists and sustained war fighters."},
-	"jaguar": {"name": "Jaguar", "offence": 1.3, "defence": 1.0, "role": "Elite offensive warriors. No hidden Prestige bonus; Prestige comes from victories, casualties, captives and loot."},
-	"otomi": {"name": "Otomi", "offence": 0.8, "defence": 1.5, "role": "Defensive veterans who trade offence for survival."},
-	"coyote": {"name": "Coyote", "offence": 1.4, "defence": 0.5, "role": "Glass-cannon raiders who favour loot."}
-}
+const WAR_DOCTRINE_RULES_SCRIPT: Script = preload("res://Scripts/Systems/WarDoctrineRules.gd")
 
 const FLOWER_WAR_PROVISIONING: Dictionary = {
 	"standard": {"name": "Standard", "supply_multiplier": 1.0, "combat_multiplier": 1.0},
@@ -158,7 +150,7 @@ func can_create_warband(state: Node, name: String = "New Warband", warriors: int
 	_ensure_warbands(state)
 	if warriors < 0:
 		return {"ok": false, "reason": "Warrior count cannot be negative."}
-	if not VALID_DOCTRINE_IDS.has(doctrine_id):
+	if not WAR_DOCTRINE_RULES_SCRIPT.has_doctrine(doctrine_id):
 		return {"ok": false, "reason": "Unknown doctrine."}
 	var available: int = _unassigned_pool(state)
 	if warriors > available:
@@ -2048,7 +2040,7 @@ func get_barracks_summary(state: Node) -> Dictionary:
 		"has_war_god_palace": bool(state.call("has_war_god_palace")) if state != null and state.has_method("has_war_god_palace") else false,
 		"flower_war_palace_gate_enabled": bool(state.call("is_flower_war_palace_gate_enabled")) if state != null and state.has_method("is_flower_war_palace_gate_enabled") else false,
 		"flower_war_palace_gate_passed": bool(state.call("flower_war_palace_gate_passed")) if state != null and state.has_method("flower_war_palace_gate_passed") else false,
-		"doctrines": FLOWER_WAR_DOCTRINES.duplicate(true),
+		"doctrines": WAR_DOCTRINE_RULES_SCRIPT.all_doctrines(),
 		"provisioning": FLOWER_WAR_PROVISIONING.duplicate(true),
 		"defence_strategies": FLOWER_WAR_DEFENCE_STRATEGIES.duplicate(true),
 		"army_muster": get_army_muster_summary(state)
@@ -2167,17 +2159,15 @@ func warband_spent_trait_points(warband: Dictionary) -> int:
 func warband_doctrine_from_specialisation(warband: Dictionary) -> String:
 	var purchased: Array[String] = warband_purchased_trait_ids(warband)
 	var chosen_cluster: String = warband_chosen_specialisation_cluster(purchased)
-	if FLOWER_WAR_DOCTRINES.has(chosen_cluster):
+	if WAR_DOCTRINE_RULES_SCRIPT.has_doctrine(chosen_cluster):
 		return chosen_cluster
 	return "unspecialised"
 
 func warband_doctrine_data(doctrine_id: String) -> Dictionary:
 	var cleaned: String = doctrine_id
-	if not FLOWER_WAR_DOCTRINES.has(cleaned):
+	if not WAR_DOCTRINE_RULES_SCRIPT.has_doctrine(cleaned):
 		cleaned = "unspecialised"
-	var data: Dictionary = (FLOWER_WAR_DOCTRINES[cleaned] as Dictionary).duplicate(true)
-	data["id"] = cleaned
-	return data
+	return WAR_DOCTRINE_RULES_SCRIPT.doctrine_data(cleaned) as Dictionary
 
 func warband_combat_stats_from_warband(warband: Dictionary) -> Dictionary:
 	var doctrine_id: String = String(warband.get("doctrine", "unspecialised"))
@@ -2277,7 +2267,7 @@ func warband_specialisation_summary_for_warband(warband: Dictionary) -> Dictiona
 	elif primary != "" and primary_points > 0:
 		name = warband_cluster_display_name(primary) + "-leaning"
 		style = "leaning"
-	var doctrine_id: String = primary if locked and FLOWER_WAR_DOCTRINES.has(primary) else "unspecialised"
+	var doctrine_id: String = primary if locked and WAR_DOCTRINE_RULES_SCRIPT.has_doctrine(primary) else "unspecialised"
 	return {
 		"name": name,
 		"style": style,

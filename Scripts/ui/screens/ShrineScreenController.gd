@@ -3,13 +3,15 @@
 # Project path: res://Scripts/ui/screens/ShrineScreenController.gd
 #
 # Extracted Shrines / Religion UI controller.
-# GameScreenMarketOverviewPatch.gd remains the active screen coordinator; this
-# controller owns shrine main-view composition, shrine report-card composition
-# and the live ReligionStateSystem bridge introduced in Patch 7D.
+# GameScreenMarketOverviewPatch.gd remains the active screen coordinator.
+# This controller owns shrine main-view and shrine report-card composition, but
+# mutable religion state is now obtained from the runtime state via
+# UIScreenContext / TRGameState metadata bridge instead of being stored here.
 extends RefCounted
 
 const SHRINE_RITUAL_RULES_SCRIPT: Script = preload("res://Scripts/Systems/ShrineRitualRules.gd")
 const RELIGION_STATE_SYSTEM_SCRIPT: Script = preload("res://Scripts/Systems/ReligionStateSystem.gd")
+const RELIGION_STATE_META_KEY: String = "tr_religion_state_system"
 
 const COLOR_TEXT: Color = Color(0.92, 0.88, 0.78, 1.0)
 const COLOR_MUTED: Color = Color(0.70, 0.78, 0.74, 1.0)
@@ -24,9 +26,10 @@ var host: Node = null
 var content_root: Control = null
 var content_text: RichTextLabel = null
 var dynamic_view_host: VBoxContainer = null
+var notification_list: VBoxContainer = null
+var screen_context: RefCounted = null
 
 var _selected_shrine_panel_id: String = ""
-var _religion_state_system: RefCounted = null
 var _calendar_period: String = "veintena"
 
 func show_content(host_node: Node, content_root_node: Control, content_text_node: RichTextLabel, dynamic_view_host_node: VBoxContainer) -> void:
@@ -63,6 +66,55 @@ func current_festival_text(host_node: Node) -> String:
 	host = host_node
 	_sync_calendar_from_host()
 	return _current_festival_text()
+
+func show_content_with_context(context: RefCounted) -> void:
+	_apply_screen_context(context)
+	_sync_calendar_from_host()
+	_show_shrine_content()
+
+func build_reports_with_context(context: RefCounted) -> void:
+	_apply_screen_context(context)
+	_sync_calendar_from_host()
+	_build_shrine_reports()
+
+func apply_divine_favour_decay_with_context(context: RefCounted, report: Array, decay_amount: float = RELIGION_NORMAL_DECAY) -> void:
+	_apply_screen_context(context)
+	_sync_calendar_from_host()
+	_apply_divine_favour_decay(report, decay_amount)
+
+func reset_religion_veintena_capacity_with_context(context: RefCounted) -> void:
+	_apply_screen_context(context)
+	_reset_religion_veintena_capacity()
+
+func current_festival_god_id_with_context(context: RefCounted) -> String:
+	_apply_screen_context(context)
+	_sync_calendar_from_host()
+	return _current_festival_god_id()
+
+func current_festival_text_with_context(context: RefCounted) -> String:
+	_apply_screen_context(context)
+	_sync_calendar_from_host()
+	return _current_festival_text()
+
+func _apply_screen_context(context: RefCounted) -> void:
+	if context == null:
+		return
+	screen_context = context
+	var raw_host: Variant = context.get("host")
+	if raw_host is Node:
+		host = raw_host as Node
+	var raw_root: Variant = context.get("content_root")
+	if raw_root is Control:
+		content_root = raw_root as Control
+	var raw_text: Variant = context.get("content_text")
+	if raw_text is RichTextLabel:
+		content_text = raw_text as RichTextLabel
+	var raw_dynamic: Variant = context.get("dynamic_view_host")
+	if raw_dynamic is VBoxContainer:
+		dynamic_view_host = raw_dynamic as VBoxContainer
+	var raw_notifications: Variant = context.get("notification_list")
+	if raw_notifications is VBoxContainer:
+		notification_list = raw_notifications as VBoxContainer
 
 # -----------------------------------------------------------------------------
 # Host bridge helpers
@@ -141,9 +193,32 @@ func _calendar_god_for_veintena(veintena_number: int) -> String:
 # -----------------------------------------------------------------------------
 
 func _religion_state() -> RefCounted:
-	if _religion_state_system == null:
-		_religion_state_system = RELIGION_STATE_SYSTEM_SCRIPT.new() as RefCounted
-	return _religion_state_system
+	# Patch 8D: the Shrine UI no longer owns religion state. Prefer the shared UI
+	# context, which stores the ReligionStateSystem on the runtime state. Legacy
+	# direct calls still attach the system to TRGameState metadata rather than a
+	# controller field.
+	if screen_context != null and screen_context.has_method("religion_state_system"):
+		var context_raw: Variant = screen_context.call("religion_state_system")
+		if context_raw is RefCounted:
+			return context_raw as RefCounted
+	var runtime_state: Node = _state()
+	if runtime_state != null:
+		if runtime_state.has_method("get_religion_state_system"):
+			var public_raw: Variant = runtime_state.call("get_religion_state_system")
+			if public_raw is RefCounted:
+				return public_raw as RefCounted
+		if runtime_state.has_method("_get_religion_state_system"):
+			var private_raw: Variant = runtime_state.call("_get_religion_state_system")
+			if private_raw is RefCounted:
+				return private_raw as RefCounted
+		if runtime_state.has_meta(RELIGION_STATE_META_KEY):
+			var meta_raw: Variant = runtime_state.get_meta(RELIGION_STATE_META_KEY)
+			if meta_raw is RefCounted:
+				return meta_raw as RefCounted
+		var runtime_owned: RefCounted = RELIGION_STATE_SYSTEM_SCRIPT.new() as RefCounted
+		runtime_state.set_meta(RELIGION_STATE_META_KEY, runtime_owned)
+		return runtime_owned
+	return null
 
 func _ensure_religion_state() -> void:
 	var system: RefCounted = _religion_state()

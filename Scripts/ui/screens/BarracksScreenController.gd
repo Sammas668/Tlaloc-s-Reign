@@ -10,6 +10,7 @@ extends RefCounted
 
 const WARBAND_SKILL_WEB_CANVAS_SCRIPT: Script = preload("res://Scripts/ui/widgets/WarbandSkillWebCanvas.gd")
 const FLOWER_WAR_EVENT_OVERLAY_SCRIPT: Script = preload("res://Scripts/ui/widgets/FlowerWarEventOverlay.gd")
+const WAR_DOCTRINE_RULES_SCRIPT: Script = preload("res://Scripts/Systems/WarDoctrineRules.gd")
 
 const COLOR_TEXT: Color = Color(0.92, 0.88, 0.78, 1.0)
 const COLOR_MUTED: Color = Color(0.70, 0.78, 0.74, 1.0)
@@ -19,6 +20,8 @@ var host: Node = null
 var content_root: Control = null
 var content_text: RichTextLabel = null
 var dynamic_view_host: VBoxContainer = null
+var notification_list: VBoxContainer = null
+var screen_context: RefCounted = null
 
 var _selected_warband_skill_web_id: String = ""
 var _selected_skill_web_node_id: String = ""
@@ -57,6 +60,42 @@ func open_attack_event(host_node: Node, option_id: String = "standard", source_i
 func open_defence_event(host_node: Node, option_id: String = "standard", source_id: String = "rival", context: Dictionary = {}) -> void:
 	host = host_node
 	_open_flower_war_defence_event(option_id, source_id, context)
+
+func show_content_with_context(context: RefCounted) -> void:
+	_apply_screen_context(context)
+	_show_barracks_content()
+
+func build_reports_with_context(context: RefCounted) -> void:
+	_apply_screen_context(context)
+	_build_barracks_reports()
+
+func open_attack_event_with_context(context: RefCounted, option_id: String = "standard", source_id: String = "player", event_context: Dictionary = {}) -> void:
+	_apply_screen_context(context)
+	_open_flower_war_attack_event(option_id, source_id, event_context)
+
+func open_defence_event_with_context(context: RefCounted, option_id: String = "standard", source_id: String = "rival", event_context: Dictionary = {}) -> void:
+	_apply_screen_context(context)
+	_open_flower_war_defence_event(option_id, source_id, event_context)
+
+func _apply_screen_context(context: RefCounted) -> void:
+	if context == null:
+		return
+	screen_context = context
+	var raw_host: Variant = context.get("host")
+	if raw_host is Node:
+		host = raw_host as Node
+	var raw_root: Variant = context.get("content_root")
+	if raw_root is Control:
+		content_root = raw_root as Control
+	var raw_text: Variant = context.get("content_text")
+	if raw_text is RichTextLabel:
+		content_text = raw_text as RichTextLabel
+	var raw_dynamic: Variant = context.get("dynamic_view_host")
+	if raw_dynamic is VBoxContainer:
+		dynamic_view_host = raw_dynamic as VBoxContainer
+	var raw_notifications: Variant = context.get("notification_list")
+	if raw_notifications is VBoxContainer:
+		notification_list = raw_notifications as VBoxContainer
 
 # -----------------------------------------------------------------------------
 # Host bridge helpers
@@ -418,30 +457,15 @@ func _warband_combat_stats(row: Dictionary) -> Dictionary:
 	if row.has("combat_stats") and row["combat_stats"] is Dictionary:
 		return (row["combat_stats"] as Dictionary).duplicate(true)
 	var ready: int = int(row.get("ready", row.get("warriors", 0)))
-	var doctrine_id: String = String(row.get("doctrine", "unspecialised"))
-	var offence: float = 1.0
-	var defence: float = 1.0
-	match doctrine_id:
-		"eagle":
-			offence = 1.0
-			defence = 1.2
-		"jaguar":
-			offence = 1.3
-			defence = 1.0
-		"otomi":
-			offence = 0.8
-			defence = 1.5
-		"coyote":
-			offence = 1.4
-			defence = 0.5
-		_:
-			offence = 1.0
-			defence = 1.0
+	var doctrine_id: String = WAR_DOCTRINE_RULES_SCRIPT.normalise_doctrine_id(String(row.get("doctrine", "unspecialised")))
+	var doctrine: Dictionary = WAR_DOCTRINE_RULES_SCRIPT.doctrine_data(doctrine_id) as Dictionary
+	var offence: float = float(doctrine.get("offence", 1.0))
+	var defence: float = float(doctrine.get("defence", 1.0))
 	return {
 		"ready": ready,
 		"injured": int(row.get("injured", 0)),
 		"dead_total": int(row.get("dead_total", 0)),
-		"doctrine_name": String(row.get("doctrine_name", doctrine_id.capitalize())),
+		"doctrine_name": String(row.get("doctrine_name", doctrine.get("name", doctrine_id.capitalize()))),
 		"offence_modifier": offence,
 		"defence_modifier": defence,
 		"effective_offence": snappedf(float(ready) * offence, 0.01),

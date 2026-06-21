@@ -15,6 +15,7 @@ var dynamic_view_host: VBoxContainer = null
 var content_root: Control = null
 var content_text: Control = null
 var notification_list: VBoxContainer = null
+var screen_context: RefCounted = null
 
 var _selected_palace_route_id: String = ""
 var _pending_palace_dedication_confirm_id: String = ""
@@ -34,6 +35,34 @@ func build_palace_navigation_probe_reports(host_node: Node, notifications: VBoxC
 func reset_divine_seat_selection() -> void:
 	_selected_palace_route_id = ""
 	_pending_palace_dedication_confirm_id = ""
+
+func show_palace_content_with_context(context: RefCounted) -> void:
+	_apply_screen_context(context)
+	_show_palace_content()
+
+func build_palace_navigation_probe_reports_with_context(context: RefCounted) -> void:
+	_apply_screen_context(context)
+	_build_palace_navigation_probe_reports()
+
+func _apply_screen_context(context: RefCounted) -> void:
+	if context == null:
+		return
+	screen_context = context
+	var raw_host: Variant = context.get("host")
+	if raw_host is Node:
+		host = raw_host as Node
+	var raw_dynamic: Variant = context.get("dynamic_view_host")
+	if raw_dynamic is VBoxContainer:
+		dynamic_view_host = raw_dynamic as VBoxContainer
+	var raw_root: Variant = context.get("content_root")
+	if raw_root is Control:
+		content_root = raw_root as Control
+	var raw_text: Variant = context.get("content_text")
+	if raw_text is Control:
+		content_text = raw_text as Control
+	var raw_notifications: Variant = context.get("notification_list")
+	if raw_notifications is VBoxContainer:
+		notification_list = raw_notifications as VBoxContainer
 
 # -----------------------------------------------------------------------------
 

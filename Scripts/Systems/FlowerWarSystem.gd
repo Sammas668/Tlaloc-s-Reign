@@ -7,13 +7,7 @@
 class_name FlowerWarSystem
 extends RefCounted
 
-const FLOWER_WAR_DOCTRINES: Dictionary = {
-	"unspecialised": {"name": "Unspecialised", "offence": 1.0, "defence": 1.0, "role": "Balanced household warriors."},
-	"eagle": {"name": "Eagle", "offence": 1.0, "defence": 1.2, "role": "Captive specialists and sustained war fighters."},
-	"jaguar": {"name": "Jaguar", "offence": 1.3, "defence": 1.0, "role": "Elite offensive warriors. No hidden Prestige bonus; Prestige comes from victories, casualties, captives and loot."},
-	"otomi": {"name": "Otomi", "offence": 0.8, "defence": 1.5, "role": "Defensive veterans who trade offence for survival."},
-	"coyote": {"name": "Coyote", "offence": 1.4, "defence": 0.5, "role": "Glass-cannon raiders who favour loot."}
-}
+const WAR_DOCTRINE_RULES_SCRIPT: Script = preload("res://Scripts/Systems/WarDoctrineRules.gd")
 
 const FLOWER_WAR_PROVISIONING: Dictionary = {
 	"standard": {"name": "Standard", "supply_multiplier": 1.0, "combat_multiplier": 1.0},
@@ -200,12 +194,12 @@ func _loot_bundle_from_units(raw_units: float) -> Dictionary:
 func get_single_doctrine_attack_preview(state: Node, option_id: String = "minor", doctrine_id: String = "unspecialised", provisioning_id: String = "standard") -> Dictionary:
 	if not FLOWER_WAR_OPTIONS.has(option_id):
 		return {"ok": false, "reason": "Unknown Flower War option."}
-	if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
+	if not WAR_DOCTRINE_RULES_SCRIPT.has_doctrine(doctrine_id):
 		doctrine_id = "unspecialised"
 	if not FLOWER_WAR_PROVISIONING.has(provisioning_id):
 		provisioning_id = "standard"
 	var option: Dictionary = FLOWER_WAR_OPTIONS[option_id] as Dictionary
-	var doctrine: Dictionary = FLOWER_WAR_DOCTRINES[doctrine_id] as Dictionary
+	var doctrine: Dictionary = WAR_DOCTRINE_RULES_SCRIPT.doctrine_data(doctrine_id) as Dictionary
 	var provisioning: Dictionary = FLOWER_WAR_PROVISIONING[provisioning_id] as Dictionary
 	var warriors_committed: int = int(option.get("warriors", 0))
 	var enemy_warriors: int = int(option.get("enemy_warriors", warriors_committed))
@@ -630,7 +624,7 @@ func flower_war_participant_rows_for_ids(state: Node, selected_ids: Array[String
 		if ready <= 0:
 			continue
 		var doctrine_id: String = String(warband.get("doctrine", "unspecialised"))
-		if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
+		if not WAR_DOCTRINE_RULES_SCRIPT.has_doctrine(doctrine_id):
 			doctrine_id = "unspecialised"
 		var synced: Dictionary = _sync_warband_progress(state, warband.duplicate(true))
 		warbands[warband_id] = synced
@@ -1186,9 +1180,9 @@ func _defence_prestige_breakdown(state: Node, result: String, enemy_casualties: 
 func _fallback_warband_combat_stats(warband: Dictionary) -> Dictionary:
 	var ready: int = max(0, int(warband.get("ready_warriors", 0)))
 	var doctrine_id: String = String(warband.get("doctrine", "unspecialised"))
-	if not FLOWER_WAR_DOCTRINES.has(doctrine_id):
+	if not WAR_DOCTRINE_RULES_SCRIPT.has_doctrine(doctrine_id):
 		doctrine_id = "unspecialised"
-	var doctrine: Dictionary = FLOWER_WAR_DOCTRINES[doctrine_id] as Dictionary
+	var doctrine: Dictionary = WAR_DOCTRINE_RULES_SCRIPT.doctrine_data(doctrine_id) as Dictionary
 	return {
 		"ready": ready,
 		"doctrine_name": String(doctrine.get("name", doctrine_id.capitalize())),

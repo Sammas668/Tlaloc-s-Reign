@@ -3,10 +3,11 @@
 # Project path: res://Scripts/Systems/ReligionStateSystem.gd
 #
 # Owns the live Prototype 0 religion state that previously lived directly in
-# GameScreenMarketOverviewPatch.gd. This is intentionally a small state holder:
-# shrine UI remains in the active wrapper until the next extraction pass, while
-# mutable divine favour, shrine levels, shrine upgrades, ritual capacity and
-# recent ritual reports are no longer stored as UI fields.
+# GameScreenMarketOverviewPatch.gd and then temporarily inside the Shrine screen
+# controller. Patch 8D makes this a runtime-owned state holder accessed through
+# UIScreenContext / TRGameState metadata bridge, ready for later CampaignState
+# migration. Mutable divine favour, shrine levels, shrine upgrades, ritual
+# capacity and recent ritual reports should not be stored as UI fields.
 extends RefCounted
 
 const RELIGION_STARTING_FAVOUR: float = 40.0
