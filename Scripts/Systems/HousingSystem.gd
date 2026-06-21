@@ -9,6 +9,9 @@
 class_name HousingSystem
 extends RefCounted
 
+var _active_population_cache_token: String = ""
+var _active_population_cache: Dictionary = {}
+
 
 func get_housing_summary(state: Node) -> Dictionary:
 	var tiers: Array[Dictionary] = []
@@ -88,6 +91,7 @@ func housing_capacity_by_group(state: Node, overrides: Dictionary = {}, active_o
 	var estate_buildings: Dictionary = _estate_buildings(state)
 	var active_housing_counts: Dictionary = _active_housing_counts(state)
 	var buildings: Dictionary = _buildings(state)
+	var building_order: Array[String] = _building_order(state)
 
 	for group_variant: Variant in base_housing_capacity.keys():
 		var group_id: String = String(group_variant)
@@ -98,10 +102,13 @@ func housing_capacity_by_group(state: Node, overrides: Dictionary = {}, active_o
 		if not result.has(group_id):
 			result[group_id] = 0
 
-	for building_id: String in _building_order(state):
-		if not is_housing_building_id(state, building_id):
-			continue
+	for building_id: String in building_order:
 		if not buildings.has(building_id):
+			continue
+		var definition: Dictionary = buildings[building_id] as Dictionary
+		if String(definition.get("screen", "")) != "housing":
+			continue
+		if not definition.has("housing_capacity") and not definition.has("housing_maintenance"):
 			continue
 
 		var built_count: int = int(estate_buildings.get(building_id, 0))
@@ -115,7 +122,6 @@ func housing_capacity_by_group(state: Node, overrides: Dictionary = {}, active_o
 		if count <= 0:
 			continue
 
-		var definition: Dictionary = buildings[building_id] as Dictionary
 		var capacity: Dictionary = definition.get("housing_capacity", {}) as Dictionary
 		for group_variant: Variant in capacity.keys():
 			var group_id: String = String(group_variant)
@@ -125,6 +131,10 @@ func housing_capacity_by_group(state: Node, overrides: Dictionary = {}, active_o
 
 
 func active_population_by_group(state: Node) -> Dictionary:
+	var token: String = _active_population_cache_key(state)
+	if token != "" and token == _active_population_cache_token and not _active_population_cache.is_empty():
+		return _active_population_cache
+
 	var result: Dictionary = {}
 	var active_capacity: Dictionary = housing_capacity_by_group(state, {}, true)
 	var population: Dictionary = _population(state)
@@ -135,6 +145,8 @@ func active_population_by_group(state: Node) -> Dictionary:
 		var active_cap: int = int(active_capacity.get(group_id, total))
 		result[group_id] = mini(total, max(0, active_cap))
 
+	_active_population_cache_token = token
+	_active_population_cache = result
 	return result
 
 
@@ -592,6 +604,21 @@ func labour_group_name(group_id: String) -> String:
 	return group_id.capitalize()
 
 
+func _clear_active_population_cache() -> void:
+	_active_population_cache_token = ""
+	_active_population_cache.clear()
+
+
+func _active_population_cache_key(state: Node) -> String:
+	if state == null:
+		return ""
+	var population: Dictionary = _population(state)
+	var active_counts: Dictionary = _active_housing_counts(state)
+	var estate_buildings: Dictionary = _estate_buildings(state)
+	var base_capacity: Dictionary = _base_housing_capacity(state)
+	return str(population.hash()) + "|" + str(active_counts.hash()) + "|" + str(estate_buildings.hash()) + "|" + str(base_capacity.hash())
+
+
 # -----------------------------------------------------------------------------
 # CampaignState-first accessors
 # -----------------------------------------------------------------------------
@@ -658,6 +685,7 @@ func _estate_stockpiles(state: Node) -> Dictionary:
 
 
 func _set_base_housing_capacity(state: Node, values: Dictionary) -> void:
+	_clear_active_population_cache()
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("set_base_housing_capacity_values"):
 		runtime_state.call("set_base_housing_capacity_values", values)
@@ -668,6 +696,7 @@ func _set_base_housing_capacity(state: Node, values: Dictionary) -> void:
 
 
 func _set_active_housing_counts(state: Node, values: Dictionary) -> void:
+	_clear_active_population_cache()
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null:
 		for building_variant: Variant in values.keys():

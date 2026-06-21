@@ -19,6 +19,7 @@ var screen_context: RefCounted = null
 
 var _selected_palace_route_id: String = ""
 var _pending_palace_dedication_confirm_id: String = ""
+var _palace_probe_summary_cache: Dictionary = {}
 
 func show_palace_content(host_node: Node, dynamic_host: VBoxContainer, root_node: Control, text_node: Control) -> void:
 	host = host_node
@@ -67,6 +68,7 @@ func _apply_screen_context(context: RefCounted) -> void:
 # -----------------------------------------------------------------------------
 
 func _show_palace_content() -> void:
+	_clear_palace_probe_summary_cache()
 	_set_content_root_layout(true)
 	if content_text:
 		content_text.visible = false
@@ -1507,6 +1509,7 @@ func _palace_wrapped_label(text: String, font_size: int, colour: Color) -> RichT
 # -----------------------------------------------------------------------------
 
 func _build_palace_navigation_probe_reports() -> void:
+	_clear_palace_probe_summary_cache()
 	var focus_id: String = _current_focus_id()
 	match focus_id:
 		"prestige":
@@ -1695,6 +1698,8 @@ func _build_palace_ruler_demands_probe_reports() -> void:
 	_add_notification(String(demands.get("mechanics_note", "Donations create prestige by base value. Prestige is score only and never spent.")))
 
 func _palace_probe_summary() -> Dictionary:
+	if not _palace_probe_summary_cache.is_empty():
+		return _palace_probe_summary_cache
 	var state: Node = _state()
 	if state == null:
 		return {"palace_level": 1, "dedicated": false, "dedicated_god": "", "dedicated_god_name": "None", "route_name": "No dedication", "power_summary": "Palace backend summary is not connected.", "authority_status": "Not connected.", "built_structure_count": 0}
@@ -1733,23 +1738,22 @@ func _palace_probe_summary() -> Dictionary:
 		inactive_ids = state.call("get_inactive_palace_structure_ids") as Array
 
 	var staff_summary: Dictionary = {}
-	if state.has_method("get_palace_staff_summary"):
-		staff_summary = state.call("get_palace_staff_summary") as Dictionary
-
 	var total_maintenance: Dictionary = {}
-	if state.has_method("get_palace_total_maintenance"):
-		total_maintenance = state.call("get_palace_total_maintenance") as Dictionary
-
 	var operation_preview: Dictionary = {}
-	if state.has_method("get_palace_structure_operation_preview"):
-		operation_preview = state.call("get_palace_structure_operation_preview") as Dictionary
+	if not built_ids.is_empty():
+		if state.has_method("get_palace_staff_summary"):
+			staff_summary = state.call("get_palace_staff_summary") as Dictionary
+		if state.has_method("get_palace_total_maintenance"):
+			total_maintenance = state.call("get_palace_total_maintenance") as Dictionary
+		if state.has_method("get_palace_structure_operation_preview"):
+			operation_preview = state.call("get_palace_structure_operation_preview") as Dictionary
 
 	var authority_status: String = "Palace authority mechanics are not active yet."
 	if dedicated:
 		authority_status = str(active_ids.size()) + " active palace structure" + ("s" if active_ids.size() != 1 else "") + " for " + route_name + "."
 
-	return {
-		"schema_version": "palace_lightweight_probe_v0_8n5",
+	_palace_probe_summary_cache = {
+		"schema_version": "palace_lightweight_probe_v0_8n6",
 		"palace_level": palace_level,
 		"dedicated": dedicated,
 		"dedicated_god": dedicated_god,
@@ -1764,6 +1768,7 @@ func _palace_probe_summary() -> Dictionary:
 		"palace_operation_preview": operation_preview,
 		"authority_status": authority_status
 	}
+	return _palace_probe_summary_cache
 
 func _palace_probe_routes() -> Array[Dictionary]:
 	var output: Array[Dictionary] = []
@@ -1776,6 +1781,10 @@ func _palace_probe_routes() -> Array[Dictionary]:
 				if route_variant is Dictionary:
 					output.append(route_variant as Dictionary)
 	return output
+
+
+func _clear_palace_probe_summary_cache() -> void:
+	_palace_probe_summary_cache.clear()
 
 
 # -----------------------------------------------------------------------------
@@ -1829,14 +1838,17 @@ func _format_cost(cost: Dictionary) -> String:
 	return ", ".join(parts)
 
 func _refresh_all() -> void:
+	_clear_palace_probe_summary_cache()
 	if host != null and host.has_method("_refresh_all"):
 		host.call("_refresh_all")
 
 func _refresh_main_content() -> void:
+	_clear_palace_probe_summary_cache()
 	if host != null and host.has_method("_refresh_main_content"):
 		host.call("_refresh_main_content")
 
 func _refresh_right_panel() -> void:
+	_clear_palace_probe_summary_cache()
 	if host != null and host.has_method("_refresh_right_panel"):
 		host.call("_refresh_right_panel")
 

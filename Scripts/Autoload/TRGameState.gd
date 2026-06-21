@@ -75,9 +75,8 @@ var last_palace_maintenance_report: Array[String] = []
 # regardless of dedication because the player is responding to an attack.
 var flower_war_palace_gate_enabled: bool = true
 
-# v0.45.2 bridge: CampaignState is now the authority for stockpile,
-# calendar/report and Prestige values. The matching TRGameState variables are
-# legacy compatibility mirrors only. Other domains are still being migrated.
+# CampaignState is the live/save-state authority. The matching TRGameState
+# variables remain temporary compatibility mirrors for older UI paths.
 var campaign_state: CampaignState = null
 var _campaign_bridge_system_instance: RefCounted = null
 
@@ -309,9 +308,8 @@ func new_game() -> void:
 	_emit_state_changed_and_sync()
 
 func _load_project_data_into_campaign_state() -> void:
-	# v0.44.6: CampaignState now owns JSON/start-state shaping for the bridge.
-	# TRGameState remains the public API and active runtime owner, but no longer
-	# carries duplicate project-data loading helpers.
+	# CampaignState owns JSON/start-state shaping. TRGameState remains the public
+	# facade for UI and system calls.
 	var runtime_state: CampaignState = _get_campaign_state()
 	var result: Dictionary = runtime_state.load_project_data_from_paths(
 		RESOURCE_DATA_PATH,
@@ -331,13 +329,11 @@ func _load_project_data_into_campaign_state() -> void:
 	_auto_staff_all_productive_buildings()
 
 func get_current_veintena() -> int:
-	# v0.45.1: calendar reads go through CampaignState.
-	_ensure_campaign_state_calendar_report_bridge()
+	# Read-only UI access should not force a bridge sync.
 	return _get_campaign_state().get_current_veintena_value()
 
 func get_last_report() -> Array[String]:
-	# v0.45.1: report reads go through CampaignState.
-	_ensure_campaign_state_calendar_report_bridge()
+	# Read-only UI access should not force a bridge sync.
 	return _get_campaign_state().get_last_report_copy()
 
 func get_resource_name(resource_id: String) -> String:
