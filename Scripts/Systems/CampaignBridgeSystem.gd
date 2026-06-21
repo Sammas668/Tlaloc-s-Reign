@@ -36,10 +36,10 @@ func sync_from_current_runtime(state: Node) -> void:
 	mirror_religion_state_from_campaign_state_to_legacy(state)
 
 func apply_campaign_state_to_current_runtime(state: Node) -> void:
-	var runtime_state: RefCounted = _get_campaign_state(state)
-	if runtime_state == null:
-		return
-	runtime_state.call("apply_to_game_state", state)
+	# 8O4A: broad CampaignState -> TRGameState application is retired.
+	# TRGameState is now a facade only; live state stays in CampaignState.
+	# Retain this method as a no-op compatibility hook until all old callers are gone.
+	return
 
 # -----------------------------------------------------------------------------
 # Calendar/report authority

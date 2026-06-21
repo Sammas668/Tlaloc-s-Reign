@@ -13,7 +13,7 @@
 class_name CampaignState
 extends RefCounted
 
-const SCHEMA_VERSION: String = "campaign_state_v0_47_5_patch_8e"
+const SCHEMA_VERSION: String = "campaign_state_v0_47_5_patch_8o4b"
 
 # -----------------------------------------------------------------------------
 # Calendar / report / summary state
@@ -57,7 +57,7 @@ var labour_assignments: Dictionary = {}
 var player_palace_dedicated_god: String = ""
 var palace_built_structures: Dictionary = {}
 var palace_structure_runtime_statuses: Dictionary = {}
-var palace_delivered_ruler_demands: Dictionary = {} # Legacy compatibility only.
+var palace_delivered_ruler_demands: Dictionary = {}
 var palace_ruler_demand_donations: Array[Dictionary] = []
 var last_palace_maintenance_report: Array[String] = []
 
@@ -68,8 +68,8 @@ var sacrifice_prestige_records: Array[Dictionary] = []
 
 # Serialisable religion-state container.
 # ReligionStateSystem instances bind to this dictionary and write back after
-# mutation. This is now the save/load-facing home for shrine levels, divine
-# favour, ritual capacity and recent offering reports.
+# mutation. This is the save/load-facing home for shrine levels, divine favour,
+# ritual capacity and recent offering reports.
 var religion_state: Dictionary = {}
 
 # -----------------------------------------------------------------------------
@@ -194,7 +194,7 @@ func load_project_data_from_paths(resource_path: String, building_path: String, 
 	market_economy = _duplicate_dictionary(market_data)
 	load_start_state(start_data)
 	return {
-		"schema_version": "campaign_state_project_data_load_v0_47_5_patch_8e",
+		"schema_version": "campaign_state_project_data_load_v0_47_5_patch_8o4b",
 		"ok": warnings.is_empty(),
 		"warnings": warnings,
 		"resource_count": resources.size(),
@@ -252,110 +252,6 @@ func _load_building_definitions_from_data(data: Dictionary) -> void:
 	)
 
 # -----------------------------------------------------------------------------
-# TRGameState bridge helpers
-# -----------------------------------------------------------------------------
-
-func copy_from_game_state(game_state: Node) -> void:
-	if game_state == null:
-		return
-	resources = _get_dictionary(game_state, "resources")
-	resource_order = _get_string_array(game_state, "resource_order")
-	buildings = _get_dictionary(game_state, "buildings")
-	building_order = _get_string_array(game_state, "building_order")
-
-	estate_stockpiles = _get_dictionary(game_state, "estate_stockpiles")
-	market_stockpiles = _get_dictionary(game_state, "market_stockpiles")
-	market_demand = _get_dictionary(game_state, "market_demand")
-	market_economy = _get_dictionary(game_state, "market_economy")
-
-	estate_buildings = _get_dictionary(game_state, "estate_buildings")
-	active_housing_counts = _get_dictionary(game_state, "active_housing_counts")
-	population = _get_dictionary(game_state, "population")
-	base_housing_capacity = _get_dictionary(game_state, "base_housing_capacity")
-	labour_assignments = _get_dictionary(game_state, "labour_assignments")
-
-	current_veintena = int(_node_get_default(game_state, "current_veintena", 1))
-	calendar_period = String(_node_get_default(game_state, "calendar_period", calendar_period))
-	ritual_year = int(_node_get_default(game_state, "ritual_year", ritual_year))
-	last_report = _get_string_array(game_state, "last_report")
-	last_turn_summary = _get_dictionary(game_state, "last_turn_summary")
-	initialized = bool(_node_get_default(game_state, "initialized", false))
-
-	player_palace_dedicated_god = String(_node_get_default(game_state, "player_palace_dedicated_god", ""))
-	palace_built_structures = _get_dictionary(game_state, "palace_built_structures")
-	palace_structure_runtime_statuses = _get_dictionary(game_state, "palace_structure_runtime_statuses")
-	palace_delivered_ruler_demands = _get_dictionary(game_state, "palace_delivered_ruler_demands")
-	palace_ruler_demand_donations = _get_dictionary_array(game_state, "palace_ruler_demand_donations")
-	last_palace_maintenance_report = _get_string_array(game_state, "last_palace_maintenance_report")
-
-	player_prestige = float(_node_get_default(game_state, "player_prestige", 0.0))
-	rival_prestige = _get_dictionary(game_state, "rival_prestige")
-	prestige_history = _get_dictionary_array(game_state, "prestige_history")
-	sacrifice_prestige_records = _get_dictionary_array(game_state, "sacrifice_prestige_records")
-	religion_state = _get_dictionary(game_state, "religion_state")
-
-	flower_war_palace_gate_enabled = bool(_node_get_default(game_state, "flower_war_palace_gate_enabled", true))
-	last_flower_war_report = _get_dictionary(game_state, "last_flower_war_report")
-	flower_war_report_archive = _get_dictionary_array(game_state, "flower_war_report_archive")
-	warbands = _get_dictionary(game_state, "warbands")
-
-	rival_houses = _get_dictionary(game_state, "rival_houses")
-	rival_stockpiles = _get_dictionary(game_state, "rival_stockpiles")
-	rival_build_progress = _get_dictionary(game_state, "rival_build_progress")
-	rival_action_history = _get_dictionary_array(game_state, "rival_action_history")
-
-func apply_to_game_state(game_state: Node) -> void:
-	if game_state == null:
-		return
-	game_state.set("resources", _duplicate_dictionary(resources))
-	game_state.set("resource_order", resource_order.duplicate())
-	game_state.set("buildings", _duplicate_dictionary(buildings))
-	game_state.set("building_order", building_order.duplicate())
-
-	game_state.set("estate_stockpiles", _duplicate_dictionary(estate_stockpiles))
-	game_state.set("market_stockpiles", _duplicate_dictionary(market_stockpiles))
-	game_state.set("market_demand", _duplicate_dictionary(market_demand))
-	game_state.set("market_economy", _duplicate_dictionary(market_economy))
-
-	game_state.set("estate_buildings", _duplicate_dictionary(estate_buildings))
-	game_state.set("active_housing_counts", _duplicate_dictionary(active_housing_counts))
-	game_state.set("population", _duplicate_dictionary(population))
-	game_state.set("base_housing_capacity", _duplicate_dictionary(base_housing_capacity))
-	game_state.set("labour_assignments", _duplicate_dictionary(labour_assignments))
-
-	game_state.set("current_veintena", current_veintena)
-	game_state.set("last_report", last_report.duplicate())
-	game_state.set("initialized", initialized)
-
-	# These properties may not exist as legacy fields yet; they are safe future
-	# compatibility writes for the CampaignState migration.
-	game_state.set("calendar_period", calendar_period)
-	game_state.set("ritual_year", ritual_year)
-	game_state.set("last_turn_summary", _duplicate_dictionary(last_turn_summary))
-	mirror_religion_state_to_game_state(game_state)
-	game_state.set("rival_houses", _duplicate_dictionary(rival_houses))
-	game_state.set("rival_stockpiles", _duplicate_dictionary(rival_stockpiles))
-	game_state.set("rival_build_progress", _duplicate_dictionary(rival_build_progress))
-	game_state.set("rival_action_history", _duplicate_dictionary_array(rival_action_history))
-
-	game_state.set("player_palace_dedicated_god", player_palace_dedicated_god)
-	game_state.set("palace_built_structures", _duplicate_dictionary(palace_built_structures))
-	game_state.set("palace_structure_runtime_statuses", _duplicate_dictionary(palace_structure_runtime_statuses))
-	game_state.set("palace_delivered_ruler_demands", _duplicate_dictionary(palace_delivered_ruler_demands))
-	game_state.set("palace_ruler_demand_donations", _duplicate_dictionary_array(palace_ruler_demand_donations))
-	game_state.set("last_palace_maintenance_report", last_palace_maintenance_report.duplicate())
-
-	game_state.set("player_prestige", player_prestige)
-	game_state.set("rival_prestige", _duplicate_dictionary(rival_prestige))
-	game_state.set("prestige_history", _duplicate_dictionary_array(prestige_history))
-	game_state.set("sacrifice_prestige_records", _duplicate_dictionary_array(sacrifice_prestige_records))
-
-	game_state.set("flower_war_palace_gate_enabled", flower_war_palace_gate_enabled)
-	game_state.set("last_flower_war_report", _duplicate_dictionary(last_flower_war_report))
-	game_state.set("flower_war_report_archive", _duplicate_dictionary_array(flower_war_report_archive))
-	game_state.set("warbands", _duplicate_dictionary(warbands))
-
-# -----------------------------------------------------------------------------
 # Stockpile access helpers
 # -----------------------------------------------------------------------------
 
@@ -371,15 +267,6 @@ func get_market_stockpiles_copy() -> Dictionary:
 
 func set_market_stockpiles_values(values: Dictionary) -> void:
 	market_stockpiles = _float_dictionary(values)
-	ensure_all_resource_keys()
-
-func seed_stockpiles_from_game_state_if_empty(game_state: Node) -> void:
-	if game_state == null:
-		return
-	if estate_stockpiles.is_empty():
-		estate_stockpiles = _float_dictionary(_get_dictionary(game_state, "estate_stockpiles"))
-	if market_stockpiles.is_empty():
-		market_stockpiles = _float_dictionary(_get_dictionary(game_state, "market_stockpiles"))
 	ensure_all_resource_keys()
 
 func get_estate_stock(resource_id: String) -> float:
@@ -403,12 +290,6 @@ func set_market_stock(resource_id: String, amount: float) -> float:
 
 func add_market_stock(resource_id: String, amount: float) -> float:
 	return set_market_stock(resource_id, get_market_stock(resource_id) + amount)
-
-func mirror_stockpiles_to_game_state(game_state: Node) -> void:
-	if game_state == null:
-		return
-	game_state.set("estate_stockpiles", _duplicate_dictionary(estate_stockpiles))
-	game_state.set("market_stockpiles", _duplicate_dictionary(market_stockpiles))
 
 # -----------------------------------------------------------------------------
 # Calendar / report / summary access helpers
@@ -479,16 +360,6 @@ func append_turn_summary_entry(section_id: String, entry: Dictionary) -> void:
 	rows.append(entry.duplicate(true))
 	last_turn_summary[section_id] = rows
 
-func mirror_calendar_report_to_game_state(game_state: Node) -> void:
-	if game_state == null:
-		return
-	game_state.set("current_veintena", current_veintena)
-	game_state.set("last_report", last_report.duplicate())
-	game_state.set("initialized", initialized)
-	game_state.set("calendar_period", calendar_period)
-	game_state.set("ritual_year", ritual_year)
-	game_state.set("last_turn_summary", _duplicate_dictionary(last_turn_summary))
-
 # -----------------------------------------------------------------------------
 # Prestige access helpers
 # -----------------------------------------------------------------------------
@@ -548,14 +419,6 @@ func append_sacrifice_prestige_record(record: Dictionary) -> void:
 
 func clear_sacrifice_prestige_records() -> void:
 	sacrifice_prestige_records.clear()
-
-func mirror_prestige_to_game_state(game_state: Node) -> void:
-	if game_state == null:
-		return
-	game_state.set("player_prestige", player_prestige)
-	game_state.set("rival_prestige", _duplicate_dictionary(rival_prestige))
-	game_state.set("prestige_history", _duplicate_dictionary_array(prestige_history))
-	game_state.set("sacrifice_prestige_records", _duplicate_dictionary_array(sacrifice_prestige_records))
 
 # -----------------------------------------------------------------------------
 # Palace state access helpers
@@ -632,28 +495,6 @@ func get_flower_war_palace_gate_enabled_value() -> bool:
 func set_flower_war_palace_gate_enabled_value(enabled: bool) -> void:
 	flower_war_palace_gate_enabled = enabled
 
-func capture_palace_state_from_game_state(game_state: Node) -> void:
-	if game_state == null:
-		return
-	player_palace_dedicated_god = String(_node_get_default(game_state, "player_palace_dedicated_god", ""))
-	palace_built_structures = _get_dictionary(game_state, "palace_built_structures")
-	palace_structure_runtime_statuses = _get_dictionary(game_state, "palace_structure_runtime_statuses")
-	palace_delivered_ruler_demands = _get_dictionary(game_state, "palace_delivered_ruler_demands")
-	palace_ruler_demand_donations = _get_dictionary_array(game_state, "palace_ruler_demand_donations")
-	last_palace_maintenance_report = _get_string_array(game_state, "last_palace_maintenance_report")
-	flower_war_palace_gate_enabled = bool(_node_get_default(game_state, "flower_war_palace_gate_enabled", true))
-
-func mirror_palace_state_to_game_state(game_state: Node) -> void:
-	if game_state == null:
-		return
-	game_state.set("player_palace_dedicated_god", player_palace_dedicated_god)
-	game_state.set("palace_built_structures", _duplicate_dictionary(palace_built_structures))
-	game_state.set("palace_structure_runtime_statuses", _duplicate_dictionary(palace_structure_runtime_statuses))
-	game_state.set("palace_delivered_ruler_demands", _duplicate_dictionary(palace_delivered_ruler_demands))
-	game_state.set("palace_ruler_demand_donations", _duplicate_dictionary_array(palace_ruler_demand_donations))
-	game_state.set("last_palace_maintenance_report", last_palace_maintenance_report.duplicate())
-	game_state.set("flower_war_palace_gate_enabled", flower_war_palace_gate_enabled)
-
 # -----------------------------------------------------------------------------
 # Religion state scaffold helpers
 # -----------------------------------------------------------------------------
@@ -676,14 +517,6 @@ func set_religion_value(key: String, value: Variant) -> void:
 
 func get_religion_value(key: String, default_value: Variant = null) -> Variant:
 	return religion_state.get(key, default_value)
-
-func mirror_religion_state_to_game_state(game_state: Node) -> void:
-	if game_state == null:
-		return
-	var copy: Dictionary = _duplicate_dictionary(religion_state)
-	game_state.set_meta("religion_state", copy)
-	if game_state.get("religion_state") != null:
-		game_state.set("religion_state", copy)
 
 # -----------------------------------------------------------------------------
 # Population / buildings / housing state access helpers
@@ -758,15 +591,6 @@ func set_labour_assignment_for_building(building_id: String, assignments: Dictio
 func clear_labour_assignment_for_building(building_id: String) -> void:
 	labour_assignments.erase(building_id)
 
-func mirror_population_building_housing_to_game_state(game_state: Node) -> void:
-	if game_state == null:
-		return
-	game_state.set("population", _duplicate_dictionary(population))
-	game_state.set("estate_buildings", _duplicate_dictionary(estate_buildings))
-	game_state.set("active_housing_counts", _duplicate_dictionary(active_housing_counts))
-	game_state.set("base_housing_capacity", _duplicate_dictionary(base_housing_capacity))
-	game_state.set("labour_assignments", _duplicate_dictionary(labour_assignments))
-
 # -----------------------------------------------------------------------------
 # Warband / Flower War report state access helpers
 # -----------------------------------------------------------------------------
@@ -828,13 +652,6 @@ func append_flower_war_report_archive(report: Dictionary, max_entries: int = 20)
 func clear_flower_war_report_archive() -> void:
 	flower_war_report_archive.clear()
 
-func mirror_warband_flower_war_state_to_game_state(game_state: Node) -> void:
-	if game_state == null:
-		return
-	game_state.set("warbands", _duplicate_dictionary(warbands))
-	game_state.set("last_flower_war_report", _duplicate_dictionary(last_flower_war_report))
-	game_state.set("flower_war_report_archive", _duplicate_dictionary_array(flower_war_report_archive))
-
 # -----------------------------------------------------------------------------
 # Rival scaffold helpers
 # -----------------------------------------------------------------------------
@@ -869,14 +686,6 @@ func append_rival_action(record: Dictionary, max_entries: int = 40) -> void:
 	rival_action_history.append(record.duplicate(true))
 	while max_entries > 0 and rival_action_history.size() > max_entries:
 		rival_action_history.pop_front()
-
-func mirror_rival_state_to_game_state(game_state: Node) -> void:
-	if game_state == null:
-		return
-	game_state.set("rival_houses", _duplicate_dictionary(rival_houses))
-	game_state.set("rival_stockpiles", _duplicate_dictionary(rival_stockpiles))
-	game_state.set("rival_build_progress", _duplicate_dictionary(rival_build_progress))
-	game_state.set("rival_action_history", _duplicate_dictionary_array(rival_action_history))
 
 # -----------------------------------------------------------------------------
 # Save/load-facing helpers
@@ -973,25 +782,6 @@ func apply_save_dictionary(data: Dictionary) -> void:
 # -----------------------------------------------------------------------------
 # Utility helpers
 # -----------------------------------------------------------------------------
-
-func _node_get_default(node: Node, property_name: String, default_value: Variant) -> Variant:
-	if node == null:
-		return default_value
-	if node.has_meta(property_name):
-		return node.get_meta(property_name)
-	var value: Variant = node.get(property_name)
-	if value == null:
-		return default_value
-	return value
-
-func _get_dictionary(node: Node, property_name: String) -> Dictionary:
-	return _dictionary_from_variant(_node_get_default(node, property_name, {}))
-
-func _get_string_array(node: Node, property_name: String) -> Array[String]:
-	return _string_array_from_variant(_node_get_default(node, property_name, []))
-
-func _get_dictionary_array(node: Node, property_name: String) -> Array[Dictionary]:
-	return _duplicate_dictionary_array(_array_from_variant(_node_get_default(node, property_name, [])))
 
 func _dictionary_from_variant(value: Variant) -> Dictionary:
 	if value is Dictionary:

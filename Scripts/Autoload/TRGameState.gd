@@ -293,7 +293,8 @@ func _load_project_data_into_campaign_state() -> void:
 	)
 	for warning_variant: Variant in result.get("warnings", []):
 		push_warning(String(warning_variant))
-	runtime_state.apply_to_game_state(self)
+	# 8O4A: project data is already loaded into CampaignState. Do not apply it
+	# back onto TRGameState; the old facade mirrors were removed in 8O3.
 	_ensure_base_housing_capacity()
 	_ensure_active_housing_counts()
 	# New-game start states should not begin with productive buildings idle just
