@@ -3,8 +3,8 @@
 # Project path: res://Scripts/Systems/MarketTradeSystem.gd
 #
 # Owns barter-trade pricing, validation and application rules.
-# Accepted trades mutate CampaignState stockpiles first. TRGameState dictionary
-# fallback remains only for compatibility.
+# Accepted trades mutate CampaignState stockpiles directly. TRGameState mirror
+# dictionaries are no longer used as a fallback source of truth.
 
 class_name MarketTradeSystem
 extends RefCounted
@@ -112,30 +112,17 @@ func apply_trade_plan(state: Node, trade_plan: Dictionary) -> Dictionary:
 		return {"valid": false, "reason": "Trade data is not connected."}
 
 	var plan: Dictionary = validation.get("plan", {}) as Dictionary
-	var campaign_state: RefCounted = _campaign_stockpile_state(state)
+	var campaign_ref: RefCounted = _campaign_stockpile_state(state)
 
-	if campaign_state != null and campaign_state.has_method("add_estate_stock") and campaign_state.has_method("add_market_stock"):
-		for key_variant: Variant in plan.keys():
-			var resource_id: String = String(key_variant)
-			var amount: float = float(plan[key_variant])
-			campaign_state.call("add_estate_stock", resource_id, amount)
-			campaign_state.call("add_market_stock", resource_id, -amount)
-		_mirror_stockpile_compatibility(state)
-	else:
-		var estate_variant: Variant = state.get("estate_stockpiles")
-		var market_variant: Variant = state.get("market_stockpiles")
-		if not (estate_variant is Dictionary) or not (market_variant is Dictionary):
-			return {"valid": false, "reason": "Stockpile data is not connected."}
+	if campaign_ref == null or not campaign_ref.has_method("add_estate_stock") or not campaign_ref.has_method("add_market_stock"):
+		return {"valid": false, "reason": "CampaignState stockpile API is not connected."}
 
-		var estate_stockpiles: Dictionary = estate_variant as Dictionary
-		var market_stockpiles: Dictionary = market_variant as Dictionary
-		for key_variant: Variant in plan.keys():
-			var resource_id: String = String(key_variant)
-			var amount: float = float(plan[key_variant])
-			estate_stockpiles[resource_id] = maxf(0.0, float(estate_stockpiles.get(resource_id, 0.0)) + amount)
-			market_stockpiles[resource_id] = maxf(0.0, float(market_stockpiles.get(resource_id, 0.0)) - amount)
-		state.set("estate_stockpiles", estate_stockpiles)
-		state.set("market_stockpiles", market_stockpiles)
+	for key_variant: Variant in plan.keys():
+		var resource_id: String = String(key_variant)
+		var amount: float = float(plan[key_variant])
+		campaign_ref.call("add_estate_stock", resource_id, amount)
+		campaign_ref.call("add_market_stock", resource_id, -amount)
+	_mirror_stockpile_compatibility(state)
 
 	var report_line: String = accepted_trade_report_line(validation)
 	_append_report_line(state, report_line)
@@ -392,11 +379,7 @@ func _append_report_line(state: Node, line: String) -> void:
 			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 		return
 
-	var report_variant: Variant = state.get("last_report") if state != null else []
-	if report_variant is Array:
-		var report: Array = report_variant as Array
-		report.append(line)
-		state.set("last_report", report)
+	# No TRGameState mirror fallback here. Reports are CampaignState-owned.
 
 
 func _clean_trade_plan(trade_plan: Dictionary) -> Dictionary:

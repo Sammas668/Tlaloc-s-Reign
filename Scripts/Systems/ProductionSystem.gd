@@ -4,8 +4,8 @@
 #
 # Owns production resolution and production operation rules.
 # CampaignState is the live/save-state owner. TRGameState remains the public
-# facade and compatibility API while systems migrate toward CampaignState-first
-# reads and writes.
+# facade. This system no longer reads or writes TRGameState mirror dictionaries
+# as a fallback source of truth.
 class_name ProductionSystem
 extends RefCounted
 
@@ -178,39 +178,37 @@ func _campaign_state(state: Node) -> RefCounted:
 	return null
 
 func _campaign_dictionary(state: Node, key: String) -> Dictionary:
-	var runtime_state: RefCounted = _campaign_state(state)
-	if runtime_state != null:
-		match key:
-			"estate_stockpiles":
-				if runtime_state.has_method("get_estate_stockpiles_copy"):
-					return runtime_state.call("get_estate_stockpiles_copy") as Dictionary
-			"buildings":
-				var buildings_value: Variant = runtime_state.get("buildings")
-				if buildings_value is Dictionary:
-					return (buildings_value as Dictionary).duplicate(true)
-			"estate_buildings":
-				if runtime_state.has_method("get_estate_buildings_copy"):
-					return runtime_state.call("get_estate_buildings_copy") as Dictionary
-				var estate_value: Variant = runtime_state.get("estate_buildings")
-				if estate_value is Dictionary:
-					return (estate_value as Dictionary).duplicate(true)
-			_:
-				var generic_value: Variant = runtime_state.get(key)
-				if generic_value is Dictionary:
-					return (generic_value as Dictionary).duplicate(true)
-	var fallback: Variant = state.get(key)
-	if fallback is Dictionary:
-		return (fallback as Dictionary).duplicate(true)
+	var campaign_ref: RefCounted = _campaign_state(state)
+	if campaign_ref == null:
+		return {}
+
+	match key:
+		"estate_stockpiles":
+			if campaign_ref.has_method("get_estate_stockpiles_copy"):
+				return campaign_ref.call("get_estate_stockpiles_copy") as Dictionary
+		"buildings":
+			var buildings_value: Variant = campaign_ref.get("buildings")
+			if buildings_value is Dictionary:
+				return (buildings_value as Dictionary).duplicate(true)
+		"estate_buildings":
+			if campaign_ref.has_method("get_estate_buildings_copy"):
+				return campaign_ref.call("get_estate_buildings_copy") as Dictionary
+			var estate_value: Variant = campaign_ref.get("estate_buildings")
+			if estate_value is Dictionary:
+				return (estate_value as Dictionary).duplicate(true)
+		_:
+			var generic_value: Variant = campaign_ref.get(key)
+			if generic_value is Dictionary:
+				return (generic_value as Dictionary).duplicate(true)
 	return {}
 
 func _campaign_string_array(state: Node, key: String) -> Array[String]:
 	var output: Array[String] = []
-	var runtime_state: RefCounted = _campaign_state(state)
-	var raw_value: Variant = null
-	if runtime_state != null:
-		raw_value = runtime_state.get(key)
-	if raw_value == null:
-		raw_value = state.get(key)
+	var campaign_ref: RefCounted = _campaign_state(state)
+	if campaign_ref == null:
+		return output
+
+	var raw_value: Variant = campaign_ref.get(key)
 	if raw_value is Array:
 		for item: Variant in raw_value as Array:
 			output.append(String(item))
@@ -320,18 +318,13 @@ func _stock(state: Node, resource_id: String) -> float:
 	return float(stockpiles.get(resource_id, 0.0))
 
 func _add_stock(state: Node, resource_id: String, amount: float) -> void:
-	var runtime_state: RefCounted = _campaign_state(state)
-	if runtime_state != null and runtime_state.has_method("add_estate_stock"):
-		runtime_state.call("add_estate_stock", resource_id, amount)
+	var campaign_ref: RefCounted = _campaign_state(state)
+	if campaign_ref != null and campaign_ref.has_method("add_estate_stock"):
+		campaign_ref.call("add_estate_stock", resource_id, amount)
 		_mirror_stockpiles_to_legacy(state)
 		return
 	if state != null and state.has_method("_add_stock"):
 		state.call("_add_stock", resource_id, amount)
-		return
-	var stockpiles: Dictionary = _estate_stockpiles_copy(state)
-	stockpiles[resource_id] = maxf(0.0, float(stockpiles.get(resource_id, 0.0)) + amount)
-	if state != null:
-		state.set("estate_stockpiles", stockpiles)
 
 func _mirror_stockpiles_to_legacy(state: Node) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
