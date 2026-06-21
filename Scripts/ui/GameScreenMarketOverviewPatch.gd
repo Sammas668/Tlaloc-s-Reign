@@ -8,9 +8,30 @@
 # - Safe gameplay-led Ritual Calendar strip and Nemontemi pacing.
 # - Turn Resolution Pipeline v1 hooks.
 # - Religion / Shrine Upgrades v2 with tiered rituals, random favour rolls, no separate Offerings tab, and overview-only global favour/priest cards.
+#
+# -----------------------------------------------------------------------------
+# ACTIVE WRAPPER BOUNDARY
+# -----------------------------------------------------------------------------
+# This file is the current active gameplay UI wrapper.
+# It may coordinate screens, compose existing views, connect UI signals and call
+# backend systems, but new gameplay rule logic should not be added here.
+#
+# New rule logic belongs in res://Scripts/Systems/.
+# New reusable UI panels/widgets belong in res://Scripts/ui/screens/ or
+# res://Scripts/ui/widgets/.
+#
+# Keep future patches narrow: either wire UI to existing systems here, or extract
+# self-contained UI pieces out of this wrapper. Do not make this file the
+# permanent home for market, religion, palace, rival, warband or turn rules.
+# -----------------------------------------------------------------------------
 extends "res://Scripts/ui/GameScreen.gd"
 
 const TRADE_BASKET_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/TradeBasketView.tscn")
+const WARBAND_SKILL_WEB_CANVAS_SCRIPT: Script = preload("res://Scripts/ui/widgets/WarbandSkillWebCanvas.gd")
+const FLOWER_WAR_EVENT_OVERLAY_SCRIPT: Script = preload("res://Scripts/ui/widgets/FlowerWarEventOverlay.gd")
+const CALENDAR_PACING_CONTROLLER_SCRIPT: Script = preload("res://Scripts/ui/widgets/CalendarPacingController.gd")
+const SHRINE_RITUAL_RULES_SCRIPT: Script = preload("res://Scripts/Systems/ShrineRitualRules.gd")
+const PalacePresentationRules: Script = preload("res://Scripts/Systems/PalacePresentationRules.gd")
 
 @export_group("Shrine Tab Art")
 @export var shrine_overview_art: Texture2D
@@ -71,781 +92,12 @@ var _last_trade_basket_savvy_lines: Array = []
 var _last_trade_basket_savvy_preview: Dictionary = {}
 var _selected_palace_route_id: String = ""
 var _pending_palace_dedication_confirm_id: String = ""
+var _calendar_pacing_controller: RefCounted = null
 
 
-class WarbandSkillWebCanvas:
-	extends Control
-
-	signal node_selected(trait_id: String)
-	signal node_hovered(trait_id: String)
-	signal pan_changed(new_pan: Vector2)
-	signal zoom_changed(new_zoom: float)
-
-	var web: Dictionary = {}
-	var selected_node_id: String = ""
-	var hovered_node_id: String = ""
-	var pan_offset: Vector2 = Vector2.ZERO
-	var zoom_level: float = 0.74
-	var min_zoom: float = 0.36
-	var max_zoom: float = 1.70
-	var node_positions: Dictionary = {}
-	var node_radius: float = 22.0
-	var keystone_radius: float = 28.0
-	var capstone_radius: float = 31.0
-	var grid_scale: float = 112.0
-	var edge_padding: float = 96.0
-	var _dragging: bool = false
-	var _drag_started: bool = false
-	var _drag_start_mouse: Vector2 = Vector2.ZERO
-	var _drag_start_pan: Vector2 = Vector2.ZERO
-
-	func setup(new_web: Dictionary, selected_id: String, hover_id: String, saved_pan: Vector2, saved_zoom: float = 0.74) -> void:
-		web = new_web
-		selected_node_id = selected_id
-		hovered_node_id = hover_id
-		zoom_level = clampf(saved_zoom, min_zoom, max_zoom)
-		pan_offset = _clamped_pan(saved_pan)
-		mouse_filter = Control.MOUSE_FILTER_STOP
-		clip_contents = true
-		queue_redraw()
-
-	func _notification(what: int) -> void:
-		if what == NOTIFICATION_RESIZED:
-			var clamped: Vector2 = _clamped_pan(pan_offset)
-			if clamped != pan_offset:
-				pan_offset = clamped
-				pan_changed.emit(pan_offset)
-			queue_redraw()
-
-	func _gui_input(event: InputEvent) -> void:
-		if event is InputEventMouseButton:
-			var mouse_event: InputEventMouseButton = event as InputEventMouseButton
-			if mouse_event.button_index == MOUSE_BUTTON_WHEEL_UP and mouse_event.pressed:
-				_zoom_at_position(1.12, mouse_event.position)
-				accept_event()
-				return
-			if mouse_event.button_index == MOUSE_BUTTON_WHEEL_DOWN and mouse_event.pressed:
-				_zoom_at_position(1.0 / 1.12, mouse_event.position)
-				accept_event()
-				return
-			if mouse_event.button_index == MOUSE_BUTTON_LEFT:
-				if mouse_event.pressed:
-					_dragging = true
-					_drag_started = false
-					_drag_start_mouse = mouse_event.position
-					_drag_start_pan = pan_offset
-					accept_event()
-				else:
-					if _dragging and not _drag_started:
-						var clicked_node: String = _node_id_at_position(mouse_event.position)
-						if clicked_node != "":
-							node_selected.emit(clicked_node)
-					_dragging = false
-					_drag_started = false
-					accept_event()
-		elif event is InputEventMouseMotion:
-			var motion_event: InputEventMouseMotion = event as InputEventMouseMotion
-			if _dragging:
-				var delta: Vector2 = motion_event.position - _drag_start_mouse
-				if delta.length() > 4.0:
-					_drag_started = true
-				pan_offset = _clamped_pan(_drag_start_pan + delta)
-				pan_changed.emit(pan_offset)
-				queue_redraw()
-				accept_event()
-			else:
-				var hovered: String = _node_id_at_position(motion_event.position)
-				if hovered != hovered_node_id:
-					hovered_node_id = hovered
-					node_hovered.emit(hovered_node_id)
-					queue_redraw()
-
-	func _draw() -> void:
-		node_positions.clear()
-		_draw_background()
-		var nodes: Array = web.get("nodes", []) as Array
-		for node_variant: Variant in nodes:
-			if node_variant is Dictionary:
-				var node: Dictionary = node_variant as Dictionary
-				var node_id: String = String(node.get("id", ""))
-				if node_id != "":
-					node_positions[node_id] = _screen_position_for_node(node)
-		_draw_connections(nodes)
-		_draw_nodes(nodes)
-		_draw_help_text()
-
-	func _draw_background() -> void:
-		var rect: Rect2 = Rect2(Vector2.ZERO, size)
-		draw_rect(rect, Color(0.012, 0.020, 0.022, 0.92), true)
-		var centre: Vector2 = size * 0.5 + pan_offset
-		var step: float = _effective_grid_scale()
-		# Keep the grid very quiet. Earlier axis-highlight lines ran directly through
-		# the four terminal capstones and looked like connection lines continuing off
-		# the screen. The web structure should be read from node links, not from axes.
-		var grid_colour: Color = Color(0.18, 0.27, 0.27, 0.10)
-		for x_index: int in range(-20, 21):
-			var x: float = centre.x + float(x_index) * step
-			draw_line(Vector2(x, 0.0), Vector2(x, size.y), grid_colour, 1.0)
-		for y_index: int in range(-20, 21):
-			var y: float = centre.y + float(y_index) * step
-			draw_line(Vector2(0.0, y), Vector2(size.x, y), grid_colour, 1.0)
-
-	func _draw_connections(nodes: Array) -> void:
-		var statuses: Dictionary = web.get("statuses", {}) as Dictionary
-		var children_by_parent: Dictionary = _direct_children_by_parent(nodes)
-		var split_parent_ids: Dictionary = {}
-
-		# Draw intentional fork shapes first. Specialist gateways and elite rejoin
-		# nodes should read as one trunk that splits into three branches, rather than
-		# three unrelated lines leaving the same node.
-		for parent_variant: Variant in children_by_parent.keys():
-			var parent_id: String = String(parent_variant)
-			var parent_node: Dictionary = _canvas_node_by_id(nodes, parent_id)
-			if parent_node.is_empty() or not node_positions.has(parent_id):
-				continue
-			var visible_children: Array = _visible_split_children_for_parent(children_by_parent[parent_variant] as Array, nodes)
-			if _should_draw_split_outgoing(parent_node, visible_children):
-				split_parent_ids[parent_id] = visible_children.duplicate()
-				_draw_split_outgoing(parent_id, visible_children, parent_node, statuses, nodes)
-
-		for node_variant: Variant in nodes:
-			if not (node_variant is Dictionary):
-				continue
-			var node: Dictionary = node_variant as Dictionary
-			var node_id: String = String(node.get("id", ""))
-			if not node_positions.has(node_id):
-				continue
-
-			# Rejoin nodes merge branch endings into one trunk before entering the node.
-			# This makes Elite / Chosen junctions read as: complete any one branch ->
-			# merge -> buy the rejoin node -> continue from that node. It also avoids the
-			# visual impression that later paths can bypass the Elite node.
-			if _is_rejoin_node(node):
-				_draw_merge_incoming(node, statuses)
-				continue
-
-			var requirements: Array = node.get("requires", []) as Array
-			for req_variant: Variant in requirements:
-				var req_id: String = String(req_variant)
-				if split_parent_ids.has(req_id) and (split_parent_ids[req_id] as Array).has(node_id):
-					continue
-				_draw_connection_between(req_id, node_id, node, statuses, false)
-
-			var any_requirements: Array = node.get("requires_any", []) as Array
-			for req_variant: Variant in any_requirements:
-				var req_id: String = String(req_variant)
-				_draw_connection_between(req_id, node_id, node, statuses, true)
-
-	func _direct_children_by_parent(nodes: Array) -> Dictionary:
-		var result: Dictionary = {}
-		for node_variant: Variant in nodes:
-			if not (node_variant is Dictionary):
-				continue
-			var node: Dictionary = node_variant as Dictionary
-			var node_id: String = String(node.get("id", ""))
-			if node_id == "":
-				continue
-			var requirements: Array = node.get("requires", []) as Array
-			for req_variant: Variant in requirements:
-				var req_id: String = String(req_variant)
-				if req_id == "":
-					continue
-				var req_node: Dictionary = _canvas_node_by_id(nodes, req_id)
-				if _is_terminal_node(req_node):
-					continue
-				if not result.has(req_id):
-					result[req_id] = []
-				(result[req_id] as Array).append(node_id)
-		return result
-
-	func _canvas_node_by_id(nodes: Array, node_id: String) -> Dictionary:
-		for node_variant: Variant in nodes:
-			if not (node_variant is Dictionary):
-				continue
-			var node: Dictionary = node_variant as Dictionary
-			if String(node.get("id", "")) == node_id:
-				return node
-		return {}
-
-	func _is_rejoin_node(node: Dictionary) -> bool:
-		if node.is_empty():
-			return false
-		var any_requirements: Array = node.get("requires_any", []) as Array
-		return bool(node.get("rejoin", false)) and not any_requirements.is_empty()
-
-	func _is_terminal_node(node: Dictionary) -> bool:
-		# Final capstones are hard visual endpoints. They may have incoming merge
-		# lines, but they should never act as a source for any outgoing line.
-		if node.is_empty():
-			return false
-		return bool(node.get("capstone", false)) or bool(node.get("chosen_capstone", false))
-
-	func _visible_split_children_for_parent(child_ids: Array, nodes: Array) -> Array:
-		var output: Array = []
-		for child_variant: Variant in child_ids:
-			var child_id: String = String(child_variant)
-			var child_node: Dictionary = _canvas_node_by_id(nodes, child_id)
-			if child_node.is_empty():
-				continue
-			# Rejoin nodes also list the gateway/elite as a hard prerequisite in data,
-			# but visually they should be reached through the branch merge, not through a
-			# direct shortcut line from the gateway.
-			if _is_rejoin_node(child_node):
-				continue
-			output.append(child_id)
-		return output
-
-	func _should_draw_split_outgoing(parent_node: Dictionary, visible_child_ids: Array) -> bool:
-		if visible_child_ids.size() < 2:
-			return false
-		# Final capstones must be visual end-points. Even if future data accidentally
-		# gives them children, do not draw a trunk continuing beyond the final node.
-		if bool(parent_node.get("capstone", false)) or bool(parent_node.get("chosen_capstone", false)):
-			return false
-		if bool(parent_node.get("specialisation", false)):
-			return true
-		if bool(parent_node.get("rejoin", false)):
-			return true
-		return false
-
-	func _draw_split_outgoing(parent_id: String, child_ids: Array, parent_node: Dictionary, statuses: Dictionary, nodes: Array) -> void:
-		if child_ids.size() < 2 or not node_positions.has(parent_id):
-			return
-		var from_pos: Vector2 = node_positions[parent_id] as Vector2
-		var child_positions: Array[Vector2] = []
-		for child_variant: Variant in child_ids:
-			var child_id: String = String(child_variant)
-			if node_positions.has(child_id):
-				child_positions.append(node_positions[child_id] as Vector2)
-		if child_positions.size() < 2:
-			return
-		var average_child: Vector2 = Vector2.ZERO
-		for child_pos: Vector2 in child_positions:
-			average_child += child_pos
-		average_child /= float(child_positions.size())
-		var direction: Vector2 = average_child - from_pos
-		if direction.length() < 0.001:
-			direction = _cluster_forward_direction(String(parent_node.get("cluster", "core")))
-		else:
-			direction = direction.normalized()
-		var junction: Vector2 = from_pos + direction * _junction_trunk_length()
-		var trunk_style: Dictionary = _parent_trunk_style(parent_id, parent_node, statuses)
-		var trunk_colour: Color = trunk_style.get("colour", Color(0.38, 0.45, 0.42, 0.70)) as Color
-		var trunk_width: float = float(trunk_style.get("width", 2.5))
-		var from_edge: Vector2 = _node_edge_toward(parent_node, from_pos, junction)
-		draw_line(from_edge, junction, trunk_colour, trunk_width, true)
-		for child_variant: Variant in child_ids:
-			var child_id: String = String(child_variant)
-			var child_node: Dictionary = _canvas_node_by_id(nodes, child_id)
-			if child_node.is_empty() or not node_positions.has(child_id):
-				continue
-			var style: Dictionary = _connection_style(parent_id, child_id, child_node, statuses, false)
-			var line_colour: Color = style.get("colour", trunk_colour) as Color
-			var line_width: float = float(style.get("width", trunk_width))
-			var child_pos: Vector2 = node_positions[child_id] as Vector2
-			var child_edge: Vector2 = _node_edge_toward(child_node, child_pos, junction)
-			draw_line(junction, child_edge, line_colour, maxf(1.5, line_width - 0.25), true)
-		draw_circle(junction, maxf(3.0, 5.0 * sqrt(zoom_level)), trunk_colour.lightened(0.08))
-
-	func _draw_merge_incoming(node: Dictionary, statuses: Dictionary) -> void:
-		var node_id: String = String(node.get("id", ""))
-		if node_id == "" or not node_positions.has(node_id):
-			return
-		var any_requirements: Array = node.get("requires_any", []) as Array
-		var input_positions: Array[Vector2] = []
-		for req_variant: Variant in any_requirements:
-			var req_id: String = String(req_variant)
-			if node_positions.has(req_id):
-				input_positions.append(node_positions[req_id] as Vector2)
-		if input_positions.is_empty():
-			return
-		var to_pos: Vector2 = node_positions[node_id] as Vector2
-		var average_input: Vector2 = Vector2.ZERO
-		for input_pos: Vector2 in input_positions:
-			average_input += input_pos
-		average_input /= float(input_positions.size())
-		var direction: Vector2 = to_pos - average_input
-		if direction.length() < 0.001:
-			direction = _cluster_forward_direction(String(node.get("cluster", "core")))
-		else:
-			direction = direction.normalized()
-		var junction: Vector2 = to_pos - direction * _junction_trunk_length()
-		var trunk_style: Dictionary = _connection_style(String(any_requirements[0]), node_id, node, statuses, true)
-		var trunk_colour: Color = trunk_style.get("colour", Color(0.38, 0.45, 0.42, 0.70)) as Color
-		var trunk_width: float = float(trunk_style.get("width", 3.0))
-		var all_nodes: Array = web.get("nodes", []) as Array
-		for req_variant: Variant in any_requirements:
-			var req_id: String = String(req_variant)
-			if not node_positions.has(req_id):
-				continue
-			var req_node: Dictionary = _canvas_node_by_id(all_nodes, req_id)
-			var style: Dictionary = _connection_style(req_id, node_id, node, statuses, true)
-			var line_colour: Color = style.get("colour", trunk_colour) as Color
-			var line_width: float = float(style.get("width", trunk_width))
-			var req_pos: Vector2 = node_positions[req_id] as Vector2
-			var req_edge: Vector2 = req_pos
-			if not req_node.is_empty():
-				req_edge = _node_edge_toward(req_node, req_pos, junction)
-			draw_line(req_edge, junction, line_colour, maxf(1.5, line_width - 0.25), true)
-		var to_edge: Vector2 = _node_edge_toward(node, to_pos, junction)
-		draw_line(junction, to_edge, trunk_colour, trunk_width + 0.5, true)
-		if _is_terminal_node(node):
-			_draw_terminal_line_blocker(to_edge, to_pos - junction, trunk_width + 0.5)
-			_draw_terminal_end_cap(to_edge, to_pos - junction, trunk_colour, trunk_width + 0.5)
-		draw_circle(junction, maxf(3.0, 5.0 * sqrt(zoom_level)), trunk_colour.lightened(0.08))
-
-	func _draw_terminal_line_blocker(edge_pos: Vector2, incoming_direction: Vector2, line_width: float) -> void:
-		# Final capstones sit on the main vertical/horizontal axes. If the background
-		# grid or any accidental future link continues past them, it reads as a
-		# connection line going off-screen. Mask the far side of the terminal node so
-		# the branch visibly ends there. Nodes are drawn afterwards, so this mask does
-		# not damage the capstone itself.
-		if incoming_direction.length() < 0.001:
-			return
-		var dir: Vector2 = incoming_direction.normalized()
-		var start_pos: Vector2 = edge_pos + dir * maxf(3.0, line_width)
-		var end_pos: Vector2 = edge_pos + dir * (maxf(size.x, size.y) + 240.0)
-		var mask_colour: Color = Color(0.012, 0.020, 0.022, 1.0)
-		draw_line(start_pos, end_pos, mask_colour, maxf(18.0, line_width + 12.0), true)
-
-	func _draw_terminal_end_cap(edge_pos: Vector2, incoming_direction: Vector2, line_colour: Color, line_width: float) -> void:
-		# A short perpendicular stopper makes final capstones read as true endpoints
-		# instead of a path that continues visually beyond the node.
-		if incoming_direction.length() < 0.001:
-			return
-		var dir: Vector2 = incoming_direction.normalized()
-		var normal: Vector2 = Vector2(-dir.y, dir.x)
-		var half_len: float = clampf(13.0 * sqrt(zoom_level), 7.0, 18.0)
-		draw_line(edge_pos - normal * half_len, edge_pos + normal * half_len, line_colour.lightened(0.15), maxf(2.0, line_width), true)
-
-	func _connection_style(req_id: String, node_id: String, node: Dictionary, statuses: Dictionary, is_rejoin_line: bool) -> Dictionary:
-		var target_status: Dictionary = {}
-		if statuses.has(node_id):
-			target_status = statuses[node_id] as Dictionary
-		var source_status: Dictionary = {}
-		if statuses.has(req_id):
-			source_status = statuses[req_id] as Dictionary
-		var target_purchased: bool = bool(target_status.get("purchased", false))
-		var target_can_purchase: bool = bool(target_status.get("can_purchase", false))
-		var target_requirements_met: bool = bool(target_status.get("requirements_met", false))
-		var source_purchased: bool = bool(source_status.get("purchased", false))
-
-		# Connection colours are intentionally calmer than node colours. The central
-		# training hub should read as one neutral household web; strong doctrine colours
-		# only begin once a line is actually entering Eagle / Jaguar / Otomi / Coyote
-		# territory. This prevents the start node from appearing to split into random
-		# purple/white routes.
-		var base_colour: Color = _connection_base_colour(req_id, node)
-		var line_colour: Color = Color(0.27, 0.34, 0.33, 0.50)
-		var line_width: float = 2.0
-		if target_purchased:
-			line_colour = base_colour.lightened(0.25)
-			line_width = 4.0
-		elif target_can_purchase or source_purchased:
-			line_colour = base_colour
-			line_width = 3.0
-		elif target_requirements_met:
-			line_colour = _neutral_connection_colour(0.70)
-		if is_rejoin_line:
-			line_width += 0.5
-			if not source_purchased and not target_purchased and not target_can_purchase:
-				line_colour.a = 0.42
-		return {"colour": line_colour, "width": line_width}
-
-	func _connection_base_colour(req_id: String, target_node: Dictionary) -> Color:
-		var target_cluster: String = String(target_node.get("cluster", "core"))
-		# Every line leaving the founding node is neutral, even if the target node is
-		# a veteran/support-flavoured early training node. Doctrine colour should not
-		# start until after the first neutral training step.
-		if req_id == "household_muster":
-			return _neutral_connection_colour()
-		# Early non-doctrine support clusters should stay visually tied to the central
-		# household web rather than drawing attention with a separate purple route.
-		if target_cluster == "core" or target_cluster == "veteran" or target_cluster == "supply":
-			return _neutral_connection_colour()
-		return _cluster_colour(target_cluster)
-
-	func _neutral_connection_colour(alpha: float = 0.88) -> Color:
-		return Color(0.74, 0.79, 0.73, alpha)
-
-	func _parent_trunk_style(parent_id: String, parent_node: Dictionary, statuses: Dictionary) -> Dictionary:
-		var parent_status: Dictionary = {}
-		if statuses.has(parent_id):
-			parent_status = statuses[parent_id] as Dictionary
-		var base_colour: Color = _cluster_colour(String(parent_node.get("cluster", "core")))
-		if parent_id == "household_muster" or String(parent_node.get("cluster", "core")) == "core" or String(parent_node.get("cluster", "core")) == "veteran" or String(parent_node.get("cluster", "core")) == "supply":
-			base_colour = _neutral_connection_colour()
-		if bool(parent_status.get("purchased", false)):
-			return {"colour": base_colour.lightened(0.12), "width": 3.5}
-		if bool(parent_status.get("can_purchase", false)):
-			return {"colour": base_colour.darkened(0.08), "width": 3.0}
-		return {"colour": Color(0.27, 0.34, 0.33, 0.50), "width": 2.0}
-
-	func _junction_trunk_length() -> float:
-		return clampf(64.0 * zoom_level, 34.0, 96.0)
-
-	func _cluster_forward_direction(cluster_id: String) -> Vector2:
-		match cluster_id:
-			"eagle":
-				return Vector2(0.0, -1.0)
-			"jaguar":
-				return Vector2(1.0, 0.0)
-			"otomi":
-				return Vector2(-1.0, 0.0)
-			"coyote":
-				return Vector2(0.0, 1.0)
-		return Vector2(1.0, 0.0)
-
-	func _draw_connection_between(req_id: String, node_id: String, node: Dictionary, statuses: Dictionary, is_rejoin_line: bool) -> void:
-		if not node_positions.has(req_id) or not node_positions.has(node_id):
-			return
-		var all_nodes_for_terminal_check: Array = web.get("nodes", []) as Array
-		var terminal_source: Dictionary = _canvas_node_by_id(all_nodes_for_terminal_check, req_id)
-		if _is_terminal_node(terminal_source):
-			return
-		var raw_from_pos: Vector2 = node_positions[req_id] as Vector2
-		var raw_to_pos: Vector2 = node_positions[node_id] as Vector2
-		var all_nodes: Array = web.get("nodes", []) as Array
-		var req_node: Dictionary = _canvas_node_by_id(all_nodes, req_id)
-		var from_pos: Vector2 = raw_from_pos
-		if not req_node.is_empty():
-			from_pos = _node_edge_toward(req_node, raw_from_pos, raw_to_pos)
-		var to_pos: Vector2 = _node_edge_toward(node, raw_to_pos, raw_from_pos)
-		var style: Dictionary = _connection_style(req_id, node_id, node, statuses, is_rejoin_line)
-		var line_colour: Color = style.get("colour", Color(0.27, 0.34, 0.33, 0.50)) as Color
-		var line_width: float = float(style.get("width", 2.0))
-		_draw_elbow_connection(from_pos, to_pos, line_colour, line_width, is_rejoin_line)
-
-	func _node_edge_toward(node: Dictionary, centre_pos: Vector2, toward_pos: Vector2) -> Vector2:
-		var direction: Vector2 = toward_pos - centre_pos
-		if direction.length() < 0.001:
-			return centre_pos
-		return centre_pos + direction.normalized() * (_radius_for_node(node) + 3.0)
-
-	func _draw_elbow_connection(from_pos: Vector2, to_pos: Vector2, line_colour: Color, line_width: float, emphasise_rejoin: bool) -> void:
-		# Symmetric routed links: straight when aligned, otherwise a two-bend route
-		# on the dominant axis. This avoids long random diagonals crossing the web.
-		if absf(from_pos.x - to_pos.x) < 8.0 or absf(from_pos.y - to_pos.y) < 8.0:
-			draw_line(from_pos, to_pos, line_colour, line_width, true)
-			return
-		if absf(from_pos.x - to_pos.x) >= absf(from_pos.y - to_pos.y):
-			var mid_x: float = (from_pos.x + to_pos.x) * 0.5
-			var p1: Vector2 = Vector2(mid_x, from_pos.y)
-			var p2: Vector2 = Vector2(mid_x, to_pos.y)
-			draw_line(from_pos, p1, line_colour, line_width, true)
-			draw_line(p1, p2, line_colour.darkened(0.08), maxf(1.0, line_width - (0.0 if emphasise_rejoin else 0.5)), true)
-			draw_line(p2, to_pos, line_colour, line_width, true)
-		else:
-			var mid_y: float = (from_pos.y + to_pos.y) * 0.5
-			var p1: Vector2 = Vector2(from_pos.x, mid_y)
-			var p2: Vector2 = Vector2(to_pos.x, mid_y)
-			draw_line(from_pos, p1, line_colour, line_width, true)
-			draw_line(p1, p2, line_colour.darkened(0.08), maxf(1.0, line_width - (0.0 if emphasise_rejoin else 0.5)), true)
-			draw_line(p2, to_pos, line_colour, line_width, true)
-
-	func _draw_nodes(nodes: Array) -> void:
-		var statuses: Dictionary = web.get("statuses", {}) as Dictionary
-		for node_variant: Variant in nodes:
-			if not (node_variant is Dictionary):
-				continue
-			var node: Dictionary = node_variant as Dictionary
-			var node_id: String = String(node.get("id", ""))
-			if not node_positions.has(node_id):
-				continue
-			var pos: Vector2 = node_positions[node_id] as Vector2
-			var cluster_id: String = String(node.get("cluster", "core"))
-			var status: Dictionary = {}
-			if statuses.has(node_id):
-				status = statuses[node_id] as Dictionary
-			var purchased: bool = bool(status.get("purchased", false))
-			var can_purchase: bool = bool(status.get("can_purchase", false))
-			var requirements_met: bool = bool(status.get("requirements_met", false))
-			var is_keystone: bool = bool(node.get("specialisation", false))
-			var is_capstone: bool = bool(node.get("capstone", false))
-			var radius: float = _radius_for_node(node)
-			var base_colour: Color = _cluster_colour(cluster_id)
-			var fill_colour: Color = Color(0.09, 0.11, 0.105, 0.96)
-			var ring_colour: Color = Color(0.38, 0.40, 0.37, 0.78)
-			if purchased:
-				fill_colour = base_colour.darkened(0.35)
-				ring_colour = base_colour.lightened(0.25)
-			elif can_purchase:
-				fill_colour = Color(0.10, 0.15, 0.14, 0.98)
-				ring_colour = base_colour
-			elif requirements_met:
-				fill_colour = Color(0.07, 0.085, 0.08, 0.92)
-				ring_colour = Color(0.62, 0.58, 0.46, 0.80)
-			draw_circle(pos, radius + 4.0, Color(0.0, 0.0, 0.0, 0.55))
-			draw_circle(pos, radius, fill_colour)
-			draw_arc(pos, radius, 0.0, TAU, 40, ring_colour, 3.0, true)
-			if is_keystone:
-				draw_arc(pos, radius + 6.0, 0.0, TAU, 40, ring_colour, 2.0, true)
-			if is_capstone:
-				draw_arc(pos, radius + 10.0, 0.0, TAU, 48, Color(1.0, 0.72, 0.34, 0.92), 3.0, true)
-			if node_id == hovered_node_id and node_id != selected_node_id:
-				draw_arc(pos, radius + 8.0, 0.0, TAU, 48, Color(0.78, 0.96, 0.90, 0.82), 2.0, true)
-			if node_id == selected_node_id:
-				draw_arc(pos, radius + 10.0, 0.0, TAU, 48, Color(1.0, 0.92, 0.50, 0.95), 3.0, true)
-			_draw_node_symbol(node, pos, radius, purchased, can_purchase, requirements_met)
-			_draw_node_label(node, pos, radius, purchased, can_purchase)
-
-	func _draw_node_symbol(node: Dictionary, pos: Vector2, radius: float, purchased: bool, can_purchase: bool, requirements_met: bool) -> void:
-		var font: Font = get_theme_default_font()
-		if font == null:
-			return
-		var symbol: String = _node_symbol(node)
-		if symbol == "":
-			return
-		var colour: Color = Color(0.70, 0.73, 0.68, 0.72)
-		if purchased:
-			colour = Color(1.0, 0.92, 0.62, 1.0)
-		elif can_purchase:
-			colour = Color(0.86, 1.0, 0.91, 1.0)
-		elif requirements_met:
-			colour = Color(0.86, 0.76, 0.52, 0.88)
-		var font_size: int = 12
-		if bool(node.get("specialisation", false)):
-			font_size = 13
-		if bool(node.get("capstone", false)):
-			font_size = 14
-		font_size = clampi(int(round(float(font_size) * sqrt(zoom_level))), 9, 16)
-		var width: float = radius * 2.2
-		draw_string(font, pos + Vector2(-width * 0.5, float(font_size) * 0.42), symbol, HORIZONTAL_ALIGNMENT_CENTER, width, font_size, colour)
-
-	func _node_symbol(node: Dictionary) -> String:
-		if node.has("symbol"):
-			return String(node.get("symbol", ""))
-		var cluster_id: String = String(node.get("cluster", "core"))
-		if bool(node.get("capstone", false)):
-			match cluster_id:
-				"eagle":
-					return "E III"
-				"jaguar":
-					return "J III"
-				"otomi":
-					return "O III"
-				"coyote":
-					return "C III"
-			return "III"
-		if bool(node.get("specialisation", false)):
-			match cluster_id:
-				"eagle":
-					return "EAG"
-				"jaguar":
-					return "JAG"
-				"otomi":
-					return "OTO"
-				"coyote":
-					return "COY"
-			return "SPEC"
-		var effects: Dictionary = node.get("effects", {}) as Dictionary
-		var effect_symbol: String = _primary_effect_symbol(effects)
-		if effect_symbol != "":
-			return effect_symbol
-		match cluster_id:
-			"core":
-				return "CORE"
-			"eagle":
-				return "E"
-			"jaguar":
-				return "J"
-			"otomi":
-				return "O"
-			"coyote":
-				return "C"
-			"veteran":
-				return "XP"
-			"supply":
-				return "SUP"
-		return "•"
-
-	func _primary_effect_symbol(effects: Dictionary) -> String:
-		if effects.is_empty():
-			return ""
-		var priority: Array[String] = [
-			"capture_chance_add",
-			"offence_add",
-			"defence_add",
-			"loot_value_add",
-			"prestige_pending_add",
-			"provisioning_discount_add",
-			"xp_gain_add",
-			"death_chance_add",
-			"casualty_chance_add",
-			"injury_recovery_add",
-			"weapon_efficiency_add",
-			"weapon_loss_add",
-			"ready_warriors_add",
-			"enemy_defence_add"
-		]
-		for effect_id: String in priority:
-			if effects.has(effect_id):
-				match effect_id:
-					"capture_chance_add":
-						return "CAP"
-					"offence_add":
-						return "ATK"
-					"defence_add":
-						return "DEF"
-					"loot_value_add":
-						return "LOOT"
-					"prestige_pending_add":
-						return "PRE"
-					"provisioning_discount_add":
-						return "SUP"
-					"xp_gain_add":
-						return "XP"
-					"death_chance_add", "casualty_chance_add":
-						return "SURV"
-					"injury_recovery_add":
-						return "REC"
-					"weapon_efficiency_add", "weapon_loss_add":
-						return "WPN"
-					"ready_warriors_add":
-						return "RDY"
-					"enemy_defence_add":
-						return "BRK"
-		return "•"
-
-	func _draw_node_label(node: Dictionary, pos: Vector2, radius: float, purchased: bool, can_purchase: bool) -> void:
-		var font: Font = get_theme_default_font()
-		var label: String = String(node.get("name", "Node"))
-		if label.length() > 18:
-			label = label.substr(0, 16) + "…"
-		var colour: Color = Color(0.75, 0.79, 0.73, 0.90)
-		if purchased:
-			colour = Color(0.94, 0.91, 0.72, 1.0)
-		elif can_purchase:
-			colour = Color(0.82, 0.95, 0.88, 1.0)
-		if font != null:
-			draw_string(font, pos + Vector2(-58.0, radius + 17.0), label, HORIZONTAL_ALIGNMENT_CENTER, 116.0, 12, colour)
-
-	func _draw_help_text() -> void:
-		var font: Font = get_theme_default_font()
-		if font == null:
-			return
-		var text_colour: Color = Color(0.72, 0.80, 0.76, 0.86)
-		draw_string(font, Vector2(18.0, 34.0), "Drag to pan. Wheel/buttons zoom. Hover for details; click to pin. One specialism per warband.", HORIZONTAL_ALIGNMENT_LEFT, size.x - 36.0, 14, text_colour)
-
-	func _effective_grid_scale() -> float:
-		return grid_scale * zoom_level
-
-	func _radius_for_node(node: Dictionary) -> float:
-		var base: float = node_radius
-		if bool(node.get("specialisation", false)):
-			base = keystone_radius
-		if bool(node.get("capstone", false)):
-			base = capstone_radius
-		return clampf(base * sqrt(zoom_level), 14.0, 40.0)
-
-	func zoom_by_factor(factor: float) -> void:
-		_zoom_at_position(factor, size * 0.5)
-
-	func reset_zoom() -> void:
-		zoom_level = 0.74
-		pan_offset = _clamped_pan(pan_offset)
-		zoom_changed.emit(zoom_level)
-		pan_changed.emit(pan_offset)
-		queue_redraw()
-
-	func _zoom_at_position(factor: float, mouse_pos: Vector2) -> void:
-		var old_zoom: float = zoom_level
-		var new_zoom: float = clampf(zoom_level * factor, min_zoom, max_zoom)
-		if is_equal_approx(old_zoom, new_zoom):
-			return
-		var old_scale: float = grid_scale * old_zoom
-		var new_scale: float = grid_scale * new_zoom
-		var centre: Vector2 = size * 0.5
-		var world_under_mouse: Vector2 = (mouse_pos - centre - pan_offset) / old_scale
-		zoom_level = new_zoom
-		pan_offset = mouse_pos - centre - world_under_mouse * new_scale
-		pan_offset = _clamped_pan(pan_offset)
-		zoom_changed.emit(zoom_level)
-		pan_changed.emit(pan_offset)
-		queue_redraw()
-
-	func _clamped_pan(raw_pan: Vector2) -> Vector2:
-		if size.x <= 8.0 or size.y <= 8.0:
-			return Vector2.ZERO
-		var nodes: Array = web.get("nodes", []) as Array
-		if nodes.is_empty():
-			return Vector2.ZERO
-		var min_world: Vector2 = Vector2(999999.0, 999999.0)
-		var max_world: Vector2 = Vector2(-999999.0, -999999.0)
-		for node_variant: Variant in nodes:
-			if not (node_variant is Dictionary):
-				continue
-			var node: Dictionary = node_variant as Dictionary
-			var world: Vector2 = Vector2(float(node.get("x", 0.0)) * _effective_grid_scale(), -float(node.get("y", 0.0)) * _effective_grid_scale())
-			min_world.x = minf(min_world.x, world.x)
-			min_world.y = minf(min_world.y, world.y)
-			max_world.x = maxf(max_world.x, world.x)
-			max_world.y = maxf(max_world.y, world.y)
-
-		# Expand the content bounds so node labels and capstone rings do not sit hard
-		# against the clamp edge. This prevents infinite scrolling while still letting
-		# the player inspect the outer specialist branches.
-		var content_pad: float = 160.0 * sqrt(zoom_level) + 40.0
-		min_world -= Vector2(content_pad, content_pad)
-		max_world += Vector2(content_pad, content_pad)
-
-		var result: Vector2 = raw_pan
-		var viewport_centre: Vector2 = size * 0.5
-		var min_x: float = edge_padding - viewport_centre.x - min_world.x
-		var max_x: float = size.x - edge_padding - viewport_centre.x - max_world.x
-		if min_x < max_x:
-			result.x = -(min_world.x + max_world.x) * 0.5
-		else:
-			result.x = clampf(raw_pan.x, max_x, min_x)
-
-		var min_y: float = edge_padding - viewport_centre.y - min_world.y
-		var max_y: float = size.y - edge_padding - viewport_centre.y - max_world.y
-		if min_y < max_y:
-			result.y = -(min_world.y + max_world.y) * 0.5
-		else:
-			result.y = clampf(raw_pan.y, max_y, min_y)
-		return result
-
-	func _screen_position_for_node(node: Dictionary) -> Vector2:
-		var centre: Vector2 = size * 0.5 + pan_offset
-		var node_x: float = float(node.get("x", 0.0))
-		var node_y: float = float(node.get("y", 0.0))
-		return centre + Vector2(node_x * _effective_grid_scale(), -node_y * _effective_grid_scale())
-
-	func _node_id_at_position(position: Vector2) -> String:
-		var nodes: Array = web.get("nodes", []) as Array
-		var best_id: String = ""
-		var best_distance: float = 999999.0
-		for node_variant: Variant in nodes:
-			if not (node_variant is Dictionary):
-				continue
-			var node: Dictionary = node_variant as Dictionary
-			var node_id: String = String(node.get("id", ""))
-			var pos: Vector2 = _screen_position_for_node(node)
-			var radius: float = _radius_for_node(node)
-			var distance: float = position.distance_to(pos)
-			if distance <= radius + 8.0 and distance < best_distance:
-				best_distance = distance
-				best_id = node_id
-		return best_id
-
-	func _cluster_colour(cluster_id: String) -> Color:
-		match cluster_id:
-			"core":
-				return Color(0.70, 0.78, 0.74, 0.96)
-			"eagle":
-				return Color(0.90, 0.78, 0.35, 0.96)
-			"jaguar":
-				return Color(0.88, 0.42, 0.28, 0.96)
-			"otomi":
-				return Color(0.37, 0.76, 0.86, 0.96)
-			"coyote":
-				return Color(0.58, 0.82, 0.42, 0.96)
-			"veteran":
-				return Color(0.72, 0.77, 0.72, 0.96)
-			"supply":
-				return Color(0.68, 0.80, 0.73, 0.96)
-		return Color(0.50, 0.82, 0.74, 0.96)
+# Warband Skill Web canvas is now a standalone widget.
+# Gameplay rules still live in backend systems; this wrapper only instantiates
+# and wires the widget into the current Barracks screen.
 
 func _ready() -> void:
 	_remove_shrine_offerings_focus()
@@ -1085,17 +337,7 @@ func _refresh_house_claim() -> void:
 			prestige_recent_label.text = "Recent: " + ("+" if amount >= 0.0 else "") + _format_religion_amount(amount) + " — " + String(last_record.get("detail", "Prestige changed"))
 
 func _ordinal_number(value: int) -> String:
-	var suffix: String = "th"
-	var mod_100: int = value % 100
-	if mod_100 < 11 or mod_100 > 13:
-		match value % 10:
-			1:
-				suffix = "st"
-			2:
-				suffix = "nd"
-			3:
-				suffix = "rd"
-	return str(value) + suffix
+	return PalacePresentationRules.ordinal_number(value)
 
 func _refresh_right_panel() -> void:
 	_clear_children(notification_list)
@@ -2038,47 +1280,16 @@ func _add_palace_prestige_leaderboard_row_card(parent: VBoxContainer, row: Dicti
 	line.add_child(value_label)
 
 func _prestige_source_display_name(source_id: String) -> String:
-	match source_id:
-		"economic_savvy_trade":
-			return "Savvy Trade"
-		"court_need_donation":
-			return "Court Need Donations"
-		"flower_war_attack":
-			return "Flower War Musters"
-		"flower_war_defence":
-			return "Flower War Defence"
-		"religion_sacrifice":
-			return "Ritual Sacrifice"
-		"shrine_level":
-			return "Shrine Recognition"
-		"palace_recognition":
-			return "Palace Recognition"
-	return source_id.replace("_", " ").capitalize()
+	return PalacePresentationRules.prestige_source_display_name(source_id)
 
 func _prestige_source_colour(source_id: String) -> Color:
-	match source_id:
-		"economic_savvy_trade":
-			return Color(0.50, 0.82, 0.74, 0.90)
-		"court_need_donation":
-			return Color(0.96, 0.78, 0.42, 0.90)
-		"flower_war_attack", "flower_war_defence":
-			return Color(0.90, 0.42, 0.30, 0.90)
-		"religion_sacrifice":
-			return Color(0.70, 0.55, 0.92, 0.90)
-		"shrine_level":
-			return Color(0.42, 0.70, 0.96, 0.90)
-		"palace_recognition":
-			return Color(0.95, 0.86, 0.54, 0.90)
-	return Color(0.70, 0.74, 0.68, 0.85)
+	return PalacePresentationRules.prestige_source_colour(source_id)
 
 func _prestige_signed_amount(amount: float) -> String:
 	return ("+" if amount >= 0.0 else "") + _format_religion_amount(amount)
 
 func _prestige_record_time_text(record: Dictionary) -> String:
-	var veintena: int = int(record.get("veintena", 0))
-	if veintena > 0:
-		return "Veintena " + str(veintena)
-	return "Current turn"
+	return PalacePresentationRules.prestige_record_time_text(record)
 
 func _build_palace_overview_main_view() -> void:
 	var summary: Dictionary = _palace_probe_summary()
@@ -2566,22 +1777,7 @@ func _palace_format_staff_requirement(staff: Dictionary) -> String:
 	return ", ".join(parts)
 
 func _palace_staff_display_name(staff_id: String) -> String:
-	match staff_id:
-		"tlamacazqueh":
-			return "Priests"
-		"pipiltin":
-			return "Nobles"
-		"tlacotin":
-			return "Tlacotin"
-		"macehualtin":
-			return "Macehualtin"
-		"tolteca":
-			return "Tolteca"
-		"yaotequihuaqueh":
-			return "Warriors"
-		"malli":
-			return "Captives"
-	return staff_id.replace("_", " ").capitalize()
+	return PalacePresentationRules.palace_staff_display_name(staff_id)
 
 func _add_palace_paths_not_chosen_panel(parent: VBoxContainer, chosen_id: String) -> void:
 	var muted: Array[String] = []
@@ -2649,52 +1845,16 @@ func _palace_tree_preview_names(god_id: String) -> Array[String]:
 	return names
 
 func _palace_route_colour(god_id: String) -> Color:
-	match god_id:
-		"tlaloc":
-			return Color(0.32, 0.86, 0.92, 0.96)
-		"huitzilopochtli":
-			return Color(0.92, 0.36, 0.26, 0.96)
-		"tezcatlipoca":
-			return Color(0.62, 0.48, 0.88, 0.96)
-		"quetzalcoatl":
-			return Color(0.52, 0.90, 0.58, 0.96)
-	return Color(0.72, 0.62, 0.42, 0.94)
+	return PalacePresentationRules.route_colour(god_id)
 
 func _palace_route_domain_line(god_id: String) -> String:
-	match god_id:
-		"tlaloc":
-			return "Rain • Drought • Flood • Harvest Signs"
-		"huitzilopochtli":
-			return "War • Captives • Sacrifice • Martial Authority"
-		"tezcatlipoca":
-			return "Scarcity • Intrigue • Rival Pressure • Hidden Power"
-		"quetzalcoatl":
-			return "Legitimacy • Recognition • Tribute Trust • Palace Order"
-	return "Divine authority"
+	return PalacePresentationRules.route_domain_line(god_id)
 
 func _palace_route_flavour(god_id: String) -> String:
-	match god_id:
-		"tlaloc":
-			return "Read the coming pressure of sky, lake and field before rival houses can react."
-		"huitzilopochtli":
-			return "Formally authorise the house to launch Flower Wars and pursue the war route."
-		"tezcatlipoca":
-			return "Exploit shortage, fear, ambition and rival weakness through dangerous palace power."
-		"quetzalcoatl":
-			return "Strengthen the house's credibility before ruler, court and region."
-	return "The palace route will define the house's authority."
+	return PalacePresentationRules.route_flavour(god_id)
 
 func _palace_route_seat_glyph(god_id: String) -> String:
-	match god_id:
-		"tlaloc":
-			return "WATER SEAT"
-		"huitzilopochtli":
-			return "WAR SEAT"
-		"tezcatlipoca":
-			return "MIRROR SEAT"
-		"quetzalcoatl":
-			return "FEATHER SEAT"
-	return "EMPTY ALTAR"
+	return PalacePresentationRules.route_seat_glyph(god_id)
 
 func _palace_label(text: String, font_size: int, colour: Color) -> Label:
 	var label: Label = Label.new()
@@ -3440,24 +2600,12 @@ func _add_favour_bar(parent: VBoxContainer, god_id: String) -> void:
 	parent.add_child(bar)
 
 func _religion_ritual_prestige_value(tier_id: String) -> float:
-	match tier_id:
-		"minor":
-			return 1.0
-		"medium":
-			return 3.0
-		"large":
-			return 8.0
-	return 0.0
+	return float(SHRINE_RITUAL_RULES_SCRIPT.religion_ritual_prestige_value(tier_id))
+
 
 func _religion_shrine_level_prestige_value(level: int) -> float:
-	match level:
-		2:
-			return 5.0
-		3:
-			return 15.0
-		4:
-			return 30.0
-	return 0.0
+	return float(SHRINE_RITUAL_RULES_SCRIPT.religion_shrine_level_prestige_value(level))
+
 
 func _award_religion_prestige(amount: float, source_id: String, detail: String, context: Dictionary = {}) -> float:
 	if amount <= 0.0001:
@@ -3712,36 +2860,16 @@ func _unlocked_ritual_text(god_id: String) -> String:
 	return "Minor"
 
 func _shrine_level_description(level: int) -> String:
-	match level:
-		1:
-			return "A founded household shrine. It supports Minor Rites and basic divine maintenance."
-		2:
-			return "An established shrine. It unlocks Medium Ceremonies and stronger upgrade branches."
-		3:
-			return "A major shrine. It unlocks Large Festivals and serious public religious statements."
-		4:
-			return "A regional religious complex. It prepares the shrine for future boon-spending and late-game divine power."
-	return "Shrine level."
+	return String(SHRINE_RITUAL_RULES_SCRIPT.shrine_level_description(level))
+
 
 func _shrine_level_cost(next_level: int) -> Dictionary:
-	match next_level:
-		2:
-			return {"wood": 20.0, "cloth": 6.0, "ritual_goods": 1.0}
-		3:
-			return {"wood": 50.0, "cloth": 15.0, "ritual_goods": 4.0, "cacao": 2.0}
-		4:
-			return {"wood": 100.0, "cloth": 30.0, "ritual_goods": 8.0, "cacao": 4.0, "fine_textiles": 1.0}
-	return {}
+	return SHRINE_RITUAL_RULES_SCRIPT.shrine_level_cost(next_level) as Dictionary
+
 
 func _shrine_level_priest_requirement(next_level: int) -> int:
-	match next_level:
-		2:
-			return 2
-		3:
-			return 5
-		4:
-			return 8
-	return 0
+	return int(SHRINE_RITUAL_RULES_SCRIPT.shrine_level_priest_requirement(next_level))
+
 
 func _can_upgrade_shrine_level(god_id: String) -> Dictionary:
 	var level: int = _shrine_level(god_id)
@@ -3781,36 +2909,8 @@ func _upgrade_shrine_level(god_id: String) -> void:
 	_refresh_all()
 
 func _god_upgrade_definitions(god_id: String) -> Array[Dictionary]:
-	match god_id:
-		"tlaloc":
-			return [
-				{"id": "rain_basin", "title": "Rain Basin", "level": 1, "priests": 1, "cost": {"wood": 8.0, "ritual_goods": 1.0}, "description": "A basin for reading water, clouds and lake signs.", "favour_bonus": 1, "decay_reduction": 0.0},
-				{"id": "canal_offering_steps", "title": "Canal Offering Steps", "level": 2, "priests": 2, "cost": {"wood": 20.0, "cloth": 5.0, "ritual_goods": 2.0}, "description": "Ritual steps linking shrine offerings to fields, canals and chinampas.", "favour_bonus": 2, "decay_reduction": 0.25},
-				{"id": "harvest_idol", "title": "Harvest Idol", "level": 3, "priests": 4, "cost": {"wood": 35.0, "cacao": 1.0, "ritual_goods": 4.0}, "description": "A major idol for harvest gratitude and drought protection hooks.", "favour_bonus": 3, "decay_reduction": 0.35},
-				{"id": "storm_court", "title": "Storm Court", "level": 4, "priests": 6, "cost": {"wood": 70.0, "cloth": 15.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, "description": "A full court for future rain boons, drought softening and agricultural rites.", "favour_bonus": 5, "decay_reduction": 0.50}
-			]
-		"huitzilopochtli":
-			return [
-				{"id": "war_banners", "title": "War Banners", "level": 1, "priests": 1, "cost": {"wood": 8.0, "ritual_goods": 1.0}, "description": "Battle banners sanctify warrior musters and small martial rites.", "favour_bonus": 1, "decay_reduction": 0.0},
-				{"id": "captive_stone", "title": "Captive Stone", "level": 2, "priests": 2, "cost": {"wood": 18.0, "cacao": 1.0, "ritual_goods": 2.0}, "description": "A ritual stone for future captive sacrifice and Flower War payoff.", "favour_bonus": 2, "decay_reduction": 0.20},
-				{"id": "eagle_arsenal_altar", "title": "Eagle Arsenal Altar", "level": 3, "priests": 4, "cost": {"wood": 35.0, "cloth": 8.0, "ritual_goods": 4.0}, "description": "An altar binding weapon preparation to martial prestige.", "favour_bonus": 3, "decay_reduction": 0.30},
-				{"id": "sun_war_court", "title": "Sun-War Court", "level": 4, "priests": 6, "cost": {"wood": 70.0, "cloth": 15.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, "description": "A full war court for future Flower War boons, captive yield and martial recognition.", "favour_bonus": 5, "decay_reduction": 0.45}
-			]
-		"tezcatlipoca":
-			return [
-				{"id": "obsidian_mirror", "title": "Obsidian Mirror", "level": 1, "priests": 1, "cost": {"wood": 8.0, "ritual_goods": 1.0}, "description": "A mirror for reading first omens and hidden danger.", "favour_bonus": 1, "decay_reduction": 0.0},
-				{"id": "smoke_vestry", "title": "Smoke Vestry", "level": 2, "priests": 2, "cost": {"wood": 18.0, "cacao": 1.0, "ritual_goods": 2.0}, "description": "A chamber for controlled smoke rites, future warnings and rival pressure hooks.", "favour_bonus": 2, "decay_reduction": 0.25},
-				{"id": "jaguar_shadow_wall", "title": "Jaguar Shadow Wall", "level": 3, "priests": 4, "cost": {"wood": 35.0, "cloth": 8.0, "ritual_goods": 4.0}, "description": "A symbolic barrier against plots, scandals and sabotage.", "favour_bonus": 3, "decay_reduction": 0.35},
-				{"id": "night_court", "title": "Night Court", "level": 4, "priests": 6, "cost": {"wood": 70.0, "cloth": 15.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, "description": "A court for future intrigue boons, counter-plots and hidden information.", "favour_bonus": 5, "decay_reduction": 0.50}
-			]
-		"quetzalcoatl":
-			return [
-				{"id": "feathered_brazier", "title": "Feathered Brazier", "level": 1, "priests": 1, "cost": {"wood": 8.0, "ritual_goods": 1.0}, "description": "A civilising fire for transition rites and household legitimacy.", "favour_bonus": 1, "decay_reduction": 0.0},
-				{"id": "scribe_mat", "title": "Scribe Mat", "level": 2, "priests": 2, "cost": {"wood": 18.0, "cacao": 1.0, "ritual_goods": 2.0}, "description": "A ritual space for record, order, tribute promises and palace-facing legitimacy.", "favour_bonus": 2, "decay_reduction": 0.25},
-				{"id": "market_wind_gate", "title": "Market Wind Gate", "level": 3, "priests": 4, "cost": {"wood": 35.0, "cloth": 8.0, "ritual_goods": 4.0}, "description": "A ceremonial gate linking trade, diplomacy and public order.", "favour_bonus": 3, "decay_reduction": 0.35},
-				{"id": "feathered_court", "title": "Feathered Court", "level": 4, "priests": 6, "cost": {"wood": 70.0, "cloth": 15.0, "ritual_goods": 6.0, "fine_textiles": 1.0}, "description": "A full court for future recognition boons, ruler interactions and legitimacy protection.", "favour_bonus": 5, "decay_reduction": 0.50}
-			]
-	return []
+	return SHRINE_RITUAL_RULES_SCRIPT.god_upgrade_definitions(god_id)
+
 
 func _upgrade_by_id(god_id: String, upgrade_id: String) -> Dictionary:
 	for data: Dictionary in _god_upgrade_definitions(god_id):
@@ -3864,73 +2964,8 @@ func _build_shrine_upgrade(god_id: String, upgrade_id: String) -> void:
 	_refresh_all()
 
 func _ritual_data(god_id: String, tier_id: String) -> Dictionary:
-	var title_prefix: String = "Ritual"
-	match tier_id:
-		"minor":
-			title_prefix = "Minor Rite"
-		"medium":
-			title_prefix = "Medium Ceremony"
-		"large":
-			title_prefix = "Large Festival"
-	var data: Dictionary = {"tier": tier_id, "title": title_prefix, "level": 1, "capacity": 4.0, "min": 3, "max": 7, "cost": {}, "description": ""}
-	match tier_id:
-		"minor":
-			data["level"] = 1
-			data["capacity"] = 4.0
-			data["min"] = 3
-			data["max"] = 7
-		"medium":
-			data["level"] = 2
-			data["capacity"] = 10.0
-			data["min"] = 8
-			data["max"] = 16
-		"large":
-			data["level"] = 3
-			data["capacity"] = 18.0
-			data["min"] = 18
-			data["max"] = 32
-	match god_id:
-		"tlaloc":
-			if tier_id == "minor":
-				data["cost"] = {"maize": 10.0}
-				data["description"] = "A small food and water rite to maintain rain favour."
-			elif tier_id == "medium":
-				data["cost"] = {"maize": 25.0, "cacao": 1.0, "ritual_goods": 1.0}
-				data["description"] = "A serious agricultural ceremony for rain, canals and fertility."
-			else:
-				data["cost"] = {"maize": 60.0, "cacao": 2.0, "ritual_goods": 3.0, "fine_textiles": 1.0}
-				data["description"] = "A public harvest and rain festival with major future drought-protection hooks."
-		"huitzilopochtli":
-			if tier_id == "minor":
-				data["cost"] = {"maize": 8.0, "ritual_goods": 1.0}
-				data["description"] = "A small martial rite for warrior courage and public discipline."
-			elif tier_id == "medium":
-				data["cost"] = {"maize": 15.0, "cacao": 1.0, "ritual_goods": 2.0}
-				data["description"] = "A warrior ceremony preparing the house for Flower Wars and sacrifice."
-			else:
-				data["cost"] = {"cacao": 2.0, "ritual_goods": 4.0, "fine_textiles": 1.0, "captives": 2.0}
-				data["description"] = "A great war festival using captives for major future martial-prestige hooks."
-		"tezcatlipoca":
-			if tier_id == "minor":
-				data["cost"] = {"cacao": 1.0}
-				data["description"] = "A small omen rite using elite goods to read hidden pressure."
-			elif tier_id == "medium":
-				data["cost"] = {"cacao": 2.0, "ritual_goods": 2.0}
-				data["description"] = "A smoke and mirror ceremony for intrigue, ambition and rival danger."
-			else:
-				data["cost"] = {"cacao": 4.0, "ritual_goods": 4.0, "fine_textiles": 1.0, "captives": 1.0}
-				data["description"] = "A dangerous night festival for future sabotage, counter-plot and scandal hooks."
-		"quetzalcoatl":
-			if tier_id == "minor":
-				data["cost"] = {"maize": 5.0, "cacao": 1.0}
-				data["description"] = "A small legitimacy rite for order, wisdom and transition."
-			elif tier_id == "medium":
-				data["cost"] = {"cacao": 2.0, "ritual_goods": 1.0}
-				data["description"] = "A civil ceremony for trade, diplomacy and palace-facing legitimacy."
-			else:
-				data["cost"] = {"cacao": 3.0, "ritual_goods": 3.0, "fine_textiles": 2.0}
-				data["description"] = "A great ceremonial festival for future recognition and ruler-interaction hooks."
-	return data
+	return SHRINE_RITUAL_RULES_SCRIPT.ritual_data(god_id, tier_id) as Dictionary
+
 
 func _ritual_favour_range(god_id: String, tier_id: String) -> Array:
 	var data: Dictionary = _ritual_data(god_id, tier_id)
@@ -4370,55 +3405,24 @@ func _god_id_from_focus(focus_id: String) -> String:
 	return ""
 
 func _god_name(god_id: String) -> String:
-	match god_id:
-		"tlaloc":
-			return "Tlaloc"
-		"huitzilopochtli":
-			return "Huitzilopochtli"
-		"tezcatlipoca":
-			return "Tezcatlipoca"
-		"quetzalcoatl":
-			return "Quetzalcoatl"
-	return "Unknown God"
+	return String(SHRINE_RITUAL_RULES_SCRIPT.god_name(god_id))
+
 
 func _god_short_role(god_id: String) -> String:
-	match god_id:
-		"tlaloc":
-			return "Rain, lakes, agriculture, fertility, harvest and drought protection."
-		"huitzilopochtli":
-			return "War, sacrifice, Flower Wars, warriors, captives and martial prestige."
-		"tezcatlipoca":
-			return "Intrigue, fate, omens, ambition, manipulation and rival-house danger."
-		"quetzalcoatl":
-			return "Wisdom, legitimacy, trade, diplomacy, civilisation and transitions."
-	return ""
+	return String(SHRINE_RITUAL_RULES_SCRIPT.god_short_role(god_id))
+
 
 func _god_domain(god_id: String) -> String:
-	return _god_short_role(god_id)
+	return String(SHRINE_RITUAL_RULES_SCRIPT.god_domain(god_id))
+
 
 func _god_description(god_id: String) -> String:
-	match god_id:
-		"tlaloc":
-			return "Build the Tlaloc shrine to strengthen rain, agriculture and harvest religion. Upgrades prepare future drought protection, maize output and water-omen systems."
-		"huitzilopochtli":
-			return "Build the Huitzilopochtli shrine to strengthen war religion. Upgrades prepare future Flower War, captive, warrior and martial-prestige systems."
-		"tezcatlipoca":
-			return "Build the Tezcatlipoca shrine to strengthen omen and intrigue religion. Upgrades prepare future sabotage warnings, rival disruption and scandal resistance."
-		"quetzalcoatl":
-			return "Build the Quetzalcoatl shrine to strengthen legitimacy, order and diplomacy. Upgrades prepare future palace interpretation, trade and recognition systems."
-	return ""
+	return String(SHRINE_RITUAL_RULES_SCRIPT.god_description(god_id))
+
 
 func _god_colour(god_id: String) -> Color:
-	match god_id:
-		"tlaloc":
-			return Color(0.22, 0.68, 0.86, 0.95)
-		"huitzilopochtli":
-			return Color(0.84, 0.35, 0.24, 0.95)
-		"tezcatlipoca":
-			return Color(0.62, 0.45, 0.84, 0.95)
-		"quetzalcoatl":
-			return Color(0.37, 0.82, 0.57, 0.95)
-	return COLOR_MUTED
+	return SHRINE_RITUAL_RULES_SCRIPT.god_colour(god_id)
+
 
 func _resource_display_name(resource_id: String) -> String:
 	var state: Node = _state()
@@ -4734,7 +3738,7 @@ func _warband_combat_stats(row: Dictionary) -> Dictionary:
 			offence = 1.3
 			defence = 1.0
 		"otomi":
-			offence = 0.8
+			offence = 1.0
 			defence = 1.5
 		"coyote":
 			offence = 1.4
@@ -4873,755 +3877,49 @@ func _build_skill_web_warband_stats_header(parent: VBoxContainer, web: Dictionar
 
 
 # -----------------------------------------------------------------------------
-# Full-screen Flower War Event Flow v0.14
+# Full-screen Flower War Event Flow bridge v0.14
 # -----------------------------------------------------------------------------
+# Patch 6A: the Flower War event UI now lives in
+# res://Scripts/ui/widgets/FlowerWarEventOverlay.gd.
+# This wrapper keeps the old public methods used by the Barracks buttons, but the
+# event itself is intentionally a full-screen modal event. It is added to the
+# GameScreen root, not to DynamicViewHost, so it is not constrained to the
+# left/main content panel.
 
 func _open_flower_war_attack_event(option_id: String = "standard", source_id: String = "player", context: Dictionary = {}) -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("start_flower_war_attack_event"):
-		var hook_result_variant: Variant = state.call("start_flower_war_attack_event", option_id, source_id, context)
-		if hook_result_variant is Dictionary:
-			var hook_result: Dictionary = hook_result_variant as Dictionary
-			if not bool(hook_result.get("ok", false)):
-				_last_skill_web_report.clear()
-				_last_skill_web_report.append(String(hook_result.get("reason", hook_result.get("message", "Flower War attack event is blocked."))))
-				_refresh_all()
-				return
-	_flower_war_event_option_id = option_id
-	_flower_war_event_provisioning_id = "standard"
-	_flower_war_event_report.clear()
-	_flower_war_event_selected_warbands.clear()
-	for warband_id: String in _all_ready_warband_ids():
-		_flower_war_event_selected_warbands[warband_id] = true
-	_show_flower_war_attack_event_overlay()
+	_show_flower_war_event_panel(true, option_id, source_id, context)
+
+func _open_flower_war_defence_event(option_id: String = "standard", source_id: String = "rival", context: Dictionary = {}) -> void:
+	_show_flower_war_event_panel(false, option_id, source_id, context)
+
+func _show_flower_war_event_panel(is_attack: bool, option_id: String = "standard", source_id: String = "player", context: Dictionary = {}) -> void:
+	# Flower War is a modal event screen, like later events.
+	# Match the pre-extraction behaviour: add the modal to the GameScreen itself,
+	# not to DynamicViewHost / ContentRoot and not to get_tree().root. Adding it to
+	# the viewport root made the panel overrun the visible game area on some window
+	# sizes. As a child of this full-screen GameScreen Control, PRESET_FULL_RECT
+	# fills the actual game UI area exactly like the original inline overlay did.
+	_clear_flower_war_event_overlay()
+	var event_panel: Control = FLOWER_WAR_EVENT_OVERLAY_SCRIPT.new() as Control
+	if event_panel == null:
+		return
+	event_panel.name = "FlowerWarEventOverlayRoot"
+	event_panel.mouse_filter = Control.MOUSE_FILTER_STOP
+	event_panel.z_index = 250
+	event_panel.set_anchors_preset(Control.PRESET_FULL_RECT)
+	add_child(event_panel)
+	_flower_war_event_overlay = event_panel
+	if is_attack:
+		if event_panel.has_method("open_attack_event"):
+			event_panel.call("open_attack_event", self, option_id, source_id, context)
+	else:
+		if event_panel.has_method("open_defence_event"):
+			event_panel.call("open_defence_event", self, option_id, source_id, context)
 
 func _clear_flower_war_event_overlay() -> void:
 	if _flower_war_event_overlay != null and is_instance_valid(_flower_war_event_overlay):
 		_flower_war_event_overlay.queue_free()
 	_flower_war_event_overlay = null
-
-func _refresh_flower_war_event_overlay() -> void:
-	_clear_flower_war_event_overlay()
-	_show_flower_war_attack_event_overlay()
-
-func _selected_flower_war_warband_ids() -> Array:
-	var selected: Array = []
-	for id_variant: Variant in _flower_war_event_selected_warbands.keys():
-		var warband_id: String = String(id_variant)
-		if bool(_flower_war_event_selected_warbands.get(warband_id, false)):
-			selected.append(warband_id)
-	return selected
-
-func _all_ready_warband_ids() -> Array[String]:
-	var ids: Array[String] = []
-	for row: Dictionary in _barracks_warband_rows():
-		var warband_id: String = String(row.get("id", ""))
-		if warband_id != "" and int(row.get("ready", row.get("warriors", 0))) > 0:
-			ids.append(warband_id)
-	return ids
-
-func _show_flower_war_attack_event_overlay() -> void:
-	_clear_flower_war_event_overlay()
-	var overlay: Control = Control.new()
-	overlay.name = "FlowerWarEventOverlay"
-	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	overlay.z_index = 250
-	add_child(overlay)
-	_flower_war_event_overlay = overlay
-
-	var shade: ColorRect = ColorRect.new()
-	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
-	shade.color = Color(0.0, 0.0, 0.0, 0.76)
-	overlay.add_child(shade)
-
-	var outer_margin: MarginContainer = MarginContainer.new()
-	outer_margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	outer_margin.add_theme_constant_override("margin_left", 34)
-	outer_margin.add_theme_constant_override("margin_top", 28)
-	outer_margin.add_theme_constant_override("margin_right", 34)
-	outer_margin.add_theme_constant_override("margin_bottom", 28)
-	overlay.add_child(outer_margin)
-
-	var event_panel: PanelContainer = PanelContainer.new()
-	event_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	event_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	event_panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.045, 0.035, 0.020, 0.96), Color(0.78, 0.58, 0.30, 0.88), 18))
-	outer_margin.add_child(event_panel)
-
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 20)
-	margin.add_theme_constant_override("margin_top", 16)
-	margin.add_theme_constant_override("margin_right", 20)
-	margin.add_theme_constant_override("margin_bottom", 16)
-	event_panel.add_child(margin)
-
-	var root: VBoxContainer = VBoxContainer.new()
-	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_theme_constant_override("separation", 10)
-	margin.add_child(root)
-
-	_build_flower_war_event_header(root)
-	_build_flower_war_scale_row(root)
-
-	var selected_ids: Array = _selected_flower_war_warband_ids()
-	var preview: Dictionary = _barracks_preview_for_selected_warbands(selected_ids, _flower_war_event_option_id, _flower_war_event_provisioning_id)
-	var status: Dictionary = _barracks_can_launch_selected_warbands(selected_ids, _flower_war_event_option_id, _flower_war_event_provisioning_id)
-
-	var body: HBoxContainer = HBoxContainer.new()
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", 14)
-	root.add_child(body)
-
-	_build_flower_war_warband_muster_column(body)
-	_build_flower_war_provision_column(body, preview, status)
-	_build_flower_war_event_footer(root, preview, status)
-
-func _build_flower_war_event_header(parent: VBoxContainer) -> void:
-	var header: HBoxContainer = HBoxContainer.new()
-	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_theme_constant_override("separation", 12)
-	parent.add_child(header)
-	var title_stack: VBoxContainer = VBoxContainer.new()
-	title_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_stack.add_theme_constant_override("separation", 2)
-	header.add_child(title_stack)
-	title_stack.add_child(_barracks_label("FLOWER WAR MUSTER", 34, COLOR_TEXT))
-	title_stack.add_child(_barracks_wrapped_label("The drums sound across the estate. Choose which warbands march and how well the expedition is provisioned.", 17, COLOR_MUTED))
-	var close_button: Button = Button.new()
-	close_button.text = "Close"
-	close_button.custom_minimum_size = Vector2(96, 38)
-	close_button.add_theme_font_size_override("font_size", 15)
-	close_button.pressed.connect(func() -> void:
-		_clear_flower_war_event_overlay()
-	)
-	header.add_child(close_button)
-
-func _build_flower_war_scale_row(parent: VBoxContainer) -> void:
-	var row: HBoxContainer = HBoxContainer.new()
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_theme_constant_override("separation", 8)
-	parent.add_child(row)
-	for option: Dictionary in _barracks_flower_options():
-		var option_id: String = String(option.get("id", "minor"))
-		var button: Button = Button.new()
-		button.text = String(option.get("name", option_id.capitalize()))
-		button.toggle_mode = true
-		button.button_pressed = option_id == _flower_war_event_option_id
-		button.custom_minimum_size = Vector2(0, 36)
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.add_theme_font_size_override("font_size", 15)
-		button.pressed.connect(func() -> void:
-			_flower_war_event_option_id = option_id
-			_refresh_flower_war_event_overlay()
-		)
-		row.add_child(button)
-
-func _build_flower_war_warband_muster_column(parent: HBoxContainer) -> void:
-	var panel: PanelContainer = PanelContainer.new()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.018, 0.038, 0.036, 0.86), Color(0.50, 0.82, 0.74, 0.48), 12))
-	parent.add_child(panel)
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 12)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_right", 12)
-	margin.add_theme_constant_override("margin_bottom", 10)
-	panel.add_child(margin)
-	var stack: VBoxContainer = VBoxContainer.new()
-	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	stack.add_theme_constant_override("separation", 8)
-	margin.add_child(stack)
-	stack.add_child(_barracks_label("Warbands to Send", 24, COLOR_TEXT))
-	stack.add_child(_barracks_wrapped_label("All warbands with ready warriors are selected by default. Injured warriors are shown but do not fight.", 15, COLOR_MUTED))
-	var scroll: ScrollContainer = ScrollContainer.new()
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	stack.add_child(scroll)
-	var list: VBoxContainer = VBoxContainer.new()
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 8)
-	scroll.add_child(list)
-	for row: Dictionary in _barracks_warband_rows():
-		_add_flower_war_event_warband_card(list, row)
-
-func _add_flower_war_event_warband_card(parent: VBoxContainer, row: Dictionary) -> void:
-	var warband_id: String = String(row.get("id", ""))
-	var ready: int = int(row.get("ready", row.get("warriors", 0)))
-	var selected: bool = bool(_flower_war_event_selected_warbands.get(warband_id, false)) and ready > 0
-	var stats: Dictionary = _warband_combat_stats(row)
-	var border: Color = Color(0.50, 0.82, 0.74, 0.58) if selected else Color(0.40, 0.42, 0.38, 0.45)
-	var panel: PanelContainer = PanelContainer.new()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.025, 0.050, 0.046, 0.82), border, 10))
-	parent.add_child(panel)
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_top", 8)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_bottom", 8)
-	panel.add_child(margin)
-	var root: VBoxContainer = VBoxContainer.new()
-	root.add_theme_constant_override("separation", 4)
-	margin.add_child(root)
-	var top: HBoxContainer = HBoxContainer.new()
-	top.add_theme_constant_override("separation", 8)
-	root.add_child(top)
-	var label_stack: VBoxContainer = VBoxContainer.new()
-	label_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label_stack.add_theme_constant_override("separation", 2)
-	top.add_child(label_stack)
-	label_stack.add_child(_barracks_label(String(row.get("name", "Warband")), 20, COLOR_TEXT))
-	label_stack.add_child(_barracks_wrapped_label("Doctrine: " + String(stats.get("doctrine_name", "Unspecialised")) + " | Ready " + str(ready) + " | Injured ✚ " + str(int(stats.get("injured", 0))), 14, COLOR_TEAL))
-	var toggle: Button = Button.new()
-	toggle.text = "Send" if selected else "Stand Down"
-	toggle.toggle_mode = true
-	toggle.button_pressed = selected
-	toggle.disabled = ready <= 0
-	toggle.custom_minimum_size = Vector2(116, 38)
-	toggle.add_theme_font_size_override("font_size", 15)
-	toggle.pressed.connect(func() -> void:
-		_flower_war_event_selected_warbands[warband_id] = not selected
-		_refresh_flower_war_event_overlay()
-	)
-	top.add_child(toggle)
-	root.add_child(_barracks_wrapped_label("Effective offence " + _format_float(float(stats.get("effective_offence", 0.0))) + " | effective defence " + _format_float(float(stats.get("effective_defence", 0.0))) + ".", 14, COLOR_MUTED))
-	if int(stats.get("injured", 0)) > 0:
-		root.add_child(_barracks_wrapped_label("✚ Injured warriors are not fighting and will recover next Veintena.", 13, Color(1.0, 0.74, 0.40, 1.0)))
-	if ready <= 0:
-		root.add_child(_barracks_wrapped_label("Cannot march: no ready warriors. Injured warriors must recover first.", 14, Color(1.0, 0.74, 0.40, 1.0)))
-
-func _build_flower_war_provision_column(parent: HBoxContainer, preview: Dictionary, status: Dictionary) -> void:
-	var panel: PanelContainer = PanelContainer.new()
-	panel.custom_minimum_size = Vector2(360, 0)
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.035, 0.030, 0.020, 0.88), Color(0.78, 0.58, 0.30, 0.58), 12))
-	parent.add_child(panel)
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 12)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_right", 12)
-	margin.add_theme_constant_override("margin_bottom", 10)
-	panel.add_child(margin)
-	var stack: VBoxContainer = VBoxContainer.new()
-	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	stack.add_theme_constant_override("separation", 8)
-	margin.add_child(stack)
-	stack.add_child(_barracks_label("Provisions", 24, COLOR_TEXT))
-	stack.add_child(_barracks_wrapped_label("Provisioning applies to the whole attacking expedition. Defence events do not use provisioning.", 15, COLOR_MUTED))
-	for provisioning_id: String in ["standard", "well", "royal"]:
-		_add_flower_war_provision_card(stack, provisioning_id)
-	stack.add_child(_barracks_label("Muster Summary", 22, COLOR_TEXT))
-	if bool(preview.get("ok", false)):
-		stack.add_child(_barracks_wrapped_label("Outcome preview: " + String(preview.get("result", "Unknown")) + ".", 16, COLOR_TEAL))
-		stack.add_child(_barracks_wrapped_label("Selected warbands: " + str(int(preview.get("participating_warband_count", 0))) + ". Ready warriors: " + str(int(preview.get("warriors_committed", 0))) + ".", 15, COLOR_MUTED))
-		stack.add_child(_barracks_wrapped_label("Effective offence " + _format_float(float(preview.get("attacker_attack", 0.0))) + " | effective defence " + _format_float(float(preview.get("attacker_defence", 0.0))) + ".", 15, COLOR_MUTED))
-		stack.add_child(_barracks_wrapped_label("Cost: " + _flower_war_event_cost_text(preview.get("provisioning_cost", {}) as Dictionary) + ".", 15, COLOR_MUTED))
-	else:
-		stack.add_child(_barracks_wrapped_label("Preview unavailable: " + String(preview.get("reason", "No selected warbands.")), 16, Color(1.0, 0.74, 0.40, 1.0)))
-	if not bool(status.get("ok", false)):
-		stack.add_child(_barracks_wrapped_label("Blocked: " + String(status.get("reason", "Cannot launch.")), 15, Color(1.0, 0.74, 0.40, 1.0)))
-
-func _add_flower_war_provision_card(parent: VBoxContainer, provisioning_id: String) -> void:
-	var selected: bool = provisioning_id == _flower_war_event_provisioning_id
-	var selected_ids: Array = _selected_flower_war_warband_ids()
-	var preview: Dictionary = _barracks_preview_for_selected_warbands(selected_ids, _flower_war_event_option_id, provisioning_id)
-	var title: String = provisioning_id.capitalize()
-	match provisioning_id:
-		"standard":
-			title = "Standard Provisioning"
-		"well":
-			title = "Well-Provisioned"
-		"royal":
-			title = "Royal Provisioning"
-	var button: Button = Button.new()
-	button.toggle_mode = true
-	button.button_pressed = selected
-	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	button.custom_minimum_size = Vector2(0, 54)
-	button.add_theme_font_size_override("font_size", 15)
-	var cost_text: String = "Cost unavailable"
-	if bool(preview.get("ok", false)):
-		cost_text = _flower_war_event_cost_text(preview.get("provisioning_cost", {}) as Dictionary)
-	button.text = title + "\n" + cost_text
-	button.tooltip_text = "Choose " + title + "."
-	button.pressed.connect(func() -> void:
-		_flower_war_event_provisioning_id = provisioning_id
-		_refresh_flower_war_event_overlay()
-	)
-	parent.add_child(button)
-
-func _build_flower_war_event_footer(parent: VBoxContainer, preview: Dictionary, status: Dictionary) -> void:
-	var footer: HBoxContainer = HBoxContainer.new()
-	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_theme_constant_override("separation", 10)
-	parent.add_child(footer)
-	var summary: Label = _barracks_wrapped_label("Deaths, captives, loot and XP will be shown in the full Flower War Return after resolution.", 15, COLOR_MUTED)
-	summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(summary)
-	var cancel_button: Button = Button.new()
-	cancel_button.text = "Cancel"
-	cancel_button.custom_minimum_size = Vector2(120, 42)
-	cancel_button.add_theme_font_size_override("font_size", 16)
-	cancel_button.pressed.connect(func() -> void:
-		_clear_flower_war_event_overlay()
-	)
-	footer.add_child(cancel_button)
-	var begin_button: Button = Button.new()
-	begin_button.text = "Begin Flower War"
-	begin_button.custom_minimum_size = Vector2(190, 42)
-	begin_button.add_theme_font_size_override("font_size", 16)
-	begin_button.disabled = not bool(status.get("ok", false))
-	begin_button.tooltip_text = String(status.get("reason", ""))
-	begin_button.pressed.connect(func() -> void:
-		_resolve_flower_war_attack_event()
-	)
-	footer.add_child(begin_button)
-
-func _resolve_flower_war_attack_event() -> void:
-	var state: Node = _state()
-	if state == null:
-		return
-	var selected_ids: Array = _selected_flower_war_warband_ids()
-	var report: Dictionary = {}
-	if state.has_method("launch_flower_war_with_selected_warbands"):
-		var raw: Variant = state.call("launch_flower_war_with_selected_warbands", selected_ids, _flower_war_event_option_id, _flower_war_event_provisioning_id)
-		if raw is Dictionary:
-			report = raw as Dictionary
-	elif state.has_method("launch_flower_war_with_all_warbands"):
-		var fallback_raw: Variant = state.call("launch_flower_war_with_all_warbands", _flower_war_event_option_id, _flower_war_event_provisioning_id)
-		if fallback_raw is Dictionary:
-			report = fallback_raw as Dictionary
-	if report.is_empty():
-		report = {"ok": false, "reason": "Flower War resolver is not available."}
-	_flower_war_event_report = report.duplicate(true)
-	_show_flower_war_return_event_overlay(report)
-
-func _open_flower_war_defence_event(option_id: String = "standard", source_id: String = "rival", context: Dictionary = {}) -> void:
-	var state: Node = _state()
-	if state != null and state.has_method("start_flower_war_defence_event"):
-		state.call("start_flower_war_defence_event", option_id, source_id, context)
-	_flower_war_event_option_id = option_id
-	_flower_war_defence_strategy_id = "balanced"
-	_flower_war_event_report.clear()
-	_show_flower_war_defence_event_overlay()
-
-func _refresh_flower_war_defence_event_overlay() -> void:
-	_clear_flower_war_event_overlay()
-	_show_flower_war_defence_event_overlay()
-
-func _show_flower_war_defence_event_overlay() -> void:
-	_clear_flower_war_event_overlay()
-	var overlay: Control = Control.new()
-	overlay.name = "FlowerWarDefenceEventOverlay"
-	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	overlay.z_index = 250
-	add_child(overlay)
-	_flower_war_event_overlay = overlay
-
-	var shade: ColorRect = ColorRect.new()
-	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
-	shade.color = Color(0.0, 0.0, 0.0, 0.76)
-	overlay.add_child(shade)
-
-	var outer_margin: MarginContainer = MarginContainer.new()
-	outer_margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	outer_margin.add_theme_constant_override("margin_left", 34)
-	outer_margin.add_theme_constant_override("margin_top", 28)
-	outer_margin.add_theme_constant_override("margin_right", 34)
-	outer_margin.add_theme_constant_override("margin_bottom", 28)
-	overlay.add_child(outer_margin)
-
-	var event_panel: PanelContainer = PanelContainer.new()
-	event_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	event_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	event_panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.035, 0.038, 0.052, 0.96), Color(0.36, 0.68, 0.92, 0.88), 18))
-	outer_margin.add_child(event_panel)
-
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 20)
-	margin.add_theme_constant_override("margin_top", 16)
-	margin.add_theme_constant_override("margin_right", 20)
-	margin.add_theme_constant_override("margin_bottom", 16)
-	event_panel.add_child(margin)
-
-	var root: VBoxContainer = VBoxContainer.new()
-	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_theme_constant_override("separation", 10)
-	margin.add_child(root)
-
-	_build_flower_war_defence_event_header(root)
-	_build_flower_war_defence_scale_row(root)
-
-	var preview: Dictionary = _barracks_preview_for_defence(_flower_war_event_option_id, _flower_war_defence_strategy_id)
-	var status: Dictionary = _barracks_can_resolve_defence(_flower_war_event_option_id, _flower_war_defence_strategy_id)
-
-	var body: HBoxContainer = HBoxContainer.new()
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", 14)
-	root.add_child(body)
-
-	_build_flower_war_defending_warbands_column(body)
-	_build_flower_war_defence_strategy_column(body, preview, status)
-	_build_flower_war_defence_event_footer(root, preview, status)
-
-func _build_flower_war_defence_event_header(parent: VBoxContainer) -> void:
-	var header: HBoxContainer = HBoxContainer.new()
-	header.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_theme_constant_override("separation", 12)
-	parent.add_child(header)
-	var title_stack: VBoxContainer = VBoxContainer.new()
-	title_stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	title_stack.add_theme_constant_override("separation", 2)
-	header.add_child(title_stack)
-	title_stack.add_child(_barracks_label("FLOWER WAR DEFENCE", 34, COLOR_TEXT))
-	title_stack.add_child(_barracks_wrapped_label("A rival house has come seeking captives and glory. Choose how your warbands answer.", 17, COLOR_MUTED))
-	var close_button: Button = Button.new()
-	close_button.text = "Close"
-	close_button.custom_minimum_size = Vector2(96, 38)
-	close_button.add_theme_font_size_override("font_size", 15)
-	close_button.pressed.connect(func() -> void:
-		_clear_flower_war_event_overlay()
-	)
-	header.add_child(close_button)
-
-func _build_flower_war_defence_scale_row(parent: VBoxContainer) -> void:
-	var row: HBoxContainer = HBoxContainer.new()
-	row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_theme_constant_override("separation", 8)
-	parent.add_child(row)
-	for option: Dictionary in _barracks_flower_options():
-		var option_id: String = String(option.get("id", "minor"))
-		var button: Button = Button.new()
-		button.text = String(option.get("name", option_id.capitalize()))
-		button.toggle_mode = true
-		button.button_pressed = option_id == _flower_war_event_option_id
-		button.custom_minimum_size = Vector2(0, 36)
-		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		button.add_theme_font_size_override("font_size", 15)
-		button.pressed.connect(func() -> void:
-			_flower_war_event_option_id = option_id
-			_refresh_flower_war_defence_event_overlay()
-		)
-		row.add_child(button)
-
-func _build_flower_war_defending_warbands_column(parent: HBoxContainer) -> void:
-	var panel: PanelContainer = PanelContainer.new()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.018, 0.038, 0.036, 0.86), Color(0.50, 0.82, 0.74, 0.48), 12))
-	parent.add_child(panel)
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 12)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_right", 12)
-	margin.add_theme_constant_override("margin_bottom", 10)
-	panel.add_child(margin)
-	var stack: VBoxContainer = VBoxContainer.new()
-	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	stack.add_theme_constant_override("separation", 8)
-	margin.add_child(stack)
-	stack.add_child(_barracks_label("Warbands Defending", 24, COLOR_TEXT))
-	stack.add_child(_barracks_wrapped_label("Defensive Flower Wars commit all ready warbands. There is no provisioning choice on defence.", 15, COLOR_MUTED))
-	var scroll: ScrollContainer = ScrollContainer.new()
-	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	stack.add_child(scroll)
-	var list: VBoxContainer = VBoxContainer.new()
-	list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	list.add_theme_constant_override("separation", 8)
-	scroll.add_child(list)
-	for row: Dictionary in _barracks_warband_rows():
-		_add_flower_war_defending_warband_card(list, row)
-
-func _add_flower_war_defending_warband_card(parent: VBoxContainer, row: Dictionary) -> void:
-	var ready: int = int(row.get("ready", row.get("warriors", 0)))
-	var stats: Dictionary = _warband_combat_stats(row)
-	var border: Color = Color(0.50, 0.82, 0.74, 0.58) if ready > 0 else Color(0.40, 0.42, 0.38, 0.45)
-	var panel: PanelContainer = PanelContainer.new()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.025, 0.050, 0.046, 0.82), border, 10))
-	parent.add_child(panel)
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_top", 8)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_bottom", 8)
-	panel.add_child(margin)
-	var root: VBoxContainer = VBoxContainer.new()
-	root.add_theme_constant_override("separation", 4)
-	margin.add_child(root)
-	root.add_child(_barracks_label(String(row.get("name", "Warband")), 20, COLOR_TEXT))
-	root.add_child(_barracks_wrapped_label("Doctrine: " + String(stats.get("doctrine_name", "Unspecialised")) + " | Ready " + str(ready) + " | Injured ✚ " + str(int(stats.get("injured", 0))), 14, COLOR_TEAL))
-	root.add_child(_barracks_wrapped_label("Effective offence " + _format_float(float(stats.get("effective_offence", 0.0))) + " | effective defence " + _format_float(float(stats.get("effective_defence", 0.0))) + ".", 14, COLOR_MUTED))
-	if ready <= 0:
-		root.add_child(_barracks_wrapped_label("Cannot defend: no ready warriors.", 14, Color(1.0, 0.74, 0.40, 1.0)))
-
-func _build_flower_war_defence_strategy_column(parent: HBoxContainer, preview: Dictionary, status: Dictionary) -> void:
-	var panel: PanelContainer = PanelContainer.new()
-	panel.custom_minimum_size = Vector2(420, 0)
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.035, 0.030, 0.020, 0.88), Color(0.78, 0.58, 0.30, 0.58), 12))
-	parent.add_child(panel)
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 12)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_right", 12)
-	margin.add_theme_constant_override("margin_bottom", 10)
-	panel.add_child(margin)
-	var stack: VBoxContainer = VBoxContainer.new()
-	stack.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	stack.add_theme_constant_override("separation", 8)
-	margin.add_child(stack)
-	stack.add_child(_barracks_label("Defensive Strategy", 24, COLOR_TEXT))
-	stack.add_child(_barracks_wrapped_label("Choose one posture. Balanced is safe; the other two trade offence and defence against each other.", 15, COLOR_MUTED))
-	for strategy: Dictionary in _barracks_defence_strategies():
-		_add_flower_war_defence_strategy_card(stack, strategy)
-	stack.add_child(_barracks_label("Defence Summary", 22, COLOR_TEXT))
-	if bool(preview.get("ok", false)):
-		stack.add_child(_barracks_wrapped_label("Outcome preview: " + String(preview.get("result", "Unknown")) + ".", 16, COLOR_TEAL))
-		stack.add_child(_barracks_wrapped_label("Defending warbands: " + str(int(preview.get("participating_warband_count", 0))) + ". Ready warriors: " + str(int(preview.get("warriors_committed", 0))) + ".", 15, COLOR_MUTED))
-		stack.add_child(_barracks_wrapped_label("Defence Off x" + _format_float(float(preview.get("offence_multiplier", 1.0))) + " | Def x" + _format_float(float(preview.get("defence_multiplier", 1.0))) + ". Enemy casualties " + str(int(preview.get("enemy_casualties", 0))) + "; expected losses " + str(int(preview.get("defender_casualties", preview.get("attacker_casualties", 0)))) + ".", 15, COLOR_MUTED))
-	else:
-		stack.add_child(_barracks_wrapped_label("Preview unavailable: " + String(preview.get("reason", "No defending warbands.")), 16, Color(1.0, 0.74, 0.40, 1.0)))
-	if not bool(status.get("ok", false)):
-		stack.add_child(_barracks_wrapped_label("Blocked: " + String(status.get("reason", "Cannot resolve defence.")), 15, Color(1.0, 0.74, 0.40, 1.0)))
-
-func _add_flower_war_defence_strategy_card(parent: VBoxContainer, strategy: Dictionary) -> void:
-	var strategy_id: String = String(strategy.get("id", "balanced"))
-	var selected: bool = strategy_id == _flower_war_defence_strategy_id
-	var button: Button = Button.new()
-	button.toggle_mode = true
-	button.button_pressed = selected
-	button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	button.custom_minimum_size = Vector2(0, 70)
-	button.add_theme_font_size_override("font_size", 15)
-	button.text = String(strategy.get("name", "Strategy")) + "\nOff x" + _format_float(float(strategy.get("offence_multiplier", 1.0))) + " | Def x" + _format_float(float(strategy.get("defence_multiplier", 1.0)))
-	button.tooltip_text = String(strategy.get("description", ""))
-	button.pressed.connect(func() -> void:
-		_flower_war_defence_strategy_id = strategy_id
-		_refresh_flower_war_defence_event_overlay()
-	)
-	parent.add_child(button)
-
-func _build_flower_war_defence_event_footer(parent: VBoxContainer, preview: Dictionary, status: Dictionary) -> void:
-	var footer: HBoxContainer = HBoxContainer.new()
-	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_theme_constant_override("separation", 10)
-	parent.add_child(footer)
-	var summary: Label = _barracks_wrapped_label("Defensive Flower Wars use all ready warbands, no provisions, and one strategy choice. Deaths and injuries appear in the return event.", 15, COLOR_MUTED)
-	summary.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(summary)
-	var cancel_button: Button = Button.new()
-	cancel_button.text = "Cancel"
-	cancel_button.custom_minimum_size = Vector2(120, 42)
-	cancel_button.add_theme_font_size_override("font_size", 16)
-	cancel_button.pressed.connect(func() -> void:
-		_clear_flower_war_event_overlay()
-	)
-	footer.add_child(cancel_button)
-	var resolve_button: Button = Button.new()
-	resolve_button.text = "Resolve Defence"
-	resolve_button.custom_minimum_size = Vector2(190, 42)
-	resolve_button.add_theme_font_size_override("font_size", 16)
-	resolve_button.disabled = not bool(status.get("ok", false))
-	resolve_button.tooltip_text = String(status.get("reason", ""))
-	resolve_button.pressed.connect(func() -> void:
-		_resolve_flower_war_defence_event()
-	)
-	footer.add_child(resolve_button)
-
-func _resolve_flower_war_defence_event() -> void:
-	var state: Node = _state()
-	if state == null:
-		return
-	var report: Dictionary = {}
-	if state.has_method("resolve_flower_war_defence"):
-		var raw: Variant = state.call("resolve_flower_war_defence", _flower_war_event_option_id, _flower_war_defence_strategy_id)
-		if raw is Dictionary:
-			report = raw as Dictionary
-	if report.is_empty():
-		report = {"ok": false, "reason": "Flower War defence resolver is not available.", "war_direction": "defence"}
-	_flower_war_event_report = report.duplicate(true)
-	_show_flower_war_return_event_overlay(report)
-
-func _show_flower_war_return_event_overlay(report: Dictionary) -> void:
-	_clear_flower_war_event_overlay()
-	var overlay: Control = Control.new()
-	overlay.name = "FlowerWarReturnOverlay"
-	overlay.set_anchors_preset(Control.PRESET_FULL_RECT)
-	overlay.mouse_filter = Control.MOUSE_FILTER_STOP
-	overlay.z_index = 250
-	add_child(overlay)
-	_flower_war_event_overlay = overlay
-
-	var shade: ColorRect = ColorRect.new()
-	shade.set_anchors_preset(Control.PRESET_FULL_RECT)
-	shade.color = Color(0.0, 0.0, 0.0, 0.78)
-	overlay.add_child(shade)
-
-	var outer_margin: MarginContainer = MarginContainer.new()
-	outer_margin.set_anchors_preset(Control.PRESET_FULL_RECT)
-	outer_margin.add_theme_constant_override("margin_left", 38)
-	outer_margin.add_theme_constant_override("margin_top", 30)
-	outer_margin.add_theme_constant_override("margin_right", 38)
-	outer_margin.add_theme_constant_override("margin_bottom", 30)
-	overlay.add_child(outer_margin)
-
-	var event_panel: PanelContainer = PanelContainer.new()
-	event_panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	event_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	event_panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.045, 0.035, 0.020, 0.97), Color(0.78, 0.58, 0.30, 0.90), 18))
-	outer_margin.add_child(event_panel)
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 20)
-	margin.add_theme_constant_override("margin_top", 16)
-	margin.add_theme_constant_override("margin_right", 20)
-	margin.add_theme_constant_override("margin_bottom", 16)
-	event_panel.add_child(margin)
-	var root: VBoxContainer = VBoxContainer.new()
-	root.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	root.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	root.add_theme_constant_override("separation", 10)
-	margin.add_child(root)
-
-	var ok: bool = bool(report.get("ok", false))
-	var direction: String = String(report.get("war_direction", "attack"))
-	var return_title: String = "FLOWER WAR RETURN"
-	if direction == "defence":
-		return_title = "FLOWER WAR DEFENCE RETURN"
-	root.add_child(_barracks_label(return_title, 34, COLOR_TEXT))
-	if not ok:
-		root.add_child(_barracks_wrapped_label("The muster failed: " + String(report.get("reason", "unknown reason")) + ".", 20, Color(1.0, 0.74, 0.40, 1.0)))
-		_build_flower_war_return_footer(root)
-		return
-	root.add_child(_barracks_label(String(report.get("result", "Unknown")).to_upper(), 30, COLOR_TEAL))
-	if direction == "defence":
-		root.add_child(_barracks_wrapped_label("Strategy: " + String(report.get("defence_strategy_name", "Balanced Defence")) + " | Enemy casualties: " + str(int(report.get("enemy_casualties", 0))) + " | Prestige " + _format_signed_prestige_ui(float(report.get("prestige_gain", 0.0))) + " | Warriors defending: " + str(int(report.get("warriors_committed", 0))) + " | Returned ready: " + str(int(report.get("warriors_returned", 0))), 18, COLOR_MUTED))
-	else:
-		root.add_child(_barracks_wrapped_label("Captives taken: " + str(int(report.get("captives", 0))) + " | Loot value: " + _format_float(float(report.get("loot_value", 0.0))) + " | Prestige " + _format_signed_prestige_ui(float(report.get("prestige_gain", 0.0))) + " | Warriors sent: " + str(int(report.get("warriors_committed", 0))) + " | Returned ready: " + str(int(report.get("warriors_returned", 0))), 18, COLOR_MUTED))
-
-	var body: HBoxContainer = HBoxContainer.new()
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_theme_constant_override("separation", 14)
-	root.add_child(body)
-	_build_flower_war_return_warband_cards(body, report)
-	_build_flower_war_return_spoils_panel(body, report)
-	_build_flower_war_return_footer(root)
-
-func _build_flower_war_return_warband_cards(parent: HBoxContainer, report: Dictionary) -> void:
-	var panel: PanelContainer = PanelContainer.new()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.018, 0.038, 0.036, 0.88), Color(0.50, 0.82, 0.74, 0.50), 12))
-	parent.add_child(panel)
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 12)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_right", 12)
-	margin.add_theme_constant_override("margin_bottom", 10)
-	panel.add_child(margin)
-	var stack: VBoxContainer = VBoxContainer.new()
-	stack.add_theme_constant_override("separation", 8)
-	stack.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	margin.add_child(stack)
-	stack.add_child(_barracks_label("Warbands Returned", 24, COLOR_TEXT))
-	var grid: GridContainer = GridContainer.new()
-	grid.columns = 3
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 8)
-	stack.add_child(grid)
-	var reports: Array = report.get("participant_reports", []) as Array
-	if reports.is_empty():
-		grid.add_child(_barracks_wrapped_label("No per-warband report was recorded.", 17, COLOR_MUTED))
-		return
-	for participant_variant: Variant in reports:
-		var participant: Dictionary = participant_variant as Dictionary
-		_add_flower_war_return_single_warband_card(grid, participant)
-
-func _add_flower_war_return_single_warband_card(parent: GridContainer, participant: Dictionary) -> void:
-	var panel: PanelContainer = PanelContainer.new()
-	panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.025, 0.050, 0.046, 0.82), Color(0.50, 0.82, 0.74, 0.46), 10))
-	parent.add_child(panel)
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 10)
-	margin.add_theme_constant_override("margin_top", 8)
-	margin.add_theme_constant_override("margin_right", 10)
-	margin.add_theme_constant_override("margin_bottom", 8)
-	panel.add_child(margin)
-	var stack: VBoxContainer = VBoxContainer.new()
-	stack.add_theme_constant_override("separation", 4)
-	margin.add_child(stack)
-	stack.add_child(_barracks_label(String(participant.get("name", "Warband")), 19, COLOR_TEXT))
-	var sent: int = int(participant.get("sent", participant.get("committed", 0)))
-	var returned_ready: int = int(participant.get("returned_ready", max(0, sent - int(participant.get("casualties", 0)))))
-	stack.add_child(_barracks_wrapped_label("Sent: " + str(sent), 15, COLOR_MUTED))
-	stack.add_child(_barracks_wrapped_label("Returned ready: " + str(returned_ready), 15, COLOR_TEAL))
-	stack.add_child(_barracks_wrapped_label("✚ Injured: " + str(int(participant.get("injured", 0))), 15, Color(0.80, 1.0, 0.88, 1.0)))
-	stack.add_child(_barracks_wrapped_label("Dead: " + str(int(participant.get("dead", 0))), 15, Color(0.72, 0.70, 0.66, 1.0)))
-	stack.add_child(_barracks_wrapped_label("XP: +" + str(int(participant.get("xp_gained", 0))), 15, COLOR_TEAL))
-
-func _build_flower_war_return_spoils_panel(parent: HBoxContainer, report: Dictionary) -> void:
-	var panel: PanelContainer = PanelContainer.new()
-	panel.custom_minimum_size = Vector2(360, 0)
-	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	panel.add_theme_stylebox_override("panel", _make_panel_style(Color(0.035, 0.030, 0.020, 0.88), Color(0.78, 0.58, 0.30, 0.58), 12))
-	parent.add_child(panel)
-	var margin: MarginContainer = MarginContainer.new()
-	margin.add_theme_constant_override("margin_left", 12)
-	margin.add_theme_constant_override("margin_top", 10)
-	margin.add_theme_constant_override("margin_right", 12)
-	margin.add_theme_constant_override("margin_bottom", 10)
-	panel.add_child(margin)
-	var stack: VBoxContainer = VBoxContainer.new()
-	stack.add_theme_constant_override("separation", 8)
-	margin.add_child(stack)
-	stack.add_child(_barracks_label("Spoils & Consequences", 24, COLOR_TEXT))
-	stack.add_child(_barracks_wrapped_label("Captives: " + str(int(report.get("captives", 0))), 18, COLOR_TEAL))
-	stack.add_child(_barracks_wrapped_label("Loot: " + _flower_war_event_loot_text(report.get("loot", {}) as Dictionary), 16, COLOR_MUTED))
-	stack.add_child(_barracks_wrapped_label("Total injured: ✚ " + str(int(report.get("attacker_injured", 0))) + ". Dead: " + str(int(report.get("attacker_dead", 0))) + ".", 16, COLOR_MUTED))
-	stack.add_child(_barracks_wrapped_label("Prestige: " + _format_signed_prestige_ui(float(report.get("prestige_gain", 0.0))), 18, Color(1.0, 0.82, 0.44, 1.0)))
-	var prestige_breakdown: Dictionary = report.get("prestige_breakdown", {}) as Dictionary
-	var prestige_lines: Array = prestige_breakdown.get("lines", []) as Array
-	for prestige_line_variant: Variant in prestige_lines:
-		stack.add_child(_barracks_wrapped_label("• " + String(prestige_line_variant), 14, COLOR_MUTED))
-	var level_reports: Array = report.get("level_reports", []) as Array
-	if not level_reports.is_empty():
-		for line_variant: Variant in level_reports:
-			stack.add_child(_barracks_wrapped_label(String(line_variant), 15, COLOR_TEAL))
-	stack.add_child(_barracks_wrapped_label("The dead are recorded here and in war reports, not on normal warband cards. Injured warriors remain out of the ready pool until the next Veintena advance.", 15, COLOR_MUTED))
-
-func _build_flower_war_return_footer(parent: VBoxContainer) -> void:
-	var footer: HBoxContainer = HBoxContainer.new()
-	footer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_theme_constant_override("separation", 10)
-	parent.add_child(footer)
-	var note: Label = _barracks_wrapped_label("This return is archived under Barracks → War Returns as a codex war report.", 15, COLOR_MUTED)
-	note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(note)
-	var continue_button: Button = Button.new()
-	continue_button.text = "Continue"
-	continue_button.custom_minimum_size = Vector2(150, 42)
-	continue_button.add_theme_font_size_override("font_size", 16)
-	continue_button.pressed.connect(func() -> void:
-		_clear_flower_war_event_overlay()
-		_refresh_all()
-	)
-	footer.add_child(continue_button)
 
 func _flower_war_event_cost_text(cost: Dictionary) -> String:
 	if cost.is_empty():
@@ -5656,6 +3954,14 @@ func _barracks_can_launch_selected_warbands(warband_ids: Array, option_id: Strin
 		if raw is Dictionary:
 			return raw as Dictionary
 	return _barracks_can_launch_all_warbands(option_id, provisioning_id)
+
+func _all_ready_warband_ids() -> Array[String]:
+	var ids: Array[String] = []
+	for row: Dictionary in _barracks_warband_rows():
+		var warband_id: String = String(row.get("id", ""))
+		if warband_id != "" and int(row.get("ready", row.get("warriors", 0))) > 0:
+			ids.append(warband_id)
+	return ids
 
 func _barracks_defence_strategies() -> Array[Dictionary]:
 	var state: Node = _state()
@@ -6182,7 +4488,7 @@ func _build_barracks_skill_web_panel(parent: VBoxContainer, warband_id: String) 
 	graph_margin.add_theme_constant_override("margin_bottom", 4)
 	graph_panel.add_child(graph_margin)
 
-	var canvas: WarbandSkillWebCanvas = WarbandSkillWebCanvas.new()
+	var canvas: Control = WARBAND_SKILL_WEB_CANVAS_SCRIPT.new() as Control
 	canvas.custom_minimum_size = Vector2(920, 640)
 	canvas.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	canvas.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -6855,231 +5161,51 @@ func _barracks_wrapped_label(text: String, font_size: int, colour: Color) -> Lab
 	return label
 
 # -----------------------------------------------------------------------------
-# Calendar Pacing v2 — safe gameplay-led order
+# Calendar Pacing v2 — extracted coordinator bridge
 # -----------------------------------------------------------------------------
 
+func _calendar_controller() -> RefCounted:
+	if _calendar_pacing_controller == null:
+		_calendar_pacing_controller = CALENDAR_PACING_CONTROLLER_SCRIPT.new() as RefCounted
+	return _calendar_pacing_controller
+
 func _build_calendar_row() -> void:
-	_refresh_calendar_advance_button_label()
-	var current_veintena: int = _calendar_current_veintena()
-	var cards_to_show: int = max(1, visible_veintenas)
-	for offset: int in range(cards_to_show):
-		var card_data: Dictionary = _calendar_card_data(current_veintena, offset)
-		var card_button: Button = Button.new()
-		card_button.toggle_mode = false
-		card_button.focus_mode = Control.FOCUS_NONE
-		card_button.custom_minimum_size = Vector2(166, 112)
-		card_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		card_button.text = String(card_data.get("button_text", "Calendar"))
-		card_button.tooltip_text = String(card_data.get("tooltip", ""))
-		card_button.add_theme_font_size_override("font_size", 15)
-		card_button.add_theme_stylebox_override("normal", _calendar_card_style(card_data, false))
-		card_button.add_theme_stylebox_override("hover", _calendar_card_style(card_data, true))
-		card_button.add_theme_stylebox_override("pressed", _calendar_card_style(card_data, true))
-		var report_id: String = String(card_data.get("report_id", ""))
-		card_button.pressed.connect(func() -> void:
-			_on_calendar_card_pressed(report_id)
-		)
-		top_row.add_child(card_button)
+	_calendar_controller().call("build_calendar_row", self, top_row, visible_veintenas)
 
 func _calendar_card_style(card_data: Dictionary, hover: bool) -> StyleBoxFlat:
-	var is_current: bool = bool(card_data.get("current", false))
-	var period: String = String(card_data.get("period", "veintena"))
-	var god: String = String(card_data.get("god", "Minor / No major festival"))
-	var base: Color = Color(0.055, 0.08, 0.075, 0.92)
-	var border: Color = _calendar_colour_for_god(god)
-	if is_current:
-		base = Color(0.09, 0.13, 0.115, 0.98)
-		border = border.lightened(0.20)
-	elif period == "nemontemi":
-		base = Color(0.08, 0.055, 0.09, 0.95)
-		border = Color(0.73, 0.46, 0.82, 0.70)
-	elif god == "Minor / No major festival":
-		base = Color(0.045, 0.065, 0.065, 0.90)
-	if hover:
-		base = base.lightened(0.07)
-		border = border.lightened(0.12)
-	return _make_panel_style(base, border, 10)
+	var raw: Variant = _calendar_controller().call("calendar_card_style", self, card_data, hover)
+	if raw is StyleBoxFlat:
+		return raw as StyleBoxFlat
+	var fallback: StyleBoxFlat = StyleBoxFlat.new()
+	fallback.bg_color = Color(0.055, 0.08, 0.075, 0.92)
+	fallback.border_color = Color(0.56, 0.62, 0.58, 0.58)
+	fallback.set_border_width_all(1)
+	fallback.set_corner_radius_all(10)
+	return fallback
 
 func _calendar_colour_for_god(god: String) -> Color:
-	match god:
-		"Tlaloc":
-			return Color(0.22, 0.68, 0.86, 0.72)
-		"Huitzilopochtli":
-			return Color(0.84, 0.35, 0.24, 0.74)
-		"Tezcatlipoca":
-			return Color(0.62, 0.45, 0.84, 0.72)
-		"Quetzalcoatl":
-			return Color(0.37, 0.82, 0.57, 0.72)
-		"Nemontemi":
-			return Color(0.73, 0.46, 0.82, 0.72)
-	return Color(0.56, 0.62, 0.58, 0.58)
+	return _calendar_controller().call("calendar_colour_for_god", god) as Color
 
 func _calendar_card_data(current_veintena: int, offset: int) -> Dictionary:
-	var base_year: int = _ritual_year
-	var position: int = current_veintena + offset
-	if _calendar_period == "nemontemi":
-		position = 19 + offset
-	var year_value: int = base_year
-	while position > 19:
-		position -= 19
-		year_value += 1
-	if position == 19:
-		return _nemontemi_card_data(year_value, offset == 0)
-	var veintena_number: int = clampi(position, 1, 18)
-	var god: String = _calendar_god_for_veintena(veintena_number)
-	var detail: String = _calendar_detail_for_veintena(veintena_number)
-	var name: String = _calendar_veintena_name(veintena_number)
-	var current: bool = offset == 0 and _calendar_period == "veintena"
-	var prefix: String = "Upcoming"
-	if current:
-		prefix = "Current"
-	var god_label: String = god
-	if god == "Minor / No major festival":
-		god_label = "Minor"
-	var report_id: String = "calendar|" + str(year_value) + "|veintena|" + str(veintena_number)
-	return {"period": "veintena", "year": year_value, "veintena": veintena_number, "name": name, "god": god, "detail": detail, "current": current, "report_id": report_id, "button_text": prefix + "\nY" + str(year_value) + " V" + str(veintena_number) + "\n" + god_label + "\n" + detail, "tooltip": "Ritual Year " + str(year_value) + ", Veintena " + str(veintena_number) + " — " + name + ". " + god + ": " + _calendar_tooltip_for_veintena(veintena_number)}
+	return _calendar_controller().call("calendar_card_data", self, current_veintena, offset) as Dictionary
 
 func _nemontemi_card_data(year_value: int, current: bool) -> Dictionary:
-	var prefix: String = "Upcoming"
-	if current:
-		prefix = "Current"
-	var report_id: String = "calendar|" + str(year_value) + "|nemontemi|0"
-	return {"period": "nemontemi", "year": year_value, "veintena": 0, "name": "Nemontemi", "god": "Nemontemi", "detail": "Year review", "current": current, "report_id": report_id, "button_text": prefix + "\nY" + str(year_value) + "\nNemontemi\nUnlucky Days", "tooltip": "Nemontemi — five unlucky days, annual reckoning, restrictions, omens, review and next-year setup."}
+	return _calendar_controller().call("nemontemi_card_data", year_value, current) as Dictionary
 
 func _calendar_current_veintena() -> int:
-	var state: Node = _state()
-	if state != null and state.has_method("get_current_veintena"):
-		return clampi(int(state.call("get_current_veintena")), 1, 18)
-	if state != null:
-		return clampi(int(state.get("current_veintena")), 1, 18)
-	return 1
+	return int(_calendar_controller().call("calendar_current_veintena", self))
 
 func _calendar_veintena_name(veintena_number: int) -> String:
-	var index: int = veintena_number - 1
-	if index >= 0 and index < _veintenas.size():
-		var data: Dictionary = _veintenas[index] as Dictionary
-		return String(data.get("name", "Veintena " + str(veintena_number)))
-	return "Veintena " + str(veintena_number)
+	return String(_calendar_controller().call("calendar_veintena_name", self, veintena_number))
 
 func _calendar_god_for_veintena(veintena_number: int) -> String:
-	match veintena_number:
-		1:
-			return "Quetzalcoatl"
-		2:
-			return "Tlaloc"
-		3:
-			return "Minor / No major festival"
-		4:
-			return "Tezcatlipoca"
-		5:
-			return "Tlaloc"
-		6:
-			return "Quetzalcoatl"
-		7:
-			return "Huitzilopochtli"
-		8:
-			return "Huitzilopochtli"
-		9:
-			return "Tezcatlipoca"
-		10:
-			return "Tlaloc"
-		11:
-			return "Minor / No major festival"
-		12:
-			return "Tlaloc"
-		13:
-			return "Quetzalcoatl"
-		14:
-			return "Minor / No major festival"
-		15:
-			return "Huitzilopochtli"
-		16:
-			return "Minor / No major festival"
-		17:
-			return "Tezcatlipoca"
-		18:
-			return "Quetzalcoatl"
-	return "Minor / No major festival"
+	return String(_calendar_controller().call("calendar_god_for_veintena", veintena_number))
 
 func _calendar_detail_for_veintena(veintena_number: int) -> String:
-	match veintena_number:
-		1:
-			return "Year opening"
-		2:
-			return "Early planting"
-		3:
-			return "Recovery/build"
-		4:
-			return "First omens"
-		5:
-			return "Mid rains"
-		6:
-			return "Trade/diplomacy"
-		7:
-			return "War prep"
-		8:
-			return "Flower Wars"
-		9:
-			return "Rival tension"
-		10:
-			return "Early harvest"
-		11:
-			return "Market reset"
-		12:
-			return "Great harvest"
-		13:
-			return "Legitimacy"
-		14:
-			return "Preparation"
-		15:
-			return "War review"
-		16:
-			return "Recovery"
-		17:
-			return "End-year plots"
-		18:
-			return "Closing rites"
-	return "planning"
+	return String(_calendar_controller().call("calendar_detail_for_veintena", veintena_number))
 
 func _calendar_tooltip_for_veintena(veintena_number: int) -> String:
-	match veintena_number:
-		1:
-			return "Quetzalcoatl opens the Ritual Year. This is a transition, legitimacy and planning period."
-		2:
-			return "Tlaloc supports early planting, rain, lake fertility and food-security planning."
-		3:
-			return "No major god dominates. Use this as a quieter estate-management, construction, trade or recovery window."
-		4:
-			return "Tezcatlipoca brings first omens, ambition, manipulation and rival-house tension."
-		5:
-			return "Tlaloc returns for mid-season rain and fertility pressure. Drought protection and crop planning matter."
-		6:
-			return "Quetzalcoatl supports trade, diplomacy, legitimacy and civil order during the middle of the year."
-		7:
-			return "Huitzilopochtli begins military prominence. Prepare warriors, weapons and Flower War readiness."
-		8:
-			return "Huitzilopochtli dominates the main Flower Wars season. Later systems should centre captives, loot and martial prestige here."
-		9:
-			return "Tezcatlipoca pressure rises after the war season. Rival plots, omens and political manipulation fit here."
-		10:
-			return "Tlaloc governs early harvest, rain memory, lakes and agricultural return."
-		11:
-			return "No major god dominates. This is a breathing-room window for markets, stores, repairs and economic recovery."
-		12:
-			return "Tlaloc reaches the great harvest moment. Agricultural output, gratitude and food security should be prominent."
-		13:
-			return "Quetzalcoatl supports diplomacy, legitimacy, palace-facing order and civil recognition."
-		14:
-			return "No major god dominates. Use this as preparation before the late-year military and reckoning pressures."
-		15:
-			return "Huitzilopochtli returns for late-year military review, martial prestige and warrior standing."
-		16:
-			return "No major god dominates. This is a recovery and economic repositioning period before the end-year intrigue phase."
-		17:
-			return "Tezcatlipoca governs end-of-year intrigue, omens, hidden pressure and reckoning danger."
-		18:
-			return "Quetzalcoatl closes the ordinary year through transition, order, legitimacy and ceremonial donation."
-	return "Calendar planning pressure."
+	return String(_calendar_controller().call("calendar_tooltip_for_veintena", veintena_number))
 
 func _on_calendar_card_pressed(report_id: String) -> void:
 	selected_estate_report_id = report_id
@@ -7356,67 +5482,14 @@ func _build_palace_estate_report_detail_text() -> String:
 	return text.strip_edges()
 
 func _calendar_report_data_from_id(report_id: String) -> Dictionary:
-	var parts: PackedStringArray = report_id.split("|")
-	var year_value: int = _ritual_year
-	var period: String = "veintena"
-	var veintena_number: int = _calendar_current_veintena()
-	if parts.size() >= 4:
-		year_value = int(parts[1])
-		period = String(parts[2])
-		veintena_number = int(parts[3])
-	return {"year": year_value, "period": period, "veintena": veintena_number}
+	return _calendar_controller().call("calendar_report_data_from_id", self, report_id) as Dictionary
 
 func _build_calendar_report_detail_text(report_id: String) -> String:
-	var data: Dictionary = _calendar_report_data_from_id(report_id)
-	var year_value: int = int(data.get("year", _ritual_year))
-	var period: String = String(data.get("period", "veintena"))
-	var veintena_number: int = int(data.get("veintena", 1))
-	if period == "nemontemi":
-		return _build_nemontemi_report_text(year_value)
-	var god: String = _calendar_god_for_veintena(veintena_number)
-	var text: String = "[b]Ritual Year " + str(year_value) + ", Veintena " + str(veintena_number) + "[/b]\n"
-	text += "[b]Inspired name:[/b] " + _calendar_veintena_name(veintena_number) + "\n"
-	text += "[b]Festival focus:[/b] " + god + "\n"
-	text += "[b]Gameplay pressure:[/b] " + _calendar_detail_for_veintena(veintena_number) + "\n\n"
-	text += _calendar_tooltip_for_veintena(veintena_number) + "\n\n"
-	text += "[b]Religion hook[/b]\n"
-	if god == "Minor / No major festival":
-		text += "• This is a breathing-room Veintena. No major god receives a festival visibility bonus.\n"
-	elif god == "Tlaloc":
-		text += "• Offerings to Tlaloc are especially visible this Veintena.\n"
-	elif god == "Huitzilopochtli":
-		text += "• Offerings to Huitzilopochtli are especially visible this Veintena.\n"
-	elif god == "Tezcatlipoca":
-		text += "• Offerings to Tezcatlipoca are especially visible this Veintena.\n"
-	elif god == "Quetzalcoatl":
-		text += "• Offerings to Quetzalcoatl are especially visible this Veintena.\n"
-	text += "• Divine favour decays on Advance. Offerings are made through the Shrines screen.\n\n"
-	text += "[b]Prototype turn pipeline[/b]\n"
-	text += "• Omens & Events: hook only for now.\n"
-	text += "• World upkeep: population upkeep and housing maintenance resolve on Advance.\n"
-	text += "• Production: staffed buildings consume inputs and add outputs on Advance.\n"
-	text += "• Religion: divine favour decays; offerings are player actions before Advance.\n"
-	text += "• Market / trade: player barter happens before Advance through the Market Trade Basket.\n"
-	text += "• Rival AI, Flower Wars, palace and prestige are future hooks.\n\n"
-	if veintena_number == 18:
-		text += "[color=#FFC25A][b]Next advance enters Nemontemi.[/b][/color]"
-	else:
-		text += "Next ordinary advance resolves this Veintena and moves to Veintena " + str(veintena_number + 1) + "."
-	return text
+	return String(_calendar_controller().call("build_calendar_report_detail_text", self, report_id))
 
 func _build_nemontemi_report_text(year_value: int) -> String:
-	var text: String = "[b]Nemontemi — Ritual Year " + str(year_value) + " Unlucky Days[/b]\n"
-	text += "Nemontemi is the five-day end-of-year reckoning phase, not a nineteenth ordinary Veintena.\n\n"
-	text += "[b]Prototype restrictions / hooks[/b]\n"
-	text += "• No Flower Wars.\n"
-	text += "• Construction and productivity can later be restricted or reduced here.\n"
-	text += "• Special omens and unique end-year events belong here.\n"
-	text += "• Divine favour takes a sharper end-year decay when Nemontemi resolves.\n"
-	text += "• Review previous-turn reports, shortages, prestige, rivals, palace pressure, offerings and Flower War results.\n\n"
-	text += "Press [b]Resolve Nemontemi[/b] to begin Ritual Year " + str(year_value + 1) + " at Veintena 1."
-	return text
+	return String(_calendar_controller().call("build_nemontemi_report_text", year_value))
 
-# -----------------------------------------------------------------------------
 # Turn Resolution Pipeline v1
 # -----------------------------------------------------------------------------
 
@@ -7491,13 +5564,4 @@ func _resolve_nemontemi(state: Node) -> void:
 		state.emit_signal("state_changed")
 
 func _refresh_calendar_advance_button_label() -> void:
-	if advance_turn_button == null:
-		return
-	if _calendar_period == "nemontemi":
-		advance_turn_button.text = "Resolve Nemontemi"
-	else:
-		var current_veintena: int = _calendar_current_veintena()
-		if current_veintena >= 18:
-			advance_turn_button.text = "Enter Nemontemi"
-		else:
-			advance_turn_button.text = "Advance Veintena"
+	_calendar_controller().call("refresh_calendar_advance_button_label", self)

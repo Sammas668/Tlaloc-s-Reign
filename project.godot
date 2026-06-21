@@ -18,6 +18,7 @@ config/icon="res://icon.svg"
 [autoload]
 
 GameState="*res://Scripts/state/GameState.gd"
+TRGameState="*res://Scripts/Autoload/TRGameState.gd"
 
 [physics]
 

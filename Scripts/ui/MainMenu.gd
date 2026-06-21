@@ -136,7 +136,7 @@ func _save_manager() -> Node:
 
 
 func _game_state() -> Node:
-	for path in ["/root/GameState", "/root/Game"]:
+	for path in ["/root/TRGameState", "/root/GameState", "/root/Game"]:
 		var node := get_node_or_null(path)
 		if node != null:
 			return node
