@@ -5,12 +5,13 @@
 # Shared lightweight context object for extracted screen controllers.
 # It replaces long parameter lists and makes controller dependencies explicit.
 # This object is UI-facing only: it should not own gameplay rules or live
-# campaign state.
+# campaign state. Patch 8H routes religion through CampaignState rather than
+# storing religion state on the UI controller.
 class_name UIScreenContext
 extends RefCounted
 
 const RELIGION_STATE_SYSTEM_SCRIPT: Script = preload("res://Scripts/Systems/ReligionStateSystem.gd")
-const RELIGION_STATE_META_KEY: String = "tr_religion_state_system"
+const RELIGION_STATE_META_KEY: String = "tr_religion_state_system" # fallback only
 
 var host: Node = null
 var content_root: Control = null
@@ -35,9 +36,8 @@ func state() -> Node:
 	return null
 
 func religion_state_system() -> RefCounted:
-	# Patch 8D: religion state is owned by runtime state when available, not by
-	# ShrineScreenController. The metadata bridge is temporary until TRGameState /
-	# CampaignState exposes a fully serialisable religion-state container.
+	# Patch 8H: prefer a runtime/CampaignState-backed religion system. Runtime
+	# metadata is kept only as a last-resort fallback for older local files.
 	var runtime_state: Node = state()
 	if runtime_state != null:
 		if runtime_state.has_method("get_religion_state_system"):
@@ -48,6 +48,13 @@ func religion_state_system() -> RefCounted:
 			var private_raw: Variant = runtime_state.call("_get_religion_state_system")
 			if private_raw is RefCounted:
 				return private_raw as RefCounted
+		if runtime_state.has_method("get_campaign_state_snapshot"):
+			var snapshot_raw: Variant = runtime_state.call("get_campaign_state_snapshot")
+			if snapshot_raw is RefCounted:
+				var campaign_backed: RefCounted = RELIGION_STATE_SYSTEM_SCRIPT.new() as RefCounted
+				if campaign_backed.has_method("bind_campaign_state"):
+					campaign_backed.call("bind_campaign_state", snapshot_raw as RefCounted, ["tlaloc", "huitzilopochtli", "tezcatlipoca", "quetzalcoatl"])
+				return campaign_backed
 		if runtime_state.has_meta(RELIGION_STATE_META_KEY):
 			var meta_raw: Variant = runtime_state.get_meta(RELIGION_STATE_META_KEY)
 			if meta_raw is RefCounted:

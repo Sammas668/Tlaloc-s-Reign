@@ -4,7 +4,7 @@
 #
 # Thin drop-in wrapper over GameScreen.gd.
 # Keeps the current GameScreen implementation intact, while adding:
-# - Market Overview / Trade Basket / Rival Procurement dashboard behaviour.
+# - Market screen routing through MarketScreenController.gd.
 # - Safe gameplay-led Ritual Calendar strip and Nemontemi pacing.
 # - Turn Resolution Pipeline v1 hooks.
 # - Religion / Shrine Upgrades v2 with tiered rituals, random favour rolls, no separate Offerings tab, and overview-only global favour/priest cards.
@@ -26,11 +26,11 @@
 # -----------------------------------------------------------------------------
 extends "res://Scripts/ui/GameScreen.gd"
 
-const TRADE_BASKET_VIEW_SCENE: PackedScene = preload("res://Scenes/Screens/TradeBasketView.tscn")
 const WARBAND_SKILL_WEB_CANVAS_SCRIPT: Script = preload("res://Scripts/ui/widgets/WarbandSkillWebCanvas.gd")
 const FLOWER_WAR_EVENT_OVERLAY_SCRIPT: Script = preload("res://Scripts/ui/widgets/FlowerWarEventOverlay.gd")
 const CALENDAR_PACING_CONTROLLER_SCRIPT: Script = preload("res://Scripts/ui/widgets/CalendarPacingController.gd")
 const UI_SCREEN_CONTEXT_SCRIPT: Script = preload("res://Scripts/ui/UIScreenContext.gd")
+const MARKET_SCREEN_CONTROLLER_SCRIPT: Script = preload("res://Scripts/ui/screens/MarketScreenController.gd")
 const SHRINE_RITUAL_RULES_SCRIPT: Script = preload("res://Scripts/Systems/ShrineRitualRules.gd")
 const RELIGION_STATE_SYSTEM_SCRIPT: Script = preload("res://Scripts/Systems/ReligionStateSystem.gd")
 const SHRINE_SCREEN_CONTROLLER_SCRIPT: Script = preload("res://Scripts/ui/screens/ShrineScreenController.gd")
@@ -61,18 +61,12 @@ const RELIGION_NEMONTEMI_DECAY: float = 4.0
 const GOD_IDS: Array[String] = ["tlaloc", "huitzilopochtli", "tezcatlipoca", "quetzalcoatl"]
 const OFFERING_RESOURCE_IDS: Array[String] = ["maize", "cacao", "ritual_goods", "fine_textiles", "captives"]
 
-var _calendar_period: String = "veintena"
-var _ritual_year: int = 1
-
 var _optional_shrine_art_cache: Dictionary = {}
 
-var _active_trade_basket_view: Control = null
-var _trade_basket_savvy_preview_label: RichTextLabel = null
-var _last_trade_basket_savvy_lines: Array = []
-var _last_trade_basket_savvy_preview: Dictionary = {}
 var _selected_palace_route_id: String = ""
 var _pending_palace_dedication_confirm_id: String = ""
 var _calendar_pacing_controller: RefCounted = null
+var _market_screen_controller: RefCounted = null
 var _shrine_screen_controller: RefCounted = null
 var _barracks_screen_controller: RefCounted = null
 var _palace_screen_controller: RefCounted = null
@@ -449,338 +443,25 @@ func _show_palace_content() -> void:
 func _build_palace_navigation_probe_reports() -> void:
 	_palace_controller().call("build_palace_navigation_probe_reports_with_context", _make_ui_screen_context())
 # -----------------------------------------------------------------------------
-# Market / Trade Basket patch
+# Market / Trade Basket UI bridge — extracted controller
 # -----------------------------------------------------------------------------
 
+func _market_controller() -> RefCounted:
+	if _market_screen_controller == null:
+		_market_screen_controller = MARKET_SCREEN_CONTROLLER_SCRIPT.new() as RefCounted
+	return _market_screen_controller
+
 func _show_market_view() -> void:
-	_set_content_root_layout(true)
-	if content_text:
-		content_text.visible = false
-	var market_focus: String = _current_focus_id()
-
-	if market_focus == "trade":
-		_show_trade_basket_view()
-		return
-
-	var auto_open_market_report: bool = market_focus == "overview" or market_focus == "village" or market_focus == "rivals" or market_focus == "reports"
-	if selected_market_good_id == "" and not auto_open_market_report:
-		if content_root:
-			content_root.visible = false
-		return
-	if content_root:
-		content_root.visible = true
-	if dynamic_view_host == null:
-		return
-	dynamic_view_host.visible = true
-	market_view = MARKET_VIEW_SCENE.instantiate() as Control
-	if market_view == null:
-		return
-	market_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	market_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	dynamic_view_host.add_child(market_view)
-	if market_view.has_signal("good_selected"):
-		market_view.connect("good_selected", Callable(self, "_on_market_good_selected"))
-	if market_view.has_signal("good_closed"):
-		market_view.connect("good_closed", Callable(self, "_on_market_good_closed"))
-	if market_view.has_method("setup"):
-		market_view.call("setup", _market_goods(), _current_focus_id(), selected_market_good_id)
-
-func _show_trade_basket_view() -> void:
-	if content_root:
-		content_root.visible = true
-	if dynamic_view_host == null:
-		return
-	dynamic_view_host.visible = true
-	var trade_view: Control = TRADE_BASKET_VIEW_SCENE.instantiate() as Control
-	if trade_view == null:
-		return
-	trade_view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	trade_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	dynamic_view_host.add_child(trade_view)
-	_active_trade_basket_view = trade_view
-	_trade_basket_savvy_preview_label = null
-	if trade_view.has_signal("trade_accepted"):
-		trade_view.connect("trade_accepted", Callable(self, "_on_trade_basket_accepted"))
-	if trade_view.has_signal("trade_changed"):
-		trade_view.connect("trade_changed", Callable(self, "_on_trade_basket_changed"))
-	if trade_view.has_method("setup"):
-		trade_view.call("setup", _state())
-	_ensure_trade_basket_savvy_preview_label()
-	_capture_trade_basket_savvy_preview()
-	_update_trade_basket_savvy_summary_display()
-
-func _on_trade_basket_accepted() -> void:
-	# TradeBasketView clears its internal plan before emitting trade_accepted, so the
-	# last captured trade_changed preview is used to award Economic Prestige safely.
-	var state: Node = _state()
-	if state != null and state.has_method("record_savvy_trade_prestige") and not _last_trade_basket_savvy_lines.is_empty():
-		state.call("record_savvy_trade_prestige", _last_trade_basket_savvy_lines, "Savvy market trade")
-	_last_trade_basket_savvy_lines.clear()
-	_last_trade_basket_savvy_preview.clear()
-	_trade_basket_savvy_preview_label = null
-	selected_market_good_id = ""
-	_refresh_main_content()
-	_refresh_right_panel()
-
-func _on_trade_basket_changed() -> void:
-	_capture_trade_basket_savvy_preview()
-	_update_trade_basket_savvy_summary_display()
-	_refresh_right_panel()
-
-func _capture_trade_basket_savvy_preview() -> void:
-	_last_trade_basket_savvy_lines.clear()
-	_last_trade_basket_savvy_preview.clear()
-	if _active_trade_basket_view == null:
-		return
-	var plan_variant: Variant = _active_trade_basket_view.get("trade_plan")
-	if not (plan_variant is Dictionary):
-		return
-	var plan: Dictionary = plan_variant as Dictionary
-	for key_variant: Variant in plan.keys():
-		var resource_id: String = String(key_variant)
-		var amount: float = float(plan[key_variant])
-		if absf(amount) <= 0.001:
-			continue
-		var average_value: float = 0.0
-		if _active_trade_basket_view.has_method("_trade_pricing"):
-			var pricing_variant: Variant = _active_trade_basket_view.call("_trade_pricing", resource_id, amount)
-			if pricing_variant is Dictionary:
-				var pricing: Dictionary = pricing_variant as Dictionary
-				average_value = float(pricing.get("average_value", 0.0))
-		if average_value <= 0.001:
-			var state_for_base: Node = _state()
-			if state_for_base != null and state_for_base.has_method("get_market_goods"):
-				for good_variant: Variant in (state_for_base.call("get_market_goods") as Array):
-					if good_variant is Dictionary and String((good_variant as Dictionary).get("id", "")) == resource_id:
-						average_value = float((good_variant as Dictionary).get("current_value", (good_variant as Dictionary).get("base_value", 1.0)))
-						break
-		_last_trade_basket_savvy_lines.append({"resource_id": resource_id, "amount": amount, "average_unit_value": average_value})
-	var state: Node = _state()
-	if state != null and state.has_method("get_savvy_trade_prestige_preview"):
-		var preview_variant: Variant = state.call("get_savvy_trade_prestige_preview", _last_trade_basket_savvy_lines)
-		if preview_variant is Dictionary:
-			_last_trade_basket_savvy_preview = preview_variant as Dictionary
-
-func _trade_basket_summary_label() -> RichTextLabel:
-	if _active_trade_basket_view == null:
-		return null
-	var label_variant: Variant = _active_trade_basket_view.get("summary_label")
-	if label_variant is RichTextLabel:
-		return label_variant as RichTextLabel
-	return _find_trade_basket_summary_label(_active_trade_basket_view)
-
-func _find_trade_basket_summary_label(node: Node) -> RichTextLabel:
-	if node == null:
-		return null
-	if node is RichTextLabel:
-		var candidate: RichTextLabel = node as RichTextLabel
-		var candidate_text: String = candidate.text.to_lower()
-		if candidate_text.contains("sold") or candidate_text.contains("bought") or candidate_text.contains("selected") or candidate_text.contains("value"):
-			return candidate
-	for child_index: int in range(node.get_child_count()):
-		var child: Node = node.get_child(child_index)
-		var found: RichTextLabel = _find_trade_basket_summary_label(child)
-		if found != null:
-			return found
-	return null
-
-func _ensure_trade_basket_savvy_preview_label() -> RichTextLabel:
-	if _active_trade_basket_view == null:
-		return null
-	if _trade_basket_savvy_preview_label != null and is_instance_valid(_trade_basket_savvy_preview_label) and _trade_basket_savvy_preview_label.get_parent() != null:
-		return _trade_basket_savvy_preview_label
-
-	var summary_label: RichTextLabel = _trade_basket_summary_label()
-	var target_parent: Node = _active_trade_basket_view
-	var insert_index: int = -1
-	if summary_label != null and summary_label.get_parent() != null:
-		target_parent = summary_label.get_parent()
-		insert_index = summary_label.get_index() + 1
-
-	var preview_label: RichTextLabel = RichTextLabel.new()
-	preview_label.name = "SavvyTradePrestigePreview"
-	preview_label.bbcode_enabled = true
-	preview_label.fit_content = true
-	preview_label.scroll_active = false
-	preview_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	preview_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	preview_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	preview_label.add_theme_color_override("default_color", COLOR_TEXT)
-	preview_label.add_theme_font_size_override("normal_font_size", 15)
-	target_parent.add_child(preview_label)
-	if insert_index >= 0:
-		target_parent.move_child(preview_label, min(insert_index, target_parent.get_child_count() - 1))
-	_trade_basket_savvy_preview_label = preview_label
-	return preview_label
-
-func _trade_basket_savvy_preview_bbcode() -> String:
-	var total: float = 0.0
-	if not _last_trade_basket_savvy_preview.is_empty():
-		total = float(_last_trade_basket_savvy_preview.get("total_prestige", 0.0))
-	var preview_text: String = "[b]Savvy Trade Prestige if accepted[/b]: "
-	if total > 0.001:
-		preview_text += "[color=#7AF09D][b]+" + _format_float(total) + "[/b][/color]"
-		var positive_lines: Array = _last_trade_basket_savvy_preview.get("positive_lines", []) as Array
-		if not positive_lines.is_empty():
-			var line_parts: Array[String] = []
-			for line_variant: Variant in positive_lines:
-				if line_parts.size() >= 3:
-					break
-				line_parts.append(String(line_variant))
-			preview_text += "\n[color=#CDEFD5]" + "; ".join(line_parts) + "[/color]"
-	else:
-		preview_text += "[color=#9AA69B]0[/color]"
-		if not _last_trade_basket_savvy_lines.is_empty():
-			preview_text += "\n[color=#9AA69B]No selected good is currently being bought below base value or sold above base value.[/color]"
-		else:
-			preview_text += "\n[color=#9AA69B]Move a trade slider to preview market-skill Prestige.[/color]"
-	return preview_text
-
-func _strip_trade_basket_savvy_from_summary_label() -> void:
-	var trade_summary: RichTextLabel = _trade_basket_summary_label()
-	if trade_summary == null:
-		return
-	var marker: String = "\n\n[b]Savvy Trade Prestige[/b]:"
-	var marker_index: int = trade_summary.text.find(marker)
-	if marker_index >= 0:
-		trade_summary.text = trade_summary.text.substr(0, marker_index)
-
-func _update_trade_basket_savvy_summary_display() -> void:
-	if _active_trade_basket_view == null:
-		return
-	_strip_trade_basket_savvy_from_summary_label()
-	var preview_label: RichTextLabel = _ensure_trade_basket_savvy_preview_label()
-	if preview_label == null:
-		return
-	preview_label.text = _trade_basket_savvy_preview_bbcode()
-	preview_label.visible = true
+	_market_controller().call("show_market_view_with_context", _make_ui_screen_context())
 
 func _build_market_overview() -> void:
-	var goods: Array[Dictionary] = _market_goods()
-	if goods.is_empty():
-		_add_notification("No market data is connected yet.")
-		return
-
-	var crisis_goods: Array[String] = []
-	var shortage_goods: Array[String] = []
-	var tight_goods: Array[String] = []
-	var abundant_goods: Array[String] = []
-	var high_value_goods: Array[String] = []
-	var low_value_goods: Array[String] = []
-	var falling_goods: Array[String] = []
-	var rising_goods: Array[String] = []
-
-	for good: Dictionary in goods:
-		var name: String = String(good.get("name", "Good"))
-		var label: String = String(good.get("label", "Unknown"))
-		var trend: String = String(good.get("trend", "Stable"))
-		var current_value: float = float(good.get("current_value", good.get("projected_value", 0.0)))
-		var base_value: float = float(good.get("base_value", 1.0))
-		var net_change: float = float(good.get("village_net_change", 0.0))
-
-		match label:
-			"Crisis":
-				crisis_goods.append(name)
-			"Shortage":
-				shortage_goods.append(name)
-			"Tight":
-				tight_goods.append(name)
-			"Abundant":
-				abundant_goods.append(name)
-
-		if base_value > 0.0 and current_value >= base_value * 1.35:
-			high_value_goods.append(name + " " + _format_float(current_value))
-		elif base_value > 0.0 and current_value <= base_value * 0.75:
-			low_value_goods.append(name + " " + _format_float(current_value))
-
-		if net_change < -0.01 or trend == "Falling" or trend == "Falling fast":
-			falling_goods.append(name + " " + _format_float(net_change))
-		elif net_change > 0.01 or trend == "Rising" or trend == "Rising fast":
-			rising_goods.append(name + " +" + _format_float(net_change))
-
-	_add_notification("Overview is the quick pressure read. Use Goods for the full good-by-good ledger and click a good for its supply, demand and price detail.")
-	_add_notification("Market pressure: " + _market_group_summary(crisis_goods, "Crisis", shortage_goods, "Shortage", tight_goods, "Tight"))
-	if not high_value_goods.is_empty():
-		_add_notification("Best sale/value pressure: " + _patch_join_limited(high_value_goods, 4) + ".")
-	else:
-		_add_notification("No obvious high-value sale pressure yet.")
-	if not falling_goods.is_empty():
-		_add_notification("Draining goods: " + _patch_join_limited(falling_goods, 5) + ".")
-	else:
-		_add_notification("No major market drains currently visible.")
-	if not rising_goods.is_empty():
-		_add_notification("Recovering/supplied goods: " + _patch_join_limited(rising_goods, 5) + ".")
-	elif not abundant_goods.is_empty():
-		_add_notification("Abundant goods: " + _patch_join_limited(abundant_goods, 5) + ".")
-	if not low_value_goods.is_empty():
-		_add_notification("Cheap buying opportunities: " + _patch_join_limited(low_value_goods, 4) + ".")
+	_market_controller().call("build_market_overview_with_context", _make_ui_screen_context())
 
 func _build_market_trade_summary() -> void:
-	_add_notification("Trade Basket is a barter interface. Drag a good left to sell estate free stock, or right to buy from the market.")
-	_add_notification("Accept Trade is enabled only when sold value covers bought value. Positive surplus is lost as barter inefficiency; it is not stored as Wealth or credit.")
-	_add_notification("Economic Prestige now comes from savvy trade only: selling above base value or buying below base value. No passive surplus, maize stockpile or production-output Prestige is granted.")
-	if not _last_trade_basket_savvy_preview.is_empty():
-		_add_notification(String(_last_trade_basket_savvy_preview.get("headline", "No savvy trade Prestige.")))
-	var state: Node = _state()
-	if state != null and state.has_method("get_economic_prestige_summary"):
-		var economic: Dictionary = state.call("get_economic_prestige_summary") as Dictionary
-		_add_notification("Savvy trade scale: " + _format_float(float(economic.get("scale", 0.25))) + " × value advantage. Recent savvy trades: " + str((economic.get("recent_savvy_trades", []) as Array).size()) + ".")
-	_add_notification("Sell caps use Storehouse free stock after reserves. Buy caps use current market stock.")
-	_add_notification("This connects Storehouse and Market directly without creating a currency resource.")
+	_market_controller().call("build_market_trade_summary_with_context", _make_ui_screen_context())
 
 func _build_market_rivals_summary() -> void:
-	var goods: Array[Dictionary] = _market_goods()
-	if goods.is_empty():
-		_add_notification("No market data is connected yet.")
-		return
-	_add_notification("Rival Procurement is a dashboard, not a duplicate goods ledger. Use it to read which goods each rival is likely to pressure once proper Rival AI is connected.")
-	_add_notification(_rival_pressure_line("War Rival", ["obsidian", "weapons", "armour", "cloth", "tools", "captives"], goods, "Wants Flower War readiness, warrior equipment and captive-taking capacity."))
-	_add_notification(_rival_pressure_line("Cunning Rival", ["tools", "cloth", "wood", "cacao", "cotton"], goods, "Wants practical bottlenecks, flexible build materials and market leverage."))
-	_add_notification(_rival_pressure_line("Diplomatic Rival", ["cacao", "fine_textiles", "cloth", "cotton", "tools"], goods, "Wants palace-facing goods, legitimacy goods and tribute-ready luxury supply."))
-
-func _rival_pressure_line(rival_name: String, target_ids: Array[String], goods: Array[Dictionary], motive: String) -> String:
-	var pressure_goods: Array[String] = []
-	var quiet_goods: Array[String] = []
-	for good: Dictionary in goods:
-		var good_id: String = String(good.get("id", ""))
-		if not target_ids.has(good_id):
-			continue
-		var name: String = String(good.get("name", good_id.capitalize()))
-		var label: String = String(good.get("label", "Unknown"))
-		var trend: String = String(good.get("trend", "Stable"))
-		var net_change: float = float(good.get("village_net_change", 0.0))
-		if label == "Crisis" or label == "Shortage" or label == "Tight" or trend == "Falling" or trend == "Falling fast" or net_change < -0.01:
-			pressure_goods.append(name + " (" + label + ", " + _format_float(net_change) + ")")
-		else:
-			quiet_goods.append(name)
-	var line: String = rival_name + ": " + motive
-	if not pressure_goods.is_empty():
-		line += " Current pressure: " + _patch_join_limited(pressure_goods, 4) + "."
-	elif not quiet_goods.is_empty():
-		line += " Watched goods: " + _patch_join_limited(quiet_goods, 5) + "."
-	else:
-		line += " Target goods are not present in the market data yet."
-	return line
-
-func _market_group_summary(first: Array[String], first_label: String, second: Array[String], second_label: String, third: Array[String], third_label: String) -> String:
-	var parts: Array[String] = []
-	if not first.is_empty(): parts.append(first_label + " — " + _patch_join_limited(first, 4))
-	if not second.is_empty(): parts.append(second_label + " — " + _patch_join_limited(second, 4))
-	if not third.is_empty(): parts.append(third_label + " — " + _patch_join_limited(third, 4))
-	if parts.is_empty():
-		return "no crisis, shortage or tight goods visible."
-	return "; ".join(parts) + "."
-
-func _patch_join_limited(values: Array[String], max_items: int) -> String:
-	var parts: Array[String] = []
-	for value: String in values:
-		if parts.size() >= max_items:
-			break
-		parts.append(value)
-	var text: String = ", ".join(parts)
-	if values.size() > max_items:
-		text += ", +" + str(values.size() - max_items) + " more"
-	return text
+	_market_controller().call("build_market_rivals_summary_with_context", _make_ui_screen_context())
 
 # -----------------------------------------------------------------------------
 # Shrine / Religion UI bridge — extracted controller
@@ -1186,78 +867,22 @@ func _build_calendar_report_detail_text(report_id: String) -> String:
 func _build_nemontemi_report_text(year_value: int) -> String:
 	return String(_calendar_controller().call("build_nemontemi_report_text", year_value))
 
-# Turn Resolution Pipeline v1
+# Turn Runtime Bridge
 # -----------------------------------------------------------------------------
+# Patch 8F: the UI no longer owns Veintena/Nemontemi resolution. The advance
+# button delegates to the runtime state, which delegates to TurnResolutionSystem.
 
 func _on_advance_turn_pressed() -> void:
 	var state: Node = _state()
 	if state == null:
 		return
-	if _calendar_period == "nemontemi":
-		_resolve_nemontemi(state)
-		_refresh_all()
-		return
-	_resolve_ordinary_veintena(state)
-	_refresh_all()
-
-func _resolve_ordinary_veintena(state: Node) -> void:
-	if not bool(state.get("initialized")) and state.has_method("new_game"):
-		state.call("new_game")
-	var current_veintena: int = _calendar_current_veintena()
-	state.set("current_veintena", current_veintena)
-	var report: Array = []
-	state.set("last_report", report)
-	report.append("Veintena " + str(current_veintena) + " resolves through the Turn Resolution Pipeline.")
-	report.append("1. Omens & Events: placeholder only; no full event pool connected yet.")
-	report.append("2. Population upkeep resolves.")
-	if state.has_method("_pay_population_upkeep"):
-		state.call("_pay_population_upkeep")
-	report.append("3. Housing upkeep resolves.")
-	if state.has_method("_pay_housing_maintenance"):
-		state.call("_pay_housing_maintenance")
-	report.append("4. Building input consumption and production resolve.")
-	if state.has_method("_operate_buildings"):
-		state.call("_operate_buildings")
-	report.append("5. Market recalculation: market values refresh from current stock, demand and projected pressure after state change.")
-	report.append("6. Calendar and religion: " + _current_festival_text() + ".")
-	_apply_divine_favour_decay(report, RELIGION_NORMAL_DECAY)
-	_reset_religion_veintena_capacity()
-	report.append("7. Rival AI hook: not active yet.")
-	report.append("8. Flower Wars hook: not active yet.")
-	report.append("9. Palace hook: not active yet.")
-	report.append("10. Prestige hook: not active yet.")
-	if current_veintena >= 18:
-		report.append("11. Report summary: final ordinary Veintena complete. Now entering Nemontemi for Ritual Year " + str(_ritual_year) + ".")
-		_calendar_period = "nemontemi"
-		state.set("current_veintena", 18)
+	if state.has_method("advance_turn"):
+		state.call("advance_turn")
+	elif state.has_method("advance_veintena"):
+		state.call("advance_veintena")
 	else:
-		var next_veintena: int = current_veintena + 1
-		report.append("11. Report summary: now entering Veintena " + str(next_veintena) + ".")
-		state.set("current_veintena", next_veintena)
-	state.set("last_report", report)
-	_refresh_calendar_advance_button_label()
-	if state.has_signal("turn_advanced"):
-		state.emit_signal("turn_advanced", report)
-	if state.has_signal("state_changed"):
-		state.emit_signal("state_changed")
-
-func _resolve_nemontemi(state: Node) -> void:
-	var report: Array = []
-	report.append("Nemontemi reckoning resolves for Ritual Year " + str(_ritual_year) + ".")
-	report.append("Nemontemi restrictions hook: no Flower Wars; construction, market activity and productivity restrictions can be connected later.")
-	_apply_divine_favour_decay(report, RELIGION_NEMONTEMI_DECAY)
-	_reset_religion_veintena_capacity()
-	report.append("Annual review hooks: prestige, palace recognition, rival comparison, Flower War results and offering history will be connected later.")
-	_ritual_year += 1
-	_calendar_period = "veintena"
-	state.set("current_veintena", 1)
-	report.append("Ritual Year " + str(_ritual_year) + " begins at Veintena 1.")
-	state.set("last_report", report)
-	_refresh_calendar_advance_button_label()
-	if state.has_signal("turn_advanced"):
-		state.emit_signal("turn_advanced", report)
-	if state.has_signal("state_changed"):
-		state.emit_signal("state_changed")
+		push_warning("No runtime turn-advance method found on state.")
+	_refresh_all()
 
 func _refresh_calendar_advance_button_label() -> void:
 	_calendar_controller().call("refresh_calendar_advance_button_label", self)

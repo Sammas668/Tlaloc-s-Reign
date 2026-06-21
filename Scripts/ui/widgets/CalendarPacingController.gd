@@ -100,15 +100,13 @@ func nemontemi_card_data(year_value: int, current: bool) -> Dictionary:
 	return {"period": "nemontemi", "year": year_value, "veintena": 0, "name": "Nemontemi", "god": "Nemontemi", "detail": "Year review", "current": current, "report_id": report_id, "button_text": prefix + "\nY" + str(year_value) + "\nNemontemi\nUnlucky Days", "tooltip": "Nemontemi — five unlucky days, annual reckoning, restrictions, omens, review and next-year setup."}
 
 func calendar_current_veintena(host: Node) -> int:
-	var state: Node = null
-	if host != null and host.has_method("_state"):
-		var raw_state: Variant = host.call("_state")
-		if raw_state is Node:
-			state = raw_state as Node
+	var state: Node = _host_state(host)
 	if state != null and state.has_method("get_current_veintena"):
 		return clampi(int(state.call("get_current_veintena")), 1, 18)
 	if state != null:
-		return clampi(int(state.get("current_veintena")), 1, 18)
+		var raw: Variant = state.get("current_veintena")
+		if raw != null:
+			return clampi(int(raw), 1, 18)
 	return 1
 
 func calendar_veintena_name(host: Node, veintena_number: int) -> String:
@@ -332,12 +330,45 @@ func _make_panel_style(host: Node, bg_colour: Color, border_colour: Color, radiu
 	style.set_corner_radius_all(radius)
 	return style
 
+func _host_state(host: Node) -> Node:
+	if host != null and host.has_method("_state"):
+		var raw_state: Variant = host.call("_state")
+		if raw_state is Node:
+			return raw_state as Node
+	return null
+
 func _calendar_period(host: Node) -> String:
-	if host != null:
-		return String(host.get("_calendar_period"))
+	var state: Node = _host_state(host)
+	if state != null:
+		# Patch 8G: CampaignState is the calendar authority. Prefer the
+		# TRGameState facade snapshot before metadata or legacy mirrors.
+		if state.has_method("get_campaign_state_snapshot"):
+			var snapshot_raw: Variant = state.call("get_campaign_state_snapshot")
+			if snapshot_raw is RefCounted and (snapshot_raw as RefCounted).has_method("get_calendar_period_value"):
+				return String((snapshot_raw as RefCounted).call("get_calendar_period_value"))
+		if state.has_method("get_calendar_period"):
+			return String(state.call("get_calendar_period"))
+		if state.has_meta("calendar_period"):
+			return String(state.get_meta("calendar_period"))
+		var raw: Variant = state.get("calendar_period")
+		if raw != null:
+			return String(raw)
 	return "veintena"
 
 func _ritual_year(host: Node) -> int:
-	if host != null:
-		return max(1, int(host.get("_ritual_year")))
+	var state: Node = _host_state(host)
+	if state != null:
+		# Patch 8G: CampaignState is the ritual-year authority. Prefer the
+		# TRGameState facade snapshot before metadata or legacy mirrors.
+		if state.has_method("get_campaign_state_snapshot"):
+			var snapshot_raw: Variant = state.call("get_campaign_state_snapshot")
+			if snapshot_raw is RefCounted and (snapshot_raw as RefCounted).has_method("get_ritual_year_value"):
+				return max(1, int((snapshot_raw as RefCounted).call("get_ritual_year_value")))
+		if state.has_method("get_ritual_year"):
+			return max(1, int(state.call("get_ritual_year")))
+		if state.has_meta("ritual_year"):
+			return max(1, int(state.get_meta("ritual_year")))
+		var raw: Variant = state.get("ritual_year")
+		if raw != null:
+			return max(1, int(raw))
 	return 1

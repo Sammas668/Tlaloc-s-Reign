@@ -136,7 +136,9 @@ func _save_manager() -> Node:
 
 
 func _game_state() -> Node:
-	for path in ["/root/TRGameState", "/root/GameState", "/root/Game"]:
+	# Patch 8I: TRGameState is the Prototype 0 runtime facade.
+	# The old /root/GameState autoload has been removed to avoid source-of-truth ambiguity.
+	for path in ["/root/TRGameState", "/root/Game"]:
 		var node := get_node_or_null(path)
 		if node != null:
 			return node

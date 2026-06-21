@@ -5,13 +5,13 @@
 # Extracted Shrines / Religion UI controller.
 # GameScreenMarketOverviewPatch.gd remains the active screen coordinator.
 # This controller owns shrine main-view and shrine report-card composition, but
-# mutable religion state is now obtained from the runtime state via
-# UIScreenContext / TRGameState metadata bridge instead of being stored here.
+# mutable religion state is now obtained from runtime/CampaignState via
+# UIScreenContext. Runtime metadata remains only as an old-file fallback.
 extends RefCounted
 
 const SHRINE_RITUAL_RULES_SCRIPT: Script = preload("res://Scripts/Systems/ShrineRitualRules.gd")
 const RELIGION_STATE_SYSTEM_SCRIPT: Script = preload("res://Scripts/Systems/ReligionStateSystem.gd")
-const RELIGION_STATE_META_KEY: String = "tr_religion_state_system"
+const RELIGION_STATE_META_KEY: String = "tr_religion_state_system" # fallback only
 
 const COLOR_TEXT: Color = Color(0.92, 0.88, 0.78, 1.0)
 const COLOR_MUTED: Color = Color(0.70, 0.78, 0.74, 1.0)
@@ -121,11 +121,27 @@ func _apply_screen_context(context: RefCounted) -> void:
 # -----------------------------------------------------------------------------
 
 func _sync_calendar_from_host() -> void:
-	if host == null:
-		return
-	var period_variant: Variant = host.get("_calendar_period")
-	if period_variant != null:
-		_calendar_period = String(period_variant)
+	var state: Node = _state()
+	if state != null:
+		# Patch 8G: CampaignState is the calendar authority. Prefer the
+		# TRGameState facade snapshot before temporary metadata mirrors.
+		if state.has_method("get_campaign_state_snapshot"):
+			var snapshot_raw: Variant = state.call("get_campaign_state_snapshot")
+			if snapshot_raw is RefCounted and (snapshot_raw as RefCounted).has_method("get_calendar_period_value"):
+				_calendar_period = String((snapshot_raw as RefCounted).call("get_calendar_period_value"))
+				return
+		if state.has_method("get_calendar_period"):
+			_calendar_period = String(state.call("get_calendar_period"))
+			return
+		if state.has_meta("calendar_period"):
+			_calendar_period = String(state.get_meta("calendar_period"))
+			return
+		var state_period: Variant = state.get("calendar_period")
+		if state_period != null:
+			_calendar_period = String(state_period)
+			return
+	# Wrapper-owned _calendar_period was removed in Patch 8F. Keep no host fallback
+	# here so Shrine festival focus does not silently depend on UI-owned state.
 
 func _state() -> Node:
 	if host != null and host.has_method("_state"):
@@ -193,10 +209,9 @@ func _calendar_god_for_veintena(veintena_number: int) -> String:
 # -----------------------------------------------------------------------------
 
 func _religion_state() -> RefCounted:
-	# Patch 8D: the Shrine UI no longer owns religion state. Prefer the shared UI
-	# context, which stores the ReligionStateSystem on the runtime state. Legacy
-	# direct calls still attach the system to TRGameState metadata rather than a
-	# controller field.
+	# Patch 8H: the Shrine UI does not own religion state. Prefer the shared UI
+	# context, which returns a CampaignState-backed ReligionStateSystem. Metadata is
+	# retained only as fallback for older local files.
 	if screen_context != null and screen_context.has_method("religion_state_system"):
 		var context_raw: Variant = screen_context.call("religion_state_system")
 		if context_raw is RefCounted:
@@ -211,6 +226,13 @@ func _religion_state() -> RefCounted:
 			var private_raw: Variant = runtime_state.call("_get_religion_state_system")
 			if private_raw is RefCounted:
 				return private_raw as RefCounted
+		if runtime_state.has_method("get_campaign_state_snapshot"):
+			var snapshot_raw: Variant = runtime_state.call("get_campaign_state_snapshot")
+			if snapshot_raw is RefCounted:
+				var campaign_backed: RefCounted = RELIGION_STATE_SYSTEM_SCRIPT.new() as RefCounted
+				if campaign_backed.has_method("bind_campaign_state"):
+					campaign_backed.call("bind_campaign_state", snapshot_raw as RefCounted, GOD_IDS)
+				return campaign_backed
 		if runtime_state.has_meta(RELIGION_STATE_META_KEY):
 			var meta_raw: Variant = runtime_state.get_meta(RELIGION_STATE_META_KEY)
 			if meta_raw is RefCounted:
@@ -1320,7 +1342,10 @@ func _format_religion_amount(value: float) -> String:
 
 func _emit_religion_state_changed() -> void:
 	var state: Node = _state()
-	if state != null and state.has_signal("state_changed"):
-		state.emit_signal("state_changed")
+	if state != null:
+		if state.has_method("_mirror_religion_state_from_campaign_state_to_legacy"):
+			state.call("_mirror_religion_state_from_campaign_state_to_legacy")
+		if state.has_signal("state_changed"):
+			state.emit_signal("state_changed")
 
 

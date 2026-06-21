@@ -68,9 +68,10 @@ var rival_prestige: Dictionary = {}
 var prestige_history: Array[Dictionary] = []
 var sacrifice_prestige_records: Array[Dictionary] = []
 
-# Patch 8E scaffold: serialisable religion-state container.
-# Patch 8D still stores the active ReligionStateSystem object through the runtime
-# bridge. This dictionary is the future save/load-facing home for that state.
+# Patch 8H: serialisable religion-state container.
+# ReligionStateSystem instances bind to this dictionary and write back after
+# mutation. This is now the save/load-facing home for shrine levels, divine
+# favour, ritual capacity and recent offering reports.
 var religion_state: Dictionary = {}
 
 # -----------------------------------------------------------------------------
@@ -333,7 +334,7 @@ func apply_to_game_state(game_state: Node) -> void:
 	game_state.set("calendar_period", calendar_period)
 	game_state.set("ritual_year", ritual_year)
 	game_state.set("last_turn_summary", _duplicate_dictionary(last_turn_summary))
-	game_state.set("religion_state", _duplicate_dictionary(religion_state))
+	mirror_religion_state_to_game_state(game_state)
 	game_state.set("rival_houses", _duplicate_dictionary(rival_houses))
 	game_state.set("rival_stockpiles", _duplicate_dictionary(rival_stockpiles))
 	game_state.set("rival_build_progress", _duplicate_dictionary(rival_build_progress))
@@ -665,6 +666,10 @@ func get_religion_state_copy() -> Dictionary:
 func set_religion_state(value: Dictionary) -> void:
 	religion_state = _duplicate_dictionary(value)
 
+func merge_religion_state(value: Dictionary) -> void:
+	for key_variant: Variant in value.keys():
+		religion_state[String(key_variant)] = value[key_variant]
+
 func clear_religion_state() -> void:
 	religion_state.clear()
 
@@ -677,7 +682,10 @@ func get_religion_value(key: String, default_value: Variant = null) -> Variant:
 func mirror_religion_state_to_game_state(game_state: Node) -> void:
 	if game_state == null:
 		return
-	game_state.set("religion_state", _duplicate_dictionary(religion_state))
+	var copy: Dictionary = _duplicate_dictionary(religion_state)
+	game_state.set_meta("religion_state", copy)
+	if game_state.get("religion_state") != null:
+		game_state.set("religion_state", copy)
 
 # -----------------------------------------------------------------------------
 # Population / buildings / housing state access helpers
@@ -971,6 +979,8 @@ func apply_save_dictionary(data: Dictionary) -> void:
 func _node_get_default(node: Node, property_name: String, default_value: Variant) -> Variant:
 	if node == null:
 		return default_value
+	if node.has_meta(property_name):
+		return node.get_meta(property_name)
 	var value: Variant = node.get(property_name)
 	if value == null:
 		return default_value

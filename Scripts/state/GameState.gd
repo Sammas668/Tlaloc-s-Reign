@@ -2,116 +2,108 @@
 # Godot 4.x
 # Project path: res://Scripts/state/GameState.gd
 #
-# Runtime owner for the campaign.
-# GameState owns live state; StaticData owns definitions; Systems own rules.
+# PATCH 8I — LEGACY ONLY.
+#
+# This file is no longer an active autoload.
+# TRGameState is the Prototype 0 runtime facade.
+# CampaignState is the live campaign/save-state data owner.
+#
+# Do not add new gameplay rules here.
+# Do not target this file in future Prototype 0 patches.
+#
+# The small forwarding helpers below exist only so any old scene/script that
+# accidentally instantiates this legacy node fails softly and redirects to
+# /root/TRGameState when possible.
+
 extends Node
 
 signal turn_advanced(current_veintena: int, ritual_year: int)
 signal state_rebuilt()
 
-var static_data: StaticData
-var economy_system: EconomySystem
-var market_system: MarketSystem
-var turn_system: TurnSystem
-
-var ritual_year: int = 1
-var current_veintena: int = 1
-var turn_count: int = 0
-
-var estate_stockpiles: Dictionary = {}
-var market_stockpiles: Dictionary = {}
 
 func _ready() -> void:
-	_bootstrap_systems()
-	reset_runtime_state()
+	push_warning("Legacy GameState.gd was instantiated. Prototype 0 should use /root/TRGameState instead.")
+
+
+func _tr_game_state() -> Node:
+	return get_node_or_null("/root/TRGameState")
+
+
+func _forward(method_name: String, args: Array = []) -> Variant:
+	var runtime_state: Node = _tr_game_state()
+	if runtime_state != null and runtime_state.has_method(method_name):
+		return runtime_state.callv(method_name, args)
+	push_warning("Legacy GameState could not forward method: " + method_name)
+	return null
+
 
 func new_game() -> void:
-	reset_runtime_state()
+	_forward("new_game")
+
 
 func reset() -> void:
-	reset_runtime_state()
+	_forward("new_game")
+
 
 func reset_runtime_state() -> void:
-	if static_data == null:
-		_bootstrap_systems()
+	_forward("new_game")
 
-	ritual_year = 1
-	current_veintena = 1
-	turn_count = 0
-
-	estate_stockpiles = _create_estate_stockpiles()
-	market_stockpiles = _create_market_stockpiles()
-
-	rebuild_current_flows()
-	emit_signal("state_rebuilt")
-
-func rebuild_current_flows() -> void:
-	if economy_system == null or static_data == null:
-		return
-	economy_system.rebuild_estate_flows(estate_stockpiles, static_data.estate_flow_sources)
-	emit_signal("state_rebuilt")
 
 func advance_placeholder_turn() -> void:
-	if turn_system == null:
-		return
-	turn_system.advance_veintena(self)
-	emit_signal("turn_advanced", current_veintena, ritual_year)
+	var runtime_state: Node = _tr_game_state()
+	if runtime_state != null:
+		if runtime_state.has_method("advance_turn"):
+			runtime_state.call("advance_turn")
+		elif runtime_state.has_method("advance_veintena"):
+			runtime_state.call("advance_veintena")
+		var current: int = 1
+		var year: int = 1
+		if runtime_state.has_method("get_current_veintena"):
+			current = int(runtime_state.call("get_current_veintena"))
+		if runtime_state.has_method("get_ritual_year"):
+			year = int(runtime_state.call("get_ritual_year"))
+		emit_signal("turn_advanced", current, year)
 	emit_signal("state_rebuilt")
 
+
 func get_estate_stockpile_rows() -> Array[Dictionary]:
-	rebuild_current_flows()
-	if economy_system == null or static_data == null:
-		return []
-	return economy_system.get_estate_stockpile_rows(estate_stockpiles, static_data)
+	var result: Variant = _forward("get_storehouse_goods")
+	if result is Array:
+		var output: Array[Dictionary] = []
+		for item: Variant in result:
+			if item is Dictionary:
+				output.append((item as Dictionary).duplicate(true))
+		return output
+	return []
+
 
 func get_market_rows() -> Array[Dictionary]:
-	if market_system == null or static_data == null:
-		return []
-	return market_system.get_market_rows(market_stockpiles, static_data.market_start, static_data)
+	var result: Variant = _forward("get_market_goods")
+	if result is Array:
+		var output: Array[Dictionary] = []
+		for item: Variant in result:
+			if item is Dictionary:
+				output.append((item as Dictionary).duplicate(true))
+		return output
+	return []
+
 
 func get_resource_definition(good_id: String) -> Dictionary:
-	if static_data == null:
-		return {}
-	return static_data.get_resource_definition(good_id)
+	var runtime_state: Node = _tr_game_state()
+	if runtime_state != null:
+		var resources_variant: Variant = runtime_state.get("resources")
+		if resources_variant is Dictionary:
+			var resources: Dictionary = resources_variant as Dictionary
+			if resources.has(good_id) and resources[good_id] is Dictionary:
+				return (resources[good_id] as Dictionary).duplicate(true)
+	return {}
 
-func get_stockpile(good_id: String) -> Stockpile:
-	if estate_stockpiles.has(good_id):
-		return estate_stockpiles[good_id] as Stockpile
+
+func get_stockpile(_good_id: String) -> Variant:
+	push_warning("Legacy GameState.get_stockpile() is not supported. Use TRGameState/CampaignState APIs.")
 	return null
 
-func get_market_stockpile(good_id: String) -> Stockpile:
-	if market_stockpiles.has(good_id):
-		return market_stockpiles[good_id] as Stockpile
+
+func get_market_stockpile(_good_id: String) -> Variant:
+	push_warning("Legacy GameState.get_market_stockpile() is not supported. Use TRGameState/CampaignState APIs.")
 	return null
-
-func _bootstrap_systems() -> void:
-	static_data = StaticData.new()
-	var loaded: bool = static_data.load_all()
-	if not loaded:
-		for error_text: String in static_data.load_errors:
-			push_error(error_text)
-
-	economy_system = EconomySystem.new()
-	market_system = MarketSystem.new()
-	turn_system = TurnSystem.new()
-
-func _create_estate_stockpiles() -> Dictionary:
-	var output: Dictionary = {}
-	var start_stockpiles: Dictionary = static_data.estate_start.get("stockpiles", {}) as Dictionary
-
-	for good_id: String in static_data.resource_order:
-		var stored: float = float(start_stockpiles.get(good_id, 0.0))
-		output[good_id] = Stockpile.new(good_id, stored)
-
-	return output
-
-func _create_market_stockpiles() -> Dictionary:
-	var output: Dictionary = {}
-	var market_data: Dictionary = static_data.market_start.get("stockpiles", {}) as Dictionary
-
-	for good_id: String in static_data.market_order:
-		var row: Dictionary = market_data.get(good_id, {}) as Dictionary
-		var stock: float = float(row.get("stock", 0.0))
-		output[good_id] = Stockpile.new(good_id, stock)
-
-	return output
