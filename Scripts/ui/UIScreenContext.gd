@@ -11,14 +11,12 @@ class_name UIScreenContext
 extends RefCounted
 
 const RELIGION_STATE_SYSTEM_SCRIPT: Script = preload("res://Scripts/Systems/ReligionStateSystem.gd")
-const RELIGION_STATE_META_KEY: String = "tr_religion_state_system" # fallback only
 
 var host: Node = null
 var content_root: Control = null
 var content_text: Control = null
 var dynamic_view_host: VBoxContainer = null
 var notification_list: VBoxContainer = null
-var _fallback_religion_state_system: RefCounted = null
 
 func setup(host_node: Node, content_root_node: Control, content_text_node: Control, dynamic_view_host_node: VBoxContainer, notification_list_node: VBoxContainer) -> UIScreenContext:
 	host = host_node
@@ -36,8 +34,9 @@ func state() -> Node:
 	return null
 
 func religion_state_system() -> RefCounted:
-	# Prefer a runtime/CampaignState-backed religion system. Runtime
-	# metadata is kept only as a last-resort fallback for older local files.
+	# Prefer runtime/CampaignState-backed religion state only. 8O5D removed
+	# UI-owned religion-state paths so religion cannot silently live
+	# outside CampaignState.
 	var runtime_state: Node = state()
 	if runtime_state != null:
 		if runtime_state.has_method("get_religion_state_system"):
@@ -55,17 +54,7 @@ func religion_state_system() -> RefCounted:
 				if campaign_backed.has_method("bind_campaign_state"):
 					campaign_backed.call("bind_campaign_state", snapshot_raw as RefCounted, ["tlaloc", "huitzilopochtli", "tezcatlipoca", "quetzalcoatl"])
 				return campaign_backed
-		if runtime_state.has_meta(RELIGION_STATE_META_KEY):
-			var meta_raw: Variant = runtime_state.get_meta(RELIGION_STATE_META_KEY)
-			if meta_raw is RefCounted:
-				return meta_raw as RefCounted
-		var runtime_owned: RefCounted = RELIGION_STATE_SYSTEM_SCRIPT.new() as RefCounted
-		runtime_state.set_meta(RELIGION_STATE_META_KEY, runtime_owned)
-		return runtime_owned
-
-	if _fallback_religion_state_system == null:
-		_fallback_religion_state_system = RELIGION_STATE_SYSTEM_SCRIPT.new() as RefCounted
-	return _fallback_religion_state_system
+	return null
 
 func current_focus_id() -> String:
 	if host != null and host.has_method("_current_focus_id"):

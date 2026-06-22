@@ -2412,10 +2412,6 @@ func _warbands(state: Node) -> Dictionary:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("get_warbands_copy"):
 		return runtime_state.call("get_warbands_copy") as Dictionary
-	if state != null:
-		var value: Variant = state.get("warbands")
-		if value is Dictionary:
-			return (value as Dictionary).duplicate(true)
 	return {}
 
 func _set_warbands(state: Node, warbands: Dictionary) -> void:
@@ -2424,10 +2420,6 @@ func _set_warbands(state: Node, warbands: Dictionary) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("set_warbands_values"):
 		runtime_state.call("set_warbands_values", warbands)
-		if state.has_method("_mirror_warband_flower_war_compatibility_from_campaign_state"):
-			state.call("_mirror_warband_flower_war_compatibility_from_campaign_state")
-		return
-	state.set("warbands", warbands)
 
 func _ensure_warbands(state: Node) -> void:
 	ensure_warband_state(state)
@@ -2492,14 +2484,7 @@ func _append_report(state: Node, line: String) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("append_report_line"):
 		runtime_state.call("append_report_line", line)
-		if state != null and state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
-			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 		return
-	var report_variant: Variant = state.get("last_report") if state != null else []
-	if report_variant is Array:
-		var report: Array = report_variant as Array
-		report.append(line)
-		state.set("last_report", report)
 
 func _emit_state_changed(state: Node) -> void:
 	if state != null and state.has_signal("state_changed"):

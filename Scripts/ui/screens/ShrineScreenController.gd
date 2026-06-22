@@ -6,12 +6,11 @@
 # GameScreenMarketOverviewPatch.gd remains the active screen coordinator.
 # This controller owns shrine main-view and shrine report-card composition, but
 # mutable religion state is now obtained from runtime/CampaignState via
-# UIScreenContext. Runtime metadata remains only as an compatibility fallback.
+# UIScreenContext. UI-owned religion-state paths have been removed.
 extends RefCounted
 
 const SHRINE_RITUAL_RULES_SCRIPT: Script = preload("res://Scripts/Systems/ShrineRitualRules.gd")
 const RELIGION_STATE_SYSTEM_SCRIPT: Script = preload("res://Scripts/Systems/ReligionStateSystem.gd")
-const RELIGION_STATE_META_KEY: String = "tr_religion_state_system" # fallback only
 
 const COLOR_TEXT: Color = Color(0.92, 0.88, 0.78, 1.0)
 const COLOR_MUTED: Color = Color(0.70, 0.78, 0.74, 1.0)
@@ -130,7 +129,7 @@ func _sync_calendar_from_host() -> void:
 	if state != null:
 		# CampaignState is the calendar authority. Prefer the public facade,
 		# then CampaignState snapshot/runtime access. Do not fall back to
-		# TRGameState compatibility mirror fields.
+		# TRGameState compatibility duplicate state fields.
 		if state.has_method("get_calendar_period"):
 			_calendar_period = String(state.call("get_calendar_period"))
 			return
@@ -183,8 +182,6 @@ func _add_stock(resource_id: String, amount: float) -> void:
 	var campaign: RefCounted = _campaign_state()
 	if campaign != null and campaign.has_method("add_estate_stock"):
 		campaign.call("add_estate_stock", resource_id, amount)
-		if runtime_state != null and runtime_state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
-			runtime_state.call("_mirror_stockpile_compatibility_from_campaign_state")
 
 func _active_population_for_group(group_id: String) -> int:
 	var runtime_state: Node = _state()
@@ -203,8 +200,6 @@ func _append_report_line(line: String) -> void:
 	var campaign: RefCounted = _campaign_state()
 	if campaign != null and campaign.has_method("append_report_line"):
 		campaign.call("append_report_line", line)
-		if runtime_state != null and runtime_state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
-			runtime_state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 
 func _current_focus_id() -> String:
 	if host != null and host.has_method("_current_focus_id"):
@@ -265,9 +260,9 @@ func _calendar_god_for_veintena(veintena_number: int) -> String:
 # -----------------------------------------------------------------------------
 
 func _religion_state() -> RefCounted:
-	# Patch 8H: the Shrine UI does not own religion state. Prefer the shared UI
-	# context, which returns a CampaignState-backed ReligionStateSystem. Metadata is
-	# retained only as fallback for older local files.
+	# Patch 8O5D: the Shrine UI does not own religion state. Prefer the shared UI
+	# context or runtime facade, both of which must resolve to CampaignState-backed
+	# ReligionStateSystem access. Do not use UI-owned religion state.
 	if screen_context != null and screen_context.has_method("religion_state_system"):
 		var context_raw: Variant = screen_context.call("religion_state_system")
 		if context_raw is RefCounted:
@@ -289,13 +284,6 @@ func _religion_state() -> RefCounted:
 				if campaign_backed.has_method("bind_campaign_state"):
 					campaign_backed.call("bind_campaign_state", snapshot_raw as RefCounted, GOD_IDS)
 				return campaign_backed
-		if runtime_state.has_meta(RELIGION_STATE_META_KEY):
-			var meta_raw: Variant = runtime_state.get_meta(RELIGION_STATE_META_KEY)
-			if meta_raw is RefCounted:
-				return meta_raw as RefCounted
-		var runtime_owned: RefCounted = RELIGION_STATE_SYSTEM_SCRIPT.new() as RefCounted
-		runtime_state.set_meta(RELIGION_STATE_META_KEY, runtime_owned)
-		return runtime_owned
 	return null
 
 func _ensure_religion_state() -> void:
@@ -1369,8 +1357,6 @@ func _format_religion_amount(value: float) -> String:
 func _emit_religion_state_changed() -> void:
 	var state: Node = _state()
 	if state != null:
-		if state.has_method("_mirror_religion_state_from_campaign_state_to_legacy"):
-			state.call("_mirror_religion_state_from_campaign_state_to_legacy")
 		if state.has_signal("state_changed"):
 			state.emit_signal("state_changed")
 

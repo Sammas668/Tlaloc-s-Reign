@@ -2,8 +2,9 @@
 # Godot 4.x
 # Project path: res://Scripts/Systems/FlowerWarSystem.gd
 #
-# Extracted Flower War rules slice.
-# TRGameState remains the live state owner during the architecture split.
+# Owns Flower War preview and resolution rules.
+# CampaignState is the live/save-state authority; TRGameState is only the
+# public runtime facade passed in by UI and other systems.
 class_name FlowerWarSystem
 extends RefCounted
 
@@ -348,6 +349,8 @@ func get_combined_attack_preview(state: Node, option_id: String, provisioning_id
 func can_launch_combined_attack(state: Node, warband_ids: Array, option_id: String = "minor", provisioning_id: String = "standard", all_warbands: bool = false) -> Dictionary:
 	if state == null:
 		return {"ok": false, "reason": "Campaign state is not connected."}
+	if not _campaign_state_connected(state):
+		return _campaign_state_error("Flower War launch", "attack")
 	if state.has_method("_ensure_warband_state"):
 		state.call("_ensure_warband_state")
 	if state.has_method("flower_war_palace_gate_passed") and not bool(state.call("flower_war_palace_gate_passed")):
@@ -384,6 +387,8 @@ func can_launch_combined_attack(state: Node, warband_ids: Array, option_id: Stri
 func launch_combined_attack(state: Node, warband_ids: Array, option_id: String = "minor", provisioning_id: String = "standard", all_warbands: bool = false) -> Dictionary:
 	if state == null:
 		return {"ok": false, "reason": "Campaign state is not connected."}
+	if not _campaign_state_connected(state):
+		return _campaign_state_error("Flower War launch", "attack")
 	var status: Dictionary = can_launch_combined_attack(state, warband_ids, option_id, provisioning_id, all_warbands)
 	if not bool(status.get("ok", false)):
 		var failed_report: Dictionary = {
@@ -545,6 +550,10 @@ func start_attack_event(state: Node, option_id: String = "standard", source_id: 
 	# Event-hook infrastructure only. This does not resolve a Flower War. It returns
 	# a standard payload that UI, rivals, calendar, palace or religion systems can
 	# use to open the attacking Flower War muster later.
+	if state == null:
+		return _campaign_state_error("Flower War attack event", "attack")
+	if not _campaign_state_connected(state):
+		return _campaign_state_error("Flower War attack event", "attack")
 	_ensure_warband_state(state)
 	if state != null and state.has_method("flower_war_palace_gate_passed") and not bool(state.call("flower_war_palace_gate_passed")):
 		var gate_text: String = String(state.call("flower_war_palace_gate_status_text")) if state.has_method("flower_war_palace_gate_status_text") else "Flower War palace gate blocks this attack."
@@ -583,6 +592,10 @@ func start_defence_event(state: Node, option_id: String = "standard", source_id:
 	# Event-hook infrastructure only. This does not resolve a Flower War. It returns
 	# a standard payload that UI, rivals, calendar, palace or religion systems can
 	# use to open the defensive Flower War strategy event later.
+	if state == null:
+		return _campaign_state_error("Flower War defence event", "defence")
+	if not _campaign_state_connected(state):
+		return _campaign_state_error("Flower War defence event", "defence")
 	_ensure_warband_state(state)
 	if not FLOWER_WAR_OPTIONS.has(option_id):
 		option_id = "standard"
@@ -646,7 +659,6 @@ func flower_war_participant_rows_for_ids(state: Node, selected_ids: Array[String
 			"combat_stats": stats
 		})
 	_set_state_dictionary(state, "warbands", warbands)
-	_mirror_warband_state(state)
 	return participants
 
 func selected_warband_ids_or_all_ready(state: Node, warband_ids: Array) -> Array[String]:
@@ -716,6 +728,10 @@ func distribute_integer_by_weights(total: int, participants: Array, weight_key: 
 	return result
 
 func get_single_warband_attack_preview(state: Node, warband_id: String, option_id: String = "minor", doctrine_id: String = "", provisioning_id: String = "standard") -> Dictionary:
+	if state == null:
+		return _campaign_state_error("Flower War preview", "attack")
+	if not _campaign_state_connected(state):
+		return _campaign_state_error("Flower War preview", "attack")
 	_ensure_warband_state(state)
 	var warbands: Dictionary = _state_dictionary(state, "warbands")
 	if not warbands.has(warband_id):
@@ -736,6 +752,10 @@ func get_single_warband_attack_preview(state: Node, warband_id: String, option_i
 	return preview
 
 func can_launch_single_warband_attack(state: Node, warband_id: String, option_id: String = "minor", doctrine_id: String = "", provisioning_id: String = "standard") -> Dictionary:
+	if state == null:
+		return _campaign_state_error("Flower War launch", "attack")
+	if not _campaign_state_connected(state):
+		return _campaign_state_error("Flower War launch", "attack")
 	_ensure_warband_state(state)
 	if state != null and state.has_method("flower_war_palace_gate_passed") and not bool(state.call("flower_war_palace_gate_passed")):
 		var gate_text: String = String(state.call("flower_war_palace_gate_status_text")) if state.has_method("flower_war_palace_gate_status_text") else "Flower War palace gate blocks this attack."
@@ -761,6 +781,10 @@ func can_launch_single_warband_attack(state: Node, warband_id: String, option_id
 	return {"ok": true, "reason": "Ready.", "preview": preview}
 
 func launch_single_warband_attack(state: Node, warband_id: String, option_id: String = "minor", doctrine_id: String = "", provisioning_id: String = "standard") -> Dictionary:
+	if state == null:
+		return _campaign_state_error("Flower War launch", "attack")
+	if not _campaign_state_connected(state):
+		return _campaign_state_error("Flower War launch", "attack")
 	var status: Dictionary = can_launch_single_warband_attack(state, warband_id, option_id, doctrine_id, provisioning_id)
 	if not bool(status.get("ok", false)):
 		var blocked_report: Dictionary = {"ok": false, "reason": String(status.get("reason", "Flower War cannot launch.")), "warband_id": warband_id}
@@ -803,7 +827,6 @@ func launch_single_warband_attack(state: Node, warband_id: String, option_id: St
 	warbands[warband_id] = _sync_warband_progress(state, warband)
 	var level_after: int = int((warbands[warband_id] as Dictionary).get("level", level_before))
 	_set_state_dictionary(state, "warbands", warbands)
-	_mirror_warband_state(state)
 
 	if dead > 0:
 		var population: Dictionary = _state_dictionary(state, "population")
@@ -828,7 +851,6 @@ func launch_single_warband_attack(state: Node, warband_id: String, option_id: St
 		if prestige_variant is Dictionary:
 			final_report = prestige_variant as Dictionary
 	_set_state_dictionary(state, "last_flower_war_report", final_report)
-	_mirror_warband_state(state)
 
 	var line: String = String(warband.get("name", "Warband")) + " fought " + String(preview.get("option_name", "Flower War")) + ": " + String(preview.get("result", "Unknown")) + ". Warriors committed " + str(committed) + "; casualties " + str(casualties) + " (injured " + str(injured) + ", dead " + str(dead) + "). Captives gained " + str(captives) + ". XP +" + str(xp_gain) + ". " + String(final_report.get("prestige_text", "Prestige +0")) + "."
 	if level_after > level_before:
@@ -864,6 +886,18 @@ func _campaign_state(state: Node) -> RefCounted:
 			return raw as RefCounted
 	return null
 
+func _campaign_state_connected(state: Node) -> bool:
+	return _campaign_state(state) != null
+
+func _campaign_state_error(action_label: String, direction: String = "") -> Dictionary:
+	var result: Dictionary = {
+		"ok": false,
+		"reason": "CampaignState is not connected; " + action_label + " cannot continue."
+	}
+	if direction != "":
+		result["war_direction"] = direction
+	return result
+
 func _set_state_dictionary(state: Node, property_name: String, value: Dictionary) -> void:
 	if state == null:
 		return
@@ -873,31 +907,21 @@ func _set_state_dictionary(state: Node, property_name: String, value: Dictionary
 			"warbands":
 				if runtime_state.has_method("set_warbands_values"):
 					runtime_state.call("set_warbands_values", value)
-					_mirror_warband_state(state)
 					return
 			"population":
 				for key_variant: Variant in value.keys():
 					if runtime_state.has_method("set_population_count"):
 						runtime_state.call("set_population_count", String(key_variant), int(value[key_variant]))
-				if state.has_method("_mirror_population_building_housing_to_game_state"):
-					state.call("_mirror_population_building_housing_to_game_state")
 				return
 			"estate_stockpiles":
 				if runtime_state.has_method("set_estate_stockpiles_values"):
 					runtime_state.call("set_estate_stockpiles_values", value)
-					if state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
-						state.call("_mirror_stockpile_compatibility_from_campaign_state")
 					return
 			"last_flower_war_report":
 				if runtime_state.has_method("set_last_flower_war_report"):
 					runtime_state.call("set_last_flower_war_report", value)
-					_mirror_warband_state(state)
 					return
-	state.set(property_name, value.duplicate(true))
-
-func _mirror_warband_state(state: Node) -> void:
-	if state != null and state.has_method("_mirror_warband_flower_war_compatibility_from_campaign_state"):
-		state.call("_mirror_warband_flower_war_compatibility_from_campaign_state")
+	return
 
 func _current_veintena(state: Node) -> int:
 	var runtime_state: RefCounted = _campaign_state(state)
@@ -905,8 +929,6 @@ func _current_veintena(state: Node) -> int:
 		return int(runtime_state.call("get_current_veintena_value"))
 	if state != null and state.has_method("get_current_veintena"):
 		return int(state.call("get_current_veintena"))
-	if state != null:
-		return int(state.get("current_veintena"))
 	return 1
 
 func _state_dictionary(state: Node, property_name: String) -> Dictionary:
@@ -922,17 +944,15 @@ func _state_dictionary(state: Node, property_name: String) -> Dictionary:
 			"estate_stockpiles":
 				if runtime_state.has_method("get_estate_stockpiles_copy"):
 					return runtime_state.call("get_estate_stockpiles_copy") as Dictionary
-			"resources", "market_economy":
-				var runtime_value: Variant = runtime_state.get(property_name)
-				if runtime_value is Dictionary:
-					return (runtime_value as Dictionary).duplicate(true)
+			"resources":
+				if runtime_state.has_method("get_resources_copy"):
+					return runtime_state.call("get_resources_copy") as Dictionary
+			"market_economy":
+				if runtime_state.has_method("get_market_economy_copy"):
+					return runtime_state.call("get_market_economy_copy") as Dictionary
 			"last_flower_war_report":
 				if runtime_state.has_method("get_last_flower_war_report_copy"):
 					return runtime_state.call("get_last_flower_war_report_copy") as Dictionary
-	if state != null:
-		var value: Variant = state.get(property_name)
-		if value is Dictionary:
-			return (value as Dictionary).duplicate(true)
 	return {}
 
 func _append_state_report(state: Node, line: String) -> void:
@@ -944,14 +964,7 @@ func _append_state_report(state: Node, line: String) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("append_report_line"):
 		runtime_state.call("append_report_line", line)
-		if state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
-			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 		return
-	var report_variant: Variant = state.get("last_report")
-	if report_variant is Array:
-		var report: Array = report_variant as Array
-		report.append(line)
-		state.set("last_report", report)
 
 func _distribute_by_weights_from_state(state: Node, total: int, rows: Array, weight_key: String, cap_to_weight: bool) -> Dictionary:
 	if state != null and state.has_method("_distribute_integer_by_weights"):
@@ -988,6 +1001,8 @@ func _distribute_by_weights_from_state(state: Node, total: int, rows: Array, wei
 func can_resolve_defence(state: Node, option_id: String = "standard", strategy_id: String = "balanced") -> Dictionary:
 	if state == null:
 		return {"ok": false, "reason": "Campaign state is not connected."}
+	if not _campaign_state_connected(state):
+		return _campaign_state_error("Flower War defence", "defence")
 	if state.has_method("_ensure_warband_state"):
 		state.call("_ensure_warband_state")
 	var preview: Dictionary = get_defence_preview(state, option_id, strategy_id)
@@ -1002,6 +1017,8 @@ func can_resolve_defence(state: Node, option_id: String = "standard", strategy_i
 func resolve_defence(state: Node, option_id: String = "standard", strategy_id: String = "balanced") -> Dictionary:
 	if state == null:
 		return {"ok": false, "reason": "Campaign state is not connected.", "war_direction": "defence"}
+	if not _campaign_state_connected(state):
+		return _campaign_state_error("Flower War defence", "defence")
 	var status: Dictionary = can_resolve_defence(state, option_id, strategy_id)
 	if not bool(status.get("ok", false)):
 		var failed_report: Dictionary = {
@@ -1133,6 +1150,10 @@ func resolve_defence(state: Node, option_id: String = "standard", strategy_id: S
 # -----------------------------------------------------------------------------
 
 func get_defence_preview(state: Node, option_id: String = "standard", strategy_id: String = "balanced") -> Dictionary:
+	if state == null:
+		return _campaign_state_error("Flower War defence preview", "defence")
+	if not _campaign_state_connected(state):
+		return _campaign_state_error("Flower War defence preview", "defence")
 	if not FLOWER_WAR_OPTIONS.has(option_id):
 		return {"ok": false, "reason": "Unknown Flower War option."}
 	var option: Dictionary = FLOWER_WAR_OPTIONS[option_id] as Dictionary

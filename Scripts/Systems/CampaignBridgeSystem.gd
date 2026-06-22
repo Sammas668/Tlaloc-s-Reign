@@ -6,7 +6,7 @@
 #
 # Owns compatibility entry points while CampaignState is the authoritative
 # live/save-state owner. TRGameState remains the public runtime facade for UI
-# and systems, but 8O3 has removed the old live-state mirror fields from the
+# and systems, but 8O3 has removed the old live-state duplicate state fields from the
 # facade through static resource/building and market-domain mirrors.
 class_name CampaignBridgeSystem
 extends RefCounted
@@ -28,7 +28,7 @@ func sync_from_current_runtime(state: Node) -> void:
 	if snapshot == null:
 		return
 
-	# 8O3G/8O4D: all active TRGameState live-state compatibility mirrors through
+	# 8O3G/8O4D: all active TRGameState live-state retired compatibility state fields through
 	# the static resource/building, market, religion and rival domains have been
 	# deleted. Do not copy from TRGameState here; missing mirror properties would
 	# overwrite true CampaignState data with empty fallback values.
@@ -102,11 +102,6 @@ func ensure_campaign_state_stockpile_bridge(state: Node) -> RefCounted:
 	# as a safe compatibility hook for callers that still ask for it.
 	return _get_campaign_state(state)
 
-func mirror_stockpile_compatibility_from_campaign_state(state: Node) -> void:
-	# 8O3D: compatibility hook retained, but no estate/market stockpile mirrors
-	# are written back onto TRGameState.
-	pass
-
 # -----------------------------------------------------------------------------
 # Palace bridge
 # -----------------------------------------------------------------------------
@@ -121,11 +116,6 @@ func capture_legacy_palace_state_to_campaign_state(state: Node) -> void:
 	# palace state to capture back into CampaignState.
 	pass
 
-func mirror_palace_state_from_campaign_state_to_legacy(state: Node) -> void:
-	# 8O3C: compatibility hook retained, but no palace mirrors are written back
-	# onto TRGameState.
-	pass
-
 # -----------------------------------------------------------------------------
 # Estate / population / warband bridge
 # -----------------------------------------------------------------------------
@@ -136,21 +126,11 @@ func ensure_campaign_state_estate_structure_bridge(state: Node) -> RefCounted:
 	# as a safe compatibility hook for callers that still ask for it.
 	return _get_campaign_state(state)
 
-func mirror_estate_structure_compatibility_from_campaign_state(state: Node) -> void:
-	# 8O3E: compatibility hook retained, but no estate/population/labour mirrors
-	# are written back onto TRGameState.
-	pass
-
 func ensure_campaign_state_warband_flower_war_bridge(state: Node) -> RefCounted:
 	# 8O3F: warband and Flower War report state are CampaignState-direct. This
 	# bridge is retained only as a safe compatibility hook for callers that still
 	# ask for it.
 	return _get_campaign_state(state)
-
-func mirror_warband_flower_war_compatibility_from_campaign_state(state: Node) -> void:
-	# 8O3F: compatibility hook retained, but no warband / Flower War report mirrors
-	# are written back onto TRGameState.
-	pass
 
 # -----------------------------------------------------------------------------
 # Prestige bridge
@@ -159,7 +139,7 @@ func mirror_warband_flower_war_compatibility_from_campaign_state(state: Node) ->
 func ensure_campaign_state_prestige_bridge(state: Node) -> RefCounted:
 	# Prestige is CampaignState-direct after 8O3B. This helper remains only as a
 	# harmless compatibility entry point for old diagnostics; it does not seed from
-	# or mirror back to TRGameState fields.
+	# or write back to TRGameState fields.
 	return _get_campaign_state(state)
 
 # -----------------------------------------------------------------------------
@@ -168,22 +148,12 @@ func ensure_campaign_state_prestige_bridge(state: Node) -> RefCounted:
 
 func ensure_campaign_state_religion_bridge(state: Node) -> RefCounted:
 	# 8O4C: religion state is CampaignState-direct. Legacy TRGameState metadata
-	# seeding and mirror write-back have been removed.
+	# seeding and retired write-back have been removed.
 	return _get_campaign_state(state)
-
-func mirror_religion_state_from_campaign_state_to_legacy(state: Node) -> void:
-	# 8O4C: compatibility hook retained for older callers, but no religion state
-	# is written back onto TRGameState metadata or fields.
-	pass
 
 # -----------------------------------------------------------------------------
 # Rival bridge
 # -----------------------------------------------------------------------------
-
-func mirror_rival_state_from_campaign_state_to_legacy(state: Node) -> void:
-	# 8O4D: rival state is CampaignState-direct. Compatibility hook retained for
-	# older callers, but no rival state is written back onto TRGameState fields.
-	pass
 
 # -----------------------------------------------------------------------------
 # Signals and audit
@@ -194,11 +164,11 @@ func emit_state_changed_and_sync(state: Node) -> void:
 	if state != null and state.has_signal("state_changed"):
 		state.emit_signal("state_changed")
 
-func get_campaign_state_sync_report(state: Node, sync_first: bool = false) -> Dictionary:
+func get_campaign_state_authority_report(state: Node, sync_first: bool = false) -> Dictionary:
 	if sync_first:
 		sync_from_current_runtime(state)
 	return {
-		"schema_version": "campaign_state_sync_report_v0_47_5_patch_8o4d",
+		"schema_version": "campaign_state_authority_report_v0_47_5_patch_8o4d",
 		"sync_first": sync_first,
 		"field_count": 0,
 		"mismatch_count": 0,
@@ -211,13 +181,13 @@ func get_campaign_state_sync_report(state: Node, sync_first: bool = false) -> Di
 		"estate_population_authority": "CampaignState-direct; TRGameState estate/population/labour mirrors removed in 8O3E.",
 		"warband_flower_war_authority": "CampaignState-direct; TRGameState warband/Flower War report mirrors removed in 8O3F.",
 		"static_market_authority": "CampaignState-direct; TRGameState resource/building and market-demand/economy mirrors removed in 8O3G.",
-		"religion_authority": "CampaignState-direct; religion metadata seeding and mirror write-back removed in 8O4C.",
-		"rival_authority": "CampaignState-direct; rival fallback reads/writes and mirror write-back removed in 8O4D.",
-		"diagnostic_note": "No live-state mirror fields remain for this bridge to compare."
+		"religion_authority": "CampaignState-direct; religion metadata seeding and retired write-back removed in 8O4C.",
+		"rival_authority": "CampaignState-direct; rival fallback reads/writes and retired write-back removed in 8O4D.",
+		"diagnostic_note": "No live-state duplicate state fields remain for this bridge to compare."
 	}
 
-func is_campaign_state_mirror_in_sync(state: Node) -> bool:
-	var report: Dictionary = get_campaign_state_sync_report(state, false)
+func is_campaign_state_authority_clean(state: Node) -> bool:
+	var report: Dictionary = get_campaign_state_authority_report(state, false)
 	return bool(report.get("in_sync", false))
 
 func campaign_state_compare_text(value: Variant) -> String:

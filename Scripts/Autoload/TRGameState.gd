@@ -44,7 +44,7 @@ const PALACE_GOD_IDS: Array[String] = [GOD_TLALOC, GOD_HUITZILOPOCHTLI, GOD_TEZC
 
 
 # CampaignState is the live/save-state authority. Historical TRGameState
-# compatibility mirrors have been removed in the 8O3 series: calendar/report
+# retired compatibility state fields have been removed in the 8O3 series: calendar/report
 # in 8O3A, prestige in 8O3B, palace in 8O3C, stockpiles in 8O3D,
 # estate/population/labour in 8O3E, warband/Flower War reports in 8O3F,
 # and static resource/building plus market-demand/economy mirrors in 8O3G.
@@ -85,6 +85,10 @@ func _get_campaign_state() -> CampaignState:
 		campaign_state = CAMPAIGN_STATE_SCRIPT.new() as CampaignState
 	return campaign_state
 
+
+func get_population_upkeep_rates_copy() -> Dictionary:
+	return population_upkeep_rates.duplicate(true)
+
 func _get_campaign_bridge_system() -> RefCounted:
 	if _campaign_bridge_system_instance == null:
 		_campaign_bridge_system_instance = CAMPAIGN_BRIDGE_SYSTEM_SCRIPT.new()
@@ -93,7 +97,7 @@ func _get_campaign_bridge_system() -> RefCounted:
 func get_campaign_state_snapshot(sync_first: bool = false) -> CampaignState:
 	# Read snapshot directly by default. Passing sync_first=true preserves an
 	# explicit legacy bridge path for diagnostics/save hardening without making
-	# normal UI reads capture compatibility mirrors.
+	# normal UI reads capture retired compatibility state fields.
 	if sync_first:
 		_sync_campaign_state_from_current_runtime()
 	return _get_campaign_state()
@@ -112,40 +116,20 @@ func _capture_legacy_palace_state_to_campaign_state() -> void:
 	# mirrors are no longer captured back into CampaignState.
 	pass
 
-func _mirror_palace_state_from_campaign_state_to_legacy() -> void:
-	# 8O3C: compatibility hook retained for older systems, but it no longer
-	# writes palace mirrors back onto TRGameState.
-	pass
-
 func _ensure_campaign_state_estate_structure_bridge() -> CampaignState:
 	# 8O3E: estate buildings, housing, population and labour assignment state are
-	# CampaignState-direct. Legacy TRGameState mirrors are no longer seeded.
+	# CampaignState-direct. Retired TRGameState duplicate state fields are no longer seeded.
 	return _get_campaign_state()
-
-func _mirror_estate_structure_compatibility_from_campaign_state() -> void:
-	# 8O3E: compatibility hook retained for older callers, but it no longer writes
-	# estate/population/labour mirrors back onto TRGameState.
-	pass
 
 func _ensure_campaign_state_warband_flower_war_bridge() -> CampaignState:
 	# 8O3F: warband and Flower War report state are CampaignState-direct.
-	# Legacy TRGameState mirrors are no longer seeded.
+	# Retired TRGameState duplicate state fields are no longer seeded.
 	return _get_campaign_state()
-
-func _mirror_warband_flower_war_compatibility_from_campaign_state() -> void:
-	# 8O3F: compatibility hook retained for older callers, but it no longer writes
-	# warband / Flower War report mirrors back onto TRGameState.
-	pass
 
 func _ensure_campaign_state_stockpile_bridge() -> CampaignState:
 	# 8O3D: stockpile state is CampaignState-direct. Legacy TRGameState
 	# stockpile mirrors are no longer seeded or written back.
 	return _get_campaign_state()
-
-func _mirror_stockpile_compatibility_from_campaign_state() -> void:
-	# 8O3D: compatibility hook retained for older callers, but it no longer
-	# writes estate/market stockpile mirrors back onto TRGameState.
-	pass
 
 func _set_current_veintena_value(value: int) -> int:
 	return int(_get_campaign_state().set_current_veintena(value))
@@ -163,11 +147,11 @@ func _append_report_line(line: String) -> void:
 func _emit_state_changed_and_sync() -> void:
 	_get_campaign_bridge_system().call("emit_state_changed_and_sync", self)
 
-func get_campaign_state_sync_report(sync_first: bool = false) -> Dictionary:
-	return _get_campaign_bridge_system().call("get_campaign_state_sync_report", self, sync_first) as Dictionary
+func get_campaign_state_authority_report(sync_first: bool = false) -> Dictionary:
+	return _get_campaign_bridge_system().call("get_campaign_state_authority_report", self, sync_first) as Dictionary
 
-func is_campaign_state_mirror_in_sync() -> bool:
-	return bool(_get_campaign_bridge_system().call("is_campaign_state_mirror_in_sync", self))
+func is_campaign_state_authority_clean() -> bool:
+	return bool(_get_campaign_bridge_system().call("is_campaign_state_authority_clean", self))
 
 func _campaign_state_compare_text(value: Variant) -> String:
 	return String(_get_campaign_bridge_system().call("campaign_state_compare_text", value))
@@ -315,7 +299,7 @@ func get_last_report() -> Array[String]:
 # CampaignState-backed read helpers
 # -----------------------------------------------------------------------------
 # These helpers are deliberately plain methods, not GDScript property getters.
-# They let TRGameState stop reading its own compatibility mirrors internally
+# They let TRGameState stop reading its own retired compatibility state fields internally
 # without recreating the 8N3 property-getter performance problem.
 
 func _campaign_initialized() -> bool:
@@ -605,7 +589,7 @@ func advance_veintena() -> void:
 	_get_turn_resolution_system().advance_veintena(self)
 	# TurnResolutionSystem writes turn, stockpile, prestige, palace, estate and
 	# warband/Flower War state through CampaignState-facing helpers. No deleted
-	# compatibility mirrors are refreshed here.
+	# retired compatibility state fields are refreshed here.
 
 func estimate_population_upkeep() -> Dictionary:
 	return _get_population_upkeep_system().calculate_population_upkeep(active_population_by_group(), population_upkeep_rates)
@@ -763,7 +747,7 @@ func _dictionary_to_named_string(values: Dictionary, suffix: String = "") -> Str
 	return "; ".join(parts)
 
 func _stock(resource_id: String) -> float:
-	# Estate stockpile reads are CampaignState-direct. Compatibility mirrors are
+	# Estate stockpile reads are CampaignState-direct. Retired compatibility state fields are
 	# not captured during ordinary read paths.
 	return _get_campaign_state().get_estate_stock(resource_id)
 

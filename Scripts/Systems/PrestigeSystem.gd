@@ -4,7 +4,7 @@
 #
 # Owns Prestige calculation and summary rules.
 # Reads/writes CampaignState through TRGameState runtime accessors instead of
-# treating TRGameState mirror fields as the source of truth.
+# treating TRGameState duplicate state fields as the source of truth.
 
 class_name PrestigeSystem
 extends RefCounted
@@ -376,10 +376,8 @@ func _campaign_state(state: Node) -> RefCounted:
 
 func _campaign_resources(state: Node) -> Dictionary:
 	var runtime_state: RefCounted = _campaign_state(state)
-	if runtime_state != null:
-		var runtime_value: Variant = runtime_state.get("resources")
-		if runtime_value is Dictionary:
-			return runtime_value as Dictionary
+	if runtime_state != null and runtime_state.has_method("get_resources_copy"):
+		return runtime_state.call("get_resources_copy") as Dictionary
 	return {}
 
 
@@ -403,8 +401,6 @@ func _set_rival_prestige(state: Node, values: Dictionary) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("set_rival_prestige_values"):
 		runtime_state.call("set_rival_prestige_values", values)
-		if state != null and state.has_method("_mirror_prestige_compatibility_from_campaign_state"):
-			state.call("_mirror_prestige_compatibility_from_campaign_state")
 
 
 func _prestige_history(state: Node) -> Array[Dictionary]:
@@ -426,8 +422,6 @@ func _append_report_line(state: Node, line: String) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("append_report_line"):
 		runtime_state.call("append_report_line", line)
-		if state != null and state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
-			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 
 
 func _resource_name(state: Node, resource_id: String) -> String:

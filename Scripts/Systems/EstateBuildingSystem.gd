@@ -180,14 +180,12 @@ func build_building(state: Node, building_id: String) -> bool:
 	var previous_staffed: int = int(state.call("_staffed_count_for_building", building_id))
 	if runtime_state.has_method("set_estate_building_count"):
 		runtime_state.call("set_estate_building_count", building_id, previous_count + 1)
-	_mirror_estate_structure(state)
 
 	if bool(state.call("_is_housing_building_id", building_id)):
 		state.call("_ensure_active_housing_counts")
 		var active_housing_counts: Dictionary = _active_housing_counts(state)
 		if runtime_state.has_method("set_active_housing_count_value"):
 			runtime_state.call("set_active_housing_count_value", building_id, int(active_housing_counts.get(building_id, previous_count)) + 1)
-		_mirror_estate_structure(state)
 
 	if bool(state.call("_is_productive_building_id", building_id)) and previous_staffed >= previous_count:
 		state.call("_auto_staff_single_building_to_max", building_id)
@@ -266,7 +264,6 @@ func destroy_building(state: Node, building_id: String) -> bool:
 		before_destroy_count = int(runtime_state.call("get_estate_building_count", building_id))
 	if runtime_state.has_method("set_estate_building_count"):
 		runtime_state.call("set_estate_building_count", building_id, max(0, before_destroy_count - 1))
-	_mirror_estate_structure(state)
 
 	if bool(state.call("_is_housing_building_id", building_id)):
 		state.call("_ensure_active_housing_counts")
@@ -274,7 +271,6 @@ func destroy_building(state: Node, building_id: String) -> bool:
 		var estate_buildings: Dictionary = _estate_buildings(state)
 		if runtime_state.has_method("set_active_housing_count_value"):
 			runtime_state.call("set_active_housing_count_value", building_id, mini(int(active_housing_counts.get(building_id, 0)), int(estate_buildings.get(building_id, 0))))
-		_mirror_estate_structure(state)
 
 	state.call("_ensure_labour_assignments")
 	_append_report_line(state, "Destroyed one " + _building_name(state, building_id) + ". No refund given.")
@@ -305,38 +301,38 @@ func _campaign_stockpile_state(state: Node) -> RefCounted:
 			return raw as RefCounted
 	return null
 
-func _dictionary_from_runtime_or_state(state: Node, key: String) -> Dictionary:
+func _dictionary_from_campaign_state(state: Node, key: String) -> Dictionary:
 	var runtime_state: RefCounted = _campaign_state(state)
-	if runtime_state != null:
-		var runtime_value: Variant = runtime_state.get(key)
-		if runtime_value is Dictionary:
-			return runtime_value as Dictionary
-
-	if state != null:
-		var fallback: Variant = state.get(key)
-		if fallback is Dictionary:
-			return fallback as Dictionary
-
+	if runtime_state == null:
+		return {}
+	match key:
+		"buildings":
+			if runtime_state.has_method("get_buildings_copy"):
+				return runtime_state.call("get_buildings_copy") as Dictionary
+		"estate_buildings":
+			if runtime_state.has_method("get_estate_buildings_copy"):
+				return runtime_state.call("get_estate_buildings_copy") as Dictionary
+		"active_housing_counts":
+			if runtime_state.has_method("get_active_housing_counts_copy"):
+				return runtime_state.call("get_active_housing_counts_copy") as Dictionary
 	return {}
 
 func _buildings(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "buildings")
+	return _dictionary_from_campaign_state(state, "buildings")
 
 
 func _estate_buildings(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "estate_buildings")
+	return _dictionary_from_campaign_state(state, "estate_buildings")
 
 
 func _active_housing_counts(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "active_housing_counts")
+	return _dictionary_from_campaign_state(state, "active_housing_counts")
 
 
 func _stock(state: Node, resource_id: String) -> float:
 	var runtime_state: RefCounted = _campaign_stockpile_state(state)
 	if runtime_state != null and runtime_state.has_method("get_estate_stock"):
 		return float(runtime_state.call("get_estate_stock", resource_id))
-	if state != null and state.has_method("_stock"):
-		return float(state.call("_stock", resource_id))
 	return 0.0
 
 
@@ -344,12 +340,8 @@ func _add_stock(state: Node, resource_id: String, delta: float) -> void:
 	var runtime_state: RefCounted = _campaign_stockpile_state(state)
 	if runtime_state != null and runtime_state.has_method("add_estate_stock"):
 		runtime_state.call("add_estate_stock", resource_id, delta)
-		if state != null and state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
-			state.call("_mirror_stockpile_compatibility_from_campaign_state")
 		return
 
-	if state != null and state.has_method("_add_stock"):
-		state.call("_add_stock", resource_id, delta)
 
 
 func _multiply_dictionary(state: Node, values: Dictionary, multiplier: int) -> Dictionary:
@@ -391,11 +383,6 @@ func _append_report_line(state: Node, line: String) -> void:
 func _emit_state_changed_and_sync(state: Node) -> void:
 	if state != null and state.has_method("_emit_state_changed_and_sync"):
 		state.call("_emit_state_changed_and_sync")
-
-
-func _mirror_estate_structure(state: Node) -> void:
-	if state != null and state.has_method("_mirror_estate_structure_compatibility_from_campaign_state"):
-		state.call("_mirror_estate_structure_compatibility_from_campaign_state")
 
 
 func _add_dictionary_amounts(target: Dictionary, source: Dictionary) -> void:

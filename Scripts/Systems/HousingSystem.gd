@@ -632,56 +632,60 @@ func _campaign_state(state: Node) -> RefCounted:
 			return raw as RefCounted
 	return null
 
-func _dictionary_from_runtime_or_state(state: Node, key: String) -> Dictionary:
+func _dictionary_from_campaign_state(state: Node, key: String) -> Dictionary:
 	var runtime_state: RefCounted = _campaign_state(state)
-	if runtime_state != null:
-		var runtime_value: Variant = runtime_state.get(key)
-		if runtime_value is Dictionary:
-			return runtime_value as Dictionary
-
-	if state != null:
-		var fallback: Variant = state.get(key)
-		if fallback is Dictionary:
-			return fallback as Dictionary
-
+	if runtime_state == null:
+		return {}
+	match key:
+		"buildings":
+			if runtime_state.has_method("get_buildings_copy"):
+				return runtime_state.call("get_buildings_copy") as Dictionary
+		"estate_buildings":
+			if runtime_state.has_method("get_estate_buildings_copy"):
+				return runtime_state.call("get_estate_buildings_copy") as Dictionary
+		"active_housing_counts":
+			if runtime_state.has_method("get_active_housing_counts_copy"):
+				return runtime_state.call("get_active_housing_counts_copy") as Dictionary
+		"population":
+			if runtime_state.has_method("get_population_copy"):
+				return runtime_state.call("get_population_copy") as Dictionary
+		"base_housing_capacity":
+			if runtime_state.has_method("get_base_housing_capacity_copy"):
+				return runtime_state.call("get_base_housing_capacity_copy") as Dictionary
+		"estate_stockpiles":
+			if runtime_state.has_method("get_estate_stockpiles_copy"):
+				return runtime_state.call("get_estate_stockpiles_copy") as Dictionary
 	return {}
 
 func _buildings(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "buildings")
+	return _dictionary_from_campaign_state(state, "buildings")
 
 
 func _building_order(state: Node) -> Array[String]:
-	var output: Array[String] = []
 	var runtime_state: RefCounted = _campaign_state(state)
-	var raw_value: Variant = null
-	if runtime_state != null:
-		raw_value = runtime_state.get("building_order")
-	if raw_value == null and state != null:
-		raw_value = state.get("building_order")
-	if raw_value is Array:
-		for item: Variant in raw_value as Array:
-			output.append(String(item))
-	return output
+	if runtime_state != null and runtime_state.has_method("get_building_order_copy"):
+		return runtime_state.call("get_building_order_copy") as Array[String]
+	return []
 
 
 func _estate_buildings(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "estate_buildings")
+	return _dictionary_from_campaign_state(state, "estate_buildings")
 
 
 func _active_housing_counts(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "active_housing_counts")
+	return _dictionary_from_campaign_state(state, "active_housing_counts")
 
 
 func _population(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "population")
+	return _dictionary_from_campaign_state(state, "population")
 
 
 func _base_housing_capacity(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "base_housing_capacity")
+	return _dictionary_from_campaign_state(state, "base_housing_capacity")
 
 
 func _estate_stockpiles(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "estate_stockpiles")
+	return _dictionary_from_campaign_state(state, "estate_stockpiles")
 
 
 func _set_base_housing_capacity(state: Node, values: Dictionary) -> void:
@@ -689,10 +693,7 @@ func _set_base_housing_capacity(state: Node, values: Dictionary) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("set_base_housing_capacity_values"):
 		runtime_state.call("set_base_housing_capacity_values", values)
-		_mirror_estate_structure(state)
 		return
-	if state != null:
-		state.set("base_housing_capacity", values)
 
 
 func _set_active_housing_counts(state: Node, values: Dictionary) -> void:
@@ -704,28 +705,15 @@ func _set_active_housing_counts(state: Node, values: Dictionary) -> void:
 			if runtime_state.has_method("set_active_housing_count_value"):
 				runtime_state.call("set_active_housing_count_value", building_id, int(values[building_variant]))
 			else:
-				runtime_state.set("active_housing_counts", values.duplicate(true))
-				break
-		_mirror_estate_structure(state)
+				return
 		return
-	if state != null:
-		state.set("active_housing_counts", values)
 
 
 func _set_estate_stockpiles(state: Node, values: Dictionary) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("set_estate_stockpiles_values"):
 		runtime_state.call("set_estate_stockpiles_values", values)
-		if state != null and state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
-			state.call("_mirror_stockpile_compatibility_from_campaign_state")
 		return
-	if state != null:
-		state.set("estate_stockpiles", values)
-
-
-func _mirror_estate_structure(state: Node) -> void:
-	if state != null and state.has_method("_mirror_estate_structure_compatibility_from_campaign_state"):
-		state.call("_mirror_estate_structure_compatibility_from_campaign_state")
 
 
 func _multiply_dictionary(values: Dictionary, multiplier: int) -> Dictionary:

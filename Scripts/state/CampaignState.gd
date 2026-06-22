@@ -179,6 +179,28 @@ func ensure_all_building_keys() -> void:
 			estate_buildings[building_id] = 0
 
 # -----------------------------------------------------------------------------
+# Static / market data access helpers
+# -----------------------------------------------------------------------------
+
+func get_resources_copy() -> Dictionary:
+	return _duplicate_dictionary(resources)
+
+func get_resource_order_copy() -> Array[String]:
+	return resource_order.duplicate()
+
+func get_buildings_copy() -> Dictionary:
+	return _duplicate_dictionary(buildings)
+
+func get_building_order_copy() -> Array[String]:
+	return building_order.duplicate()
+
+func get_market_demand_copy() -> Dictionary:
+	return _duplicate_dictionary(market_demand)
+
+func get_market_economy_copy() -> Dictionary:
+	return _duplicate_dictionary(market_economy)
+
+# -----------------------------------------------------------------------------
 # Project-data loading helpers
 # -----------------------------------------------------------------------------
 

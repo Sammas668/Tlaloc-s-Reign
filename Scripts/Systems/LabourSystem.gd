@@ -977,67 +977,57 @@ func _campaign_state(state: Node) -> RefCounted:
 			return raw as RefCounted
 	return null
 
-func _dictionary_from_runtime_or_state(state: Node, key: String) -> Dictionary:
+func _dictionary_from_campaign_state(state: Node, key: String) -> Dictionary:
 	var runtime_state: RefCounted = _campaign_state(state)
-	if runtime_state != null:
-		var runtime_value: Variant = runtime_state.get(key)
-		if runtime_value is Dictionary:
-			return runtime_value as Dictionary
-
-	if state != null:
-		var fallback: Variant = state.get(key)
-		if fallback is Dictionary:
-			return fallback as Dictionary
-
+	if runtime_state == null:
+		return {}
+	match key:
+		"buildings":
+			if runtime_state.has_method("get_buildings_copy"):
+				return runtime_state.call("get_buildings_copy") as Dictionary
+		"estate_buildings":
+			if runtime_state.has_method("get_estate_buildings_copy"):
+				return runtime_state.call("get_estate_buildings_copy") as Dictionary
+		"population":
+			if runtime_state.has_method("get_population_copy"):
+				return runtime_state.call("get_population_copy") as Dictionary
+		"labour_assignments":
+			if runtime_state.has_method("get_labour_assignments_copy"):
+				return runtime_state.call("get_labour_assignments_copy") as Dictionary
 	return {}
 
-func _string_array_from_runtime_or_state(state: Node, key: String) -> Array[String]:
-	var output: Array[String] = []
+func _building_order_from_campaign_state(state: Node) -> Array[String]:
 	var runtime_state: RefCounted = _campaign_state(state)
-	var raw_value: Variant = null
-	if runtime_state != null:
-		raw_value = runtime_state.get(key)
-	if raw_value == null and state != null:
-		raw_value = state.get(key)
-	if raw_value is Array:
-		for item: Variant in raw_value as Array:
-			output.append(String(item))
-	return output
+	if runtime_state != null and runtime_state.has_method("get_building_order_copy"):
+		return runtime_state.call("get_building_order_copy") as Array[String]
+	return []
 
 
 func _buildings(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "buildings")
+	return _dictionary_from_campaign_state(state, "buildings")
 
 
 func _building_order(state: Node) -> Array[String]:
-	return _string_array_from_runtime_or_state(state, "building_order")
+	return _building_order_from_campaign_state(state)
 
 
 func _estate_buildings(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "estate_buildings")
+	return _dictionary_from_campaign_state(state, "estate_buildings")
 
 
 func _population(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "population")
+	return _dictionary_from_campaign_state(state, "population")
 
 
 func _labour_assignments(state: Node) -> Dictionary:
-	return _dictionary_from_runtime_or_state(state, "labour_assignments")
+	return _dictionary_from_campaign_state(state, "labour_assignments")
 
 
 func _set_labour_assignments(state: Node, values: Dictionary) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("set_labour_assignments_values"):
 		runtime_state.call("set_labour_assignments_values", values)
-		_mirror_population_building_housing(state)
 		return
-	if state != null:
-		state.set("labour_assignments", values)
-
-
-func _mirror_population_building_housing(state: Node) -> void:
-	if state != null and state.has_method("_mirror_estate_structure_compatibility_from_campaign_state"):
-		state.call("_mirror_estate_structure_compatibility_from_campaign_state")
 
 
 func _active_population_for_group(state: Node, group_id: String) -> int:

@@ -139,7 +139,6 @@ func operate_buildings(state: Node) -> Array[String]:
 			reports.append(String(definition.get("name", building_id)) + " operated x" + str(operated) + ".")
 		if _is_productive_building_id(state, building_id) and target_count < count:
 			reports.append(String(definition.get("name", building_id)) + " unstaffed x" + str(count - target_count) + ".")
-	_mirror_stockpiles_to_legacy(state)
 	return reports
 
 func _empty_resolution() -> Dictionary:
@@ -321,18 +320,9 @@ func _add_stock(state: Node, resource_id: String, amount: float) -> void:
 	var campaign_ref: RefCounted = _campaign_state(state)
 	if campaign_ref != null and campaign_ref.has_method("add_estate_stock"):
 		campaign_ref.call("add_estate_stock", resource_id, amount)
-		_mirror_stockpiles_to_legacy(state)
 		return
 	if state != null and state.has_method("_add_stock"):
 		state.call("_add_stock", resource_id, amount)
-
-func _mirror_stockpiles_to_legacy(state: Node) -> void:
-	var runtime_state: RefCounted = _campaign_state(state)
-	if runtime_state != null and runtime_state.has_method("mirror_stockpiles_to_game_state"):
-		runtime_state.call("mirror_stockpiles_to_game_state", state)
-		return
-	if state != null and state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
-		state.call("_mirror_stockpile_compatibility_from_campaign_state")
 
 func _consume_inputs(state: Node, inputs: Dictionary) -> void:
 	for resource_variant: Variant in inputs.keys():

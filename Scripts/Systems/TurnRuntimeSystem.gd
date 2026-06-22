@@ -4,7 +4,7 @@
 #
 # Owns small turn-runtime helper bodies that were still sitting in TRGameState.
 # Reads/writes CampaignState through runtime helpers instead of treating
-# TRGameState mirror fields as the source of truth.
+# TRGameState duplicate state fields as the source of truth.
 
 class_name TurnRuntimeSystem
 extends RefCounted
@@ -52,9 +52,6 @@ func pay_population_upkeep(state: Node) -> void:
 			_append_report_line(state, "Paid population upkeep: " + _format_amount(state, needed) + " " + _resource_name(state, resource_id) + ".")
 		else:
 			_append_report_line(state, "Shortage: paid only " + _format_amount(state, paid) + " / " + _format_amount(state, needed) + " " + _resource_name(state, resource_id) + " for population upkeep.")
-
-	if state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
-		state.call("_mirror_stockpile_compatibility_from_campaign_state")
 
 
 func pay_housing_maintenance(state: Node) -> void:
@@ -159,21 +156,16 @@ func _campaign_state(state: Node) -> RefCounted:
 
 func _campaign_buildings(state: Node) -> Dictionary:
 	var runtime_state: RefCounted = _campaign_state(state)
-	if runtime_state != null:
-		var runtime_value: Variant = runtime_state.get("buildings")
-		if runtime_value is Dictionary:
-			return runtime_value as Dictionary
+	if runtime_state != null and runtime_state.has_method("get_buildings_copy"):
+		return runtime_state.call("get_buildings_copy") as Dictionary
 	return {}
 
 
 func _population_upkeep_rates(state: Node) -> Dictionary:
-	# Population upkeep rates are rule/static data currently exposed on TRGameState,
-	# not CampaignState live/save data.
-	if state == null:
-		return {}
-	var value: Variant = state.get("population_upkeep_rates")
-	if value is Dictionary:
-		return value as Dictionary
+	# Population upkeep rates are rule/static data exposed through the runtime
+	# facade, not CampaignState live/save data.
+	if state != null and state.has_method("get_population_upkeep_rates_copy"):
+		return state.call("get_population_upkeep_rates_copy") as Dictionary
 	return {}
 
 
@@ -187,8 +179,6 @@ func _append_report_line(state: Node, line: String) -> void:
 	var runtime_state: RefCounted = _campaign_state(state)
 	if runtime_state != null and runtime_state.has_method("append_report_line"):
 		runtime_state.call("append_report_line", line)
-		if state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
-			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 
 
 func _format_amount(state: Node, value: float) -> String:

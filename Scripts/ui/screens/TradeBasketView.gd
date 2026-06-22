@@ -12,7 +12,7 @@
 # validation and application rules instead of owning those rules itself.
 # Local pricing remains preview-only fallback compatibility. Emergency trade
 # application fallback writes through CampaignState/runtime helpers, not
-# TRGameState mirror fields.
+# TRGameState duplicate state fields.
 
 extends PanelContainer
 
@@ -634,7 +634,6 @@ func _apply_trade_fallback(validation: Dictionary) -> Dictionary:
 		_add_estate_stock(resource_id, amount)
 		_add_market_stock(resource_id, -amount)
 
-	_mirror_stockpiles_if_needed()
 
 	var sold_parts: Array = validation.get("sold_parts", []) as Array
 	var bought_parts: Array = validation.get("bought_parts", []) as Array
@@ -684,11 +683,6 @@ func _add_market_stock(resource_id: String, amount: float) -> void:
 		campaign.call("add_market_stock", resource_id, amount)
 
 
-func _mirror_stockpiles_if_needed() -> void:
-	if state != null and state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
-		state.call("_mirror_stockpile_compatibility_from_campaign_state")
-
-
 func _append_report_line(line: String) -> void:
 	if state != null and state.has_method("_append_report_line"):
 		state.call("_append_report_line", line)
@@ -696,8 +690,6 @@ func _append_report_line(line: String) -> void:
 	var campaign: RefCounted = _campaign_state()
 	if campaign != null and campaign.has_method("append_report_line"):
 		campaign.call("append_report_line", line)
-		if state != null and state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
-			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 
 
 func _market_goods_by_id() -> Dictionary:

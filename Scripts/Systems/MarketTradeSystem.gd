@@ -122,7 +122,6 @@ func apply_trade_plan(state: Node, trade_plan: Dictionary) -> Dictionary:
 		var amount: float = float(plan[key_variant])
 		campaign_ref.call("add_estate_stock", resource_id, amount)
 		campaign_ref.call("add_market_stock", resource_id, -amount)
-	_mirror_stockpile_compatibility(state)
 
 	var report_line: String = accepted_trade_report_line(validation)
 	_append_report_line(state, report_line)
@@ -354,11 +353,6 @@ func _campaign_stockpile_state(state: Node) -> RefCounted:
 			return raw as RefCounted
 	return null
 
-func _mirror_stockpile_compatibility(state: Node) -> void:
-	if state != null and state.has_method("_mirror_stockpile_compatibility_from_campaign_state"):
-		state.call("_mirror_stockpile_compatibility_from_campaign_state")
-
-
 func _append_report_line(state: Node, line: String) -> void:
 	if line.strip_edges() == "":
 		return
@@ -375,8 +369,6 @@ func _append_report_line(state: Node, line: String) -> void:
 
 	if runtime_state != null and runtime_state.has_method("append_report_line"):
 		runtime_state.call("append_report_line", line)
-		if state != null and state.has_method("_mirror_calendar_report_compatibility_from_campaign_state"):
-			state.call("_mirror_calendar_report_compatibility_from_campaign_state")
 		return
 
 	# No TRGameState mirror fallback here. Reports are CampaignState-owned.
