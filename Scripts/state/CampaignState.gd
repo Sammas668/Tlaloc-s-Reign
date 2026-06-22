@@ -341,6 +341,9 @@ func set_ritual_year_value(value: int) -> int:
 	ritual_year = maxi(1, value)
 	return ritual_year
 
+func get_initialized_value() -> bool:
+	return initialized
+
 func set_initialized(value: bool) -> void:
 	initialized = value
 

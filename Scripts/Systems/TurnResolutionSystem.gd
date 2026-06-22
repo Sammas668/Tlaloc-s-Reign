@@ -158,8 +158,8 @@ func _campaign_state(state: Node) -> RefCounted:
 
 func _campaign_initialized(state: Node) -> bool:
 	var runtime_state: RefCounted = _campaign_state(state)
-	if runtime_state != null:
-		return bool(runtime_state.get("initialized"))
+	if runtime_state != null and runtime_state.has_method("get_initialized_value"):
+		return bool(runtime_state.call("get_initialized_value"))
 	return false
 
 
@@ -242,10 +242,19 @@ func _set_last_turn_summary(state: Node, summary: Dictionary) -> void:
 
 func _campaign_dictionary(state: Node, property_name: String) -> Dictionary:
 	var runtime_state: RefCounted = _campaign_state(state)
-	if runtime_state != null:
-		var value: Variant = runtime_state.get(property_name)
-		if value is Dictionary:
-			return (value as Dictionary).duplicate(true)
+	if runtime_state == null:
+		return {}
+
+	match property_name:
+		"estate_stockpiles":
+			if runtime_state.has_method("get_estate_stockpiles_copy"):
+				return runtime_state.call("get_estate_stockpiles_copy") as Dictionary
+		"market_stockpiles":
+			if runtime_state.has_method("get_market_stockpiles_copy"):
+				return runtime_state.call("get_market_stockpiles_copy") as Dictionary
+		"resources":
+			if runtime_state.has_method("get_resources_copy"):
+				return runtime_state.call("get_resources_copy") as Dictionary
 	return {}
 
 
