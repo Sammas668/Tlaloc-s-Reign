@@ -4,8 +4,9 @@
 #
 # Owns palace dedication, palace route labels, palace structure rules,
 # palace static structure-tree data, route authority presentation and court needs.
-# Reads/writes CampaignState first through TRGameState accessors, with
-# TRGameState field fallback kept only for compatibility.
+# Reads/writes CampaignState through explicit access methods. If CampaignState
+# is unavailable, this system returns safe defaults instead of reading or
+# writing retired TRGameState duplicate state.
 class_name PalaceSystem
 extends RefCounted
 

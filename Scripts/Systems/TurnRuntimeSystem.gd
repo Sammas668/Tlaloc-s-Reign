@@ -4,23 +4,21 @@
 #
 # Owns small turn-runtime helper bodies that were still sitting in TRGameState.
 # Reads/writes CampaignState through runtime helpers instead of treating
-# TRGameState duplicate state fields as the source of truth.
+# TRGameState duplicate state fields as the source of truth. Production preview
+# reads use the facade cache when available so inputs, outputs and building
+# statuses reuse one resolution per state version.
 
 class_name TurnRuntimeSystem
 extends RefCounted
 
 
 func estimate_building_inputs(state: Node) -> Dictionary:
-	if state == null or not state.has_method("estimate_production_resolution"):
-		return {}
-	var resolution: Dictionary = state.call("estimate_production_resolution") as Dictionary
+	var resolution: Dictionary = _production_resolution(state)
 	return (resolution.get("inputs", {}) as Dictionary).duplicate(true)
 
 
 func estimate_building_outputs(state: Node) -> Dictionary:
-	if state == null or not state.has_method("estimate_production_resolution"):
-		return {}
-	var resolution: Dictionary = state.call("estimate_production_resolution") as Dictionary
+	var resolution: Dictionary = _production_resolution(state)
 	return (resolution.get("outputs", {}) as Dictionary).duplicate(true)
 
 
@@ -114,7 +112,7 @@ func estimate_building_status(state: Node, building_id: String) -> Dictionary:
 	if not buildings.has(building_id):
 		return _default_building_status("Unknown building.")
 
-	var resolution: Dictionary = state.call("estimate_production_resolution") as Dictionary
+	var resolution: Dictionary = _production_resolution(state)
 	var statuses: Dictionary = resolution.get("building_statuses", {}) as Dictionary
 	if statuses.has(building_id):
 		return (statuses[building_id] as Dictionary).duplicate(true)
@@ -131,6 +129,15 @@ func estimated_operating_count_for_building(state: Node, building_id: String) ->
 
 	return int(estimate_building_status(state, building_id).get("operating", 0))
 
+
+func _production_resolution(state: Node) -> Dictionary:
+	if state == null:
+		return {}
+	if state.has_method("get_cached_production_resolution"):
+		return state.call("get_cached_production_resolution") as Dictionary
+	if state.has_method("estimate_production_resolution"):
+		return state.call("estimate_production_resolution") as Dictionary
+	return {}
 
 func _default_building_status(status_text: String) -> Dictionary:
 	return {

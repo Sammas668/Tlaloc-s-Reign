@@ -69,6 +69,13 @@ var _warband_system_instance: WarbandSystem = null
 var _flower_war_system_instance: FlowerWarSystem = null
 var _rival_system_instance: RivalSystem = null
 
+# 8P1D: expensive production preview reads are cached per state version.
+# UI/report paths often ask for inputs, outputs and building statuses in the
+# same refresh. Keep the cache in the facade so Storehouse, Estate summaries and
+# TurnRuntime helpers can reuse one authoritative ProductionSystem resolution.
+var _production_preview_cache_valid: bool = false
+var _production_preview_cache: Dictionary = {}
+
 var population_upkeep_rates: Dictionary = {
 	"macehualtin": {"maize": 1.0, "cotton": 0.05, "cloth": 0.2, "tools": 0.1},
 	"tlacotin": {"maize": 0.5, "cotton": 0.025, "cloth": 0.1, "tools": 0.05},
@@ -108,6 +115,18 @@ func _sync_campaign_state_from_current_runtime() -> void:
 func _apply_campaign_state_to_current_runtime() -> void:
 	_get_campaign_bridge_system().call("apply_campaign_state_to_current_runtime", self)
 
+func invalidate_production_preview_cache() -> void:
+	_production_preview_cache_valid = false
+	_production_preview_cache.clear()
+
+func get_cached_production_resolution() -> Dictionary:
+	if _production_preview_cache_valid:
+		return _production_preview_cache.duplicate(true)
+	var resolution: Dictionary = _get_production_system().estimate_production_resolution(self)
+	_production_preview_cache = resolution.duplicate(true)
+	_production_preview_cache_valid = true
+	return _production_preview_cache.duplicate(true)
+
 func _ensure_campaign_state_palace_bridge() -> CampaignState:
 	return _get_campaign_state()
 
@@ -145,6 +164,7 @@ func _append_report_line(line: String) -> void:
 
 
 func _emit_state_changed_and_sync() -> void:
+	invalidate_production_preview_cache()
 	_get_campaign_bridge_system().call("emit_state_changed_and_sync", self)
 
 func get_campaign_state_authority_report(sync_first: bool = false) -> Dictionary:
@@ -245,10 +265,41 @@ func _get_rival_system() -> RivalSystem:
 	return _rival_system_instance
 
 func _ready() -> void:
-	if not _campaign_initialized():
-		new_game()
+	# 8P1A: create the CampaignState container only. Do not automatically
+	# start a new campaign from the autoload, because the Main Menu's New Game
+	# button is responsible for calling new_game(). This prevents the fresh-game
+	# path from loading project data twice.
+	_get_campaign_state()
+	call_deferred("_ensure_campaign_started_for_direct_scene_testing")
+
+func ensure_campaign_started_for_direct_scene_testing() -> bool:
+	# Keeps direct GameScreen/editor testing safe without reintroducing automatic
+	# new-game initialisation on the Main Menu path.
+	if _campaign_initialized():
+		return false
+	if not _current_scene_looks_like_gameplay_screen():
+		return false
+	new_game()
+	return true
+
+func _ensure_campaign_started_for_direct_scene_testing() -> void:
+	ensure_campaign_started_for_direct_scene_testing()
+
+func _current_scene_looks_like_gameplay_screen() -> bool:
+	var tree: SceneTree = get_tree()
+	if tree == null or tree.current_scene == null:
+		return false
+	var scene: Node = tree.current_scene
+	var scene_name: String = String(scene.name).to_lower()
+	var scene_path: String = String(scene.scene_file_path).to_lower()
+	if scene_name.find("gamescreen") >= 0 or scene_name.find("game_screen") >= 0:
+		return true
+	if scene_path.find("gamescreen") >= 0 or scene_path.find("game_screen") >= 0:
+		return true
+	return false
 
 func new_game() -> void:
+	invalidate_production_preview_cache()
 	_load_project_data_into_campaign_state()
 	var runtime_state: CampaignState = _get_campaign_state()
 	runtime_state.clear_palace_state()
@@ -263,6 +314,7 @@ func new_game() -> void:
 	runtime_state.set_initialized(true)
 	runtime_state.clear_last_report()
 	runtime_state.append_report_line("New estate simulation started.")
+	invalidate_production_preview_cache()
 	_emit_state_changed_and_sync()
 
 func _load_project_data_into_campaign_state() -> void:
@@ -286,6 +338,7 @@ func _load_project_data_into_campaign_state() -> void:
 	# Default setup staffs production automatically in priority order, with maize
 	# protected first, then other production buildings until population runs out.
 	_auto_staff_all_productive_buildings()
+	invalidate_production_preview_cache()
 
 func get_current_veintena() -> int:
 	# Read-only UI access should not force a bridge sync.
@@ -379,7 +432,10 @@ func validate_market_trade_plan(trade_plan: Dictionary) -> Dictionary:
 func apply_market_trade_plan(trade_plan: Dictionary) -> Dictionary:
 	# MarketTradeSystem applies stockpile changes through CampaignState. No
 	# TRGameState stockpile mirror is refreshed after 8O3D.
-	return _get_market_trade_system().apply_trade_plan(self, trade_plan)
+	var result: Dictionary = _get_market_trade_system().apply_trade_plan(self, trade_plan)
+	if bool(result.get("ok", false)):
+		invalidate_production_preview_cache()
+	return result
 
 func get_market_trade_prestige_lines(trade_plan: Dictionary) -> Array[Dictionary]:
 	var preview: Dictionary = get_market_trade_preview(trade_plan)
@@ -484,6 +540,7 @@ func set_active_housing_count(building_id: String, active_count: int) -> bool:
 	var result: bool = _get_housing_system().set_active_housing_count(self, building_id, active_count)
 	if result:
 		_ensure_labour_assignments()
+		invalidate_production_preview_cache()
 		_emit_state_changed_and_sync()
 	return result
 
@@ -506,16 +563,28 @@ func _combined_labour_assignment_group_data(group_id: String, display_name: Stri
 	return _get_labour_system().call("combined_labour_assignment_group_data", self, group_id, display_name, description, member_ids, assigned_by_group, required_by_group) as Dictionary
 
 func assign_labour_to_building(building_id: String, group_id: String, amount: int) -> bool:
-	return bool(_get_labour_system().call("assign_labour_to_building", self, building_id, group_id, amount))
+	var result: bool = bool(_get_labour_system().call("assign_labour_to_building", self, building_id, group_id, amount))
+	if result:
+		invalidate_production_preview_cache()
+	return result
 
 func set_staffed_building_count(building_id: String, requested_count: int) -> bool:
-	return bool(_get_labour_system().call("set_staffed_building_count", self, building_id, requested_count))
+	var result: bool = bool(_get_labour_system().call("set_staffed_building_count", self, building_id, requested_count))
+	if result:
+		invalidate_production_preview_cache()
+	return result
 
 func set_staffed_building_count_for_group(building_id: String, group_id: String, requested_count: int) -> bool:
-	return bool(_get_labour_system().call("set_staffed_building_count_for_group", self, building_id, group_id, requested_count))
+	var result: bool = bool(_get_labour_system().call("set_staffed_building_count_for_group", self, building_id, group_id, requested_count))
+	if result:
+		invalidate_production_preview_cache()
+	return result
 
 func set_staffed_building_count_for_field_labour(building_id: String, requested_count: int) -> bool:
-	return bool(_get_labour_system().call("set_staffed_building_count_for_field_labour", self, building_id, requested_count))
+	var result: bool = bool(_get_labour_system().call("set_staffed_building_count_for_field_labour", self, building_id, requested_count))
+	if result:
+		invalidate_production_preview_cache()
+	return result
 
 func _productive_labour_required() -> Dictionary:
 	return _get_labour_system().call("productive_labour_required", self) as Dictionary
@@ -574,7 +643,10 @@ func build_status_text(building_id: String) -> String:
 	return String(_get_estate_building_system().call("build_status_text", self, building_id))
 
 func build_building(building_id: String) -> bool:
-	return bool(_get_estate_building_system().call("build_building", self, building_id))
+	var result: bool = bool(_get_estate_building_system().call("build_building", self, building_id))
+	if result:
+		invalidate_production_preview_cache()
+	return result
 
 func can_destroy(building_id: String) -> bool:
 	return bool(_get_estate_building_system().call("can_destroy", self, building_id))
@@ -583,10 +655,15 @@ func destroy_status_text(building_id: String) -> String:
 	return String(_get_estate_building_system().call("destroy_status_text", self, building_id))
 
 func destroy_building(building_id: String) -> bool:
-	return bool(_get_estate_building_system().call("destroy_building", self, building_id))
+	var result: bool = bool(_get_estate_building_system().call("destroy_building", self, building_id))
+	if result:
+		invalidate_production_preview_cache()
+	return result
 
 func advance_veintena() -> void:
+	invalidate_production_preview_cache()
 	_get_turn_resolution_system().advance_veintena(self)
+	invalidate_production_preview_cache()
 	# TurnResolutionSystem writes turn, stockpile, prestige, palace, estate and
 	# warband/Flower War state through CampaignState-facing helpers. No deleted
 	# retired compatibility state fields are refreshed here.
@@ -595,20 +672,25 @@ func estimate_population_upkeep() -> Dictionary:
 	return _get_population_upkeep_system().calculate_population_upkeep(active_population_by_group(), population_upkeep_rates)
 
 func estimate_building_inputs() -> Dictionary:
-	return _get_turn_runtime_system().call("estimate_building_inputs", self) as Dictionary
+	var resolution: Dictionary = get_cached_production_resolution()
+	return (resolution.get("inputs", {}) as Dictionary).duplicate(true)
 func estimate_building_outputs() -> Dictionary:
-	return _get_turn_runtime_system().call("estimate_building_outputs", self) as Dictionary
+	var resolution: Dictionary = get_cached_production_resolution()
+	return (resolution.get("outputs", {}) as Dictionary).duplicate(true)
 func estimate_production_resolution() -> Dictionary:
-	# Authoritative production preview. Rule logic lives in ProductionSystem while
+	# Authoritative cached production preview. Rule logic lives in ProductionSystem while
 	# CampaignState owns live data and TRGameState stays the public facade.
-	return _get_production_system().estimate_production_resolution(self)
+	return get_cached_production_resolution()
 
 func _pay_population_upkeep() -> void:
 	_get_turn_runtime_system().call("pay_population_upkeep", self)
+	invalidate_production_preview_cache()
 func _pay_housing_maintenance() -> void:
 	_get_turn_runtime_system().call("pay_housing_maintenance", self)
+	invalidate_production_preview_cache()
 func _operate_buildings() -> void:
 	_get_turn_runtime_system().call("operate_buildings", self)
+	invalidate_production_preview_cache()
 func _reserve_staff(staff: Dictionary, available_staff: Dictionary) -> void:
 	_get_turn_runtime_system().call("reserve_staff", staff, available_staff)
 func _consume_inputs(inputs: Dictionary) -> void:
@@ -616,9 +698,16 @@ func _consume_inputs(inputs: Dictionary) -> void:
 func _add_outputs(outputs: Dictionary) -> void:
 	_get_turn_runtime_system().call("add_outputs", self, outputs)
 func _estimate_building_status(building_id: String) -> Dictionary:
-	return _get_turn_runtime_system().call("estimate_building_status", self, building_id) as Dictionary
+	var buildings: Dictionary = _campaign_buildings()
+	if not buildings.has(building_id):
+		return {"operating": 0, "blocked": 0, "staffed_count": 0, "unstaffed": 0, "input_blocked": 0, "status_text": "Unknown building.", "input_shortages": []}
+	var resolution: Dictionary = get_cached_production_resolution()
+	var statuses: Dictionary = resolution.get("building_statuses", {}) as Dictionary
+	if statuses.has(building_id) and statuses[building_id] is Dictionary:
+		return (statuses[building_id] as Dictionary).duplicate(true)
+	return {"operating": 0, "blocked": 0, "staffed_count": 0, "unstaffed": 0, "input_blocked": 0, "status_text": "Not built.", "input_shortages": []}
 func _estimated_operating_count_for_building(building_id: String) -> int:
-	return int(_get_turn_runtime_system().call("estimated_operating_count_for_building", self, building_id))
+	return int(_estimate_building_status(building_id).get("operating", 0))
 func _is_productive_building_id(building_id: String) -> bool:
 	return bool(_get_labour_system().call("is_productive_building_id", self, building_id))
 
@@ -755,6 +844,7 @@ func _add_stock(resource_id: String, amount: float) -> void:
 	# Estate stockpile writes update CampaignState directly. TRGameState stockpile
 	# mirrors were removed in 8O3D.
 	_get_campaign_state().add_estate_stock(resource_id, amount)
+	invalidate_production_preview_cache()
 
 func _reserve_breakdown(resource_id: String, upkeep_value: float, input_value: float, housing_value: float = 0.0) -> Array[String]:
 	return _get_storehouse_system().call("reserve_breakdown", self, resource_id, upkeep_value, input_value, housing_value) as Array[String]
@@ -1380,7 +1470,9 @@ func can_launch_flower_war_with_all_warbands(option_id: String = "minor", provis
 	return _get_flower_war_system().can_launch_combined_attack(self, [], option_id, provisioning_id, true)
 
 func launch_flower_war_with_all_warbands(option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
-	return _get_flower_war_system().launch_combined_attack(self, [], option_id, provisioning_id, true)
+	var result: Dictionary = _get_flower_war_system().launch_combined_attack(self, [], option_id, provisioning_id, true)
+	invalidate_production_preview_cache()
+	return result
 
 func _selected_warband_ids_or_all_ready(warband_ids: Array) -> Array[String]:
 	return _get_flower_war_system().selected_warband_ids_or_all_ready(self, warband_ids)
@@ -1396,7 +1488,9 @@ func can_launch_flower_war_with_selected_warbands(warband_ids: Array, option_id:
 	return _get_flower_war_system().can_launch_combined_attack(self, warband_ids, option_id, provisioning_id, false)
 
 func launch_flower_war_with_selected_warbands(warband_ids: Array, option_id: String = "minor", provisioning_id: String = "standard") -> Dictionary:
-	return _get_flower_war_system().launch_combined_attack(self, warband_ids, option_id, provisioning_id, false)
+	var result: Dictionary = _get_flower_war_system().launch_combined_attack(self, warband_ids, option_id, provisioning_id, false)
+	invalidate_production_preview_cache()
+	return result
 
 func get_flower_war_defence_preview(option_id: String = "standard", strategy_id: String = "balanced") -> Dictionary:
 	_ensure_warband_state()
@@ -1406,7 +1500,9 @@ func can_resolve_flower_war_defence(option_id: String = "standard", strategy_id:
 	return _get_flower_war_system().can_resolve_defence(self, option_id, strategy_id)
 
 func resolve_flower_war_defence(option_id: String = "standard", strategy_id: String = "balanced") -> Dictionary:
-	return _get_flower_war_system().resolve_defence(self, option_id, strategy_id)
+	var result: Dictionary = _get_flower_war_system().resolve_defence(self, option_id, strategy_id)
+	invalidate_production_preview_cache()
+	return result
 
 func _flower_war_captives_for_all_warbands(result: String, defender_casualties: int, warriors_committed: int, eagle_warriors: int) -> int:
 	return _get_flower_war_system().flower_war_captives_for_all_warbands(result, defender_casualties, warriors_committed, eagle_warriors)
@@ -1424,7 +1520,9 @@ func can_launch_flower_war_with_warband(warband_id: String, option_id: String = 
 	return _get_flower_war_system().can_launch_single_warband_attack(self, warband_id, option_id, doctrine_id, provisioning_id)
 
 func launch_flower_war_with_warband(warband_id: String, option_id: String = "minor", doctrine_id: String = "", provisioning_id: String = "standard") -> Dictionary:
-	return _get_flower_war_system().launch_single_warband_attack(self, warband_id, option_id, doctrine_id, provisioning_id)
+	var result: Dictionary = _get_flower_war_system().launch_single_warband_attack(self, warband_id, option_id, doctrine_id, provisioning_id)
+	invalidate_production_preview_cache()
+	return result
 
 func _flower_war_result_label(net_damage: int, attacker_size: int, defender_size: int) -> String:
 	return _get_flower_war_system().flower_war_result_label(net_damage, attacker_size, defender_size)

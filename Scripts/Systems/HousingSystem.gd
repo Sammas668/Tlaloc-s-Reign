@@ -3,8 +3,9 @@
 # Project path: res://Scripts/Systems/HousingSystem.gd
 #
 # Owns housing-capacity, active/mothballed housing and housing-maintenance rules.
-# Reads and writes CampaignState first through TRGameState bridge/accessors, with
-# TRGameState field fallback kept only for compatibility.
+# Reads and writes CampaignState through explicit access methods. If
+# CampaignState is unavailable, this system returns safe defaults instead of
+# reading or writing retired TRGameState duplicate state.
 
 class_name HousingSystem
 extends RefCounted

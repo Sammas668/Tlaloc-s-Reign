@@ -3,8 +3,9 @@
 # Project path: res://Scripts/Systems/MarketEconomySystem.gd
 #
 # Owns market/village economy presentation and scarcity projection logic.
-# Reads CampaignState first through TRGameState accessors, with TRGameState
-# field fallback kept only for compatibility.
+# Reads CampaignState through explicit access methods. If CampaignState is not
+# connected, this system returns empty/default projection data rather than
+# reading retired TRGameState duplicate state.
 
 class_name MarketEconomySystem
 extends RefCounted
@@ -297,42 +298,39 @@ func _campaign_state(state: Node) -> RefCounted:
 
 func _campaign_dictionary(state: Node, key: String) -> Dictionary:
 	var runtime_state: RefCounted = _campaign_state(state)
-	if runtime_state != null:
-		match key:
-			"market_stockpiles":
-				if runtime_state.has_method("get_market_stockpiles_copy"):
-					return runtime_state.call("get_market_stockpiles_copy") as Dictionary
-			"market_demand":
-				var demand_value: Variant = runtime_state.get("market_demand")
-				if demand_value is Dictionary:
-					return (demand_value as Dictionary).duplicate(true)
-			_:
-				var runtime_value: Variant = runtime_state.get(key)
-				if runtime_value is Dictionary:
-					return (runtime_value as Dictionary).duplicate(true)
-
-	if state != null:
-		var fallback: Variant = state.get(key)
-		if fallback is Dictionary:
-			return (fallback as Dictionary).duplicate(true)
-
+	if runtime_state == null:
+		return {}
+	match key:
+		"resources":
+			if runtime_state.has_method("get_resources_copy"):
+				return runtime_state.call("get_resources_copy") as Dictionary
+		"market_stockpiles":
+			if runtime_state.has_method("get_market_stockpiles_copy"):
+				return runtime_state.call("get_market_stockpiles_copy") as Dictionary
+		"market_demand":
+			if runtime_state.has_method("get_market_demand_copy"):
+				return runtime_state.call("get_market_demand_copy") as Dictionary
+		"market_economy":
+			if runtime_state.has_method("get_market_economy_copy"):
+				return runtime_state.call("get_market_economy_copy") as Dictionary
 	return {}
 
 
 func _campaign_string_array(state: Node, key: String) -> Array[String]:
 	var output: Array[String] = []
 	var runtime_state: RefCounted = _campaign_state(state)
-	var raw_value: Variant = null
+	if runtime_state == null:
+		return output
 
-	if runtime_state != null:
-		raw_value = runtime_state.get(key)
-	if raw_value == null and state != null:
-		raw_value = state.get(key)
+	var raw_value: Variant = null
+	match key:
+		"resource_order":
+			if runtime_state.has_method("get_resource_order_copy"):
+				raw_value = runtime_state.call("get_resource_order_copy")
 
 	if raw_value is Array:
 		for item: Variant in raw_value as Array:
 			output.append(String(item))
-
 	return output
 
 

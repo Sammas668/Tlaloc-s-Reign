@@ -11,6 +11,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_mainmenu")
+game_scene_path = "res://Scenes/Main/GameScreenLazyArt.tscn"
 
 [node name="BackgroundColour" type="ColorRect" parent="." unique_id=1124706028]
 layout_mode = 1

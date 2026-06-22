@@ -3,8 +3,9 @@
 # Project path: res://Scripts/Systems/WarbandSystem.gd
 #
 # Owns warband roster, recovery, warrior assignment and skill-web rules.
-# Reads/writes CampaignState first through TRGameState accessors, with
-# TRGameState field fallback kept only for compatibility.
+# Reads/writes CampaignState through explicit access methods. If CampaignState
+# is unavailable, this system returns safe defaults instead of reading or
+# writing retired TRGameState duplicate state.
 class_name WarbandSystem
 extends RefCounted
 

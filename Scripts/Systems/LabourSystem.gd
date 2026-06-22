@@ -3,8 +3,9 @@
 # Project path: res://Scripts/Systems/LabourSystem.gd
 #
 # Owns labour-assignment UI rows, staffing setters and field-labour helper
-# calculations. Reads/writes CampaignState first through TRGameState
-# bridge/accessors, with TRGameState field fallback kept only for compatibility.
+# calculations. Reads/writes CampaignState through explicit access methods. If
+# CampaignState is unavailable, this system returns safe defaults instead of
+# reading or writing retired TRGameState duplicate state.
 
 class_name LabourSystem
 extends RefCounted
