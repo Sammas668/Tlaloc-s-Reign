@@ -1,7 +1,5 @@
-[gd_scene format=3 uid="uid://b4dxhfod10qmi"]
+[gd_scene load_steps=2 format=3]
 
-[ext_resource type="PackedScene" uid="uid://b18p1elazyart" path="res://Scenes/Main/GameScreenLazyArt.tscn" id="1_lazy"]
-[ext_resource type="Script" path="res://Scripts/ui/GameScreenNodeReusePatch.gd" id="2_node_reuse"]
+[ext_resource type="PackedScene" path="res://Scenes/Main/GameScreenOptimized.tscn" id="1_optimized"]
 
-[node name="GameScreen" instance=ExtResource("1_lazy")]
-script = ExtResource("2_node_reuse")
+[node name="GameScreen" instance=ExtResource("1_optimized")]

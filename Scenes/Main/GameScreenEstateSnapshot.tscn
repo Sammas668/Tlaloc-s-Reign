@@ -1,7 +1,5 @@
-[gd_scene format=3 uid="uid://ci82tbc22b7jb"]
+[gd_scene load_steps=2 format=3]
 
-[ext_resource type="PackedScene" uid="uid://b18p1bcoalesced" path="res://Scenes/Main/GameScreenCoalesced.tscn" id="1_coalesced"]
-[ext_resource type="Script" path="res://Scripts/ui/GameScreenEstateSnapshotPatch.gd" id="2_snapshot"]
+[ext_resource type="PackedScene" path="res://Scenes/Main/GameScreenOptimized.tscn" id="1_optimized"]
 
-[node name="GameScreen" instance=ExtResource("1_coalesced")]
-script = ExtResource("2_snapshot")
+[node name="GameScreen" instance=ExtResource("1_optimized")]

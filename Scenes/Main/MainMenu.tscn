@@ -1,7 +1,7 @@
 [gd_scene format=3 uid="uid://bmw1ya2kg1omy"]
 
-[ext_resource type="Script" uid="uid://vesuip85a4sb" path="res://scripts/ui/MainMenu.gd" id="1_mainmenu"]
-[ext_resource type="Texture2D" uid="uid://dltxubjvphxtu" path="res://Assets/main_menu/Main menu.png" id="2_y5k35"]
+[ext_resource type="Script" path="res://scripts/ui/MainMenu.gd" id="1_mainmenu"]
+[ext_resource type="Texture2D" path="res://Assets/main_menu/Main menu.png" id="2_y5k35"]
 
 [node name="MainMenu" type="Control" unique_id=508865285]
 layout_mode = 3
@@ -11,7 +11,7 @@ anchor_bottom = 1.0
 grow_horizontal = 2
 grow_vertical = 2
 script = ExtResource("1_mainmenu")
-game_scene_path = "res://Scenes/Main/GameScreenNodeReuse.tscn"
+game_scene_path = "res://Scenes/Main/GameScreenOptimized.tscn"
 
 [node name="BackgroundColour" type="ColorRect" parent="." unique_id=1124706028]
 layout_mode = 1
